@@ -49,7 +49,6 @@ class AsrWorker:
         session = SherpaStreamingSession(self._config, self._emit)
         session.start()
         self._session = session
-        self._emit(event("listening"))
 
     def stop(self) -> None:
         if self._session is None:
@@ -108,6 +107,7 @@ class SherpaStreamingSession:
                 blocksize=blocksize,
                 callback=callback,
             ):
+                self._emit(event("listening"))
                 while not self._stop.is_set():
                     try:
                         samples = self._audio.get(timeout=0.1)

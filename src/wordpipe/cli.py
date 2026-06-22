@@ -50,6 +50,19 @@ def _cmd_type_text(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_daemon(args: argparse.Namespace) -> int:
+    from .daemon import DaemonConfig, run_daemon
+
+    config = DaemonConfig(
+        model_dir=Path(args.model_dir),
+        dry_run_insertion=args.dry_run_insertion,
+        provider=args.provider,
+        num_threads=args.num_threads,
+        sample_rate=args.sample_rate,
+    )
+    return run_daemon(config)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="wordpipe",
@@ -89,6 +102,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print generated keysyms instead of opening a portal session.",
     )
     type_text.set_defaults(func=_cmd_type_text)
+
+    daemon = subparsers.add_parser(
+        "daemon",
+        help="Run the MVP dictation loop: ASR subprocess plus text insertion.",
+    )
+    daemon.add_argument(
+        "--model-dir",
+        required=True,
+        help="Path to sherpa-onnx Nemotron int8 streaming model directory.",
+    )
+    daemon.add_argument(
+        "--dry-run-insertion",
+        action="store_true",
+        help="Print keyboard events instead of opening a portal keyboard session.",
+    )
+    daemon.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
+    daemon.add_argument("--num-threads", type=int, default=2)
+    daemon.add_argument("--sample-rate", type=int, default=16000)
+    daemon.set_defaults(func=_cmd_daemon)
 
     return parser
 
