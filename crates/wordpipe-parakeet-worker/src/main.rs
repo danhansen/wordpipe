@@ -146,8 +146,7 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
         buffer_size: cpal::BufferSize::Default,
     };
 
-    let queue_chunks =
-        ((args.queue_seconds * args.sample_rate as f32) as usize / args.chunk_samples).max(2);
+    let queue_chunks = ((args.queue_seconds * 100.0).ceil() as usize).max(64);
     let (audio_tx, audio_rx) = bounded::<Vec<f32>>(queue_chunks);
     let dropped_chunks = Arc::new(AtomicUsize::new(0));
     let stream = build_input_stream(
