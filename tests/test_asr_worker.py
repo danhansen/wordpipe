@@ -6,7 +6,7 @@ import types
 import unittest
 from pathlib import Path
 
-from wordpipe.asr_worker import AsrWorkerConfig, _create_recognizer
+from wordpipe.asr_worker import AsrWorkerConfig, _create_recognizer, discover_model_layout
 
 
 class _OnlineRecognizer:
@@ -42,10 +42,12 @@ class ModelDiscoveryTests(unittest.TestCase):
             (model_dir / "model.int8.onnx").write_text("", encoding="utf-8")
 
             _create_recognizer(AsrWorkerConfig(model_dir=model_dir))
+            layout = discover_model_layout(model_dir)
 
         self.assertIsNotNone(_OnlineRecognizer.called)
         name, kwargs = _OnlineRecognizer.called
         self.assertEqual(name, "nemo")
+        self.assertEqual(layout.kind, "nemo_ctc")
         self.assertEqual(kwargs["tokens"], str(model_dir / "tokens.txt"))
         self.assertEqual(kwargs["model"], str(model_dir / "model.int8.onnx"))
         self.assertTrue(kwargs["enable_endpoint_detection"])
@@ -59,10 +61,12 @@ class ModelDiscoveryTests(unittest.TestCase):
             (model_dir / "joiner.onnx").write_text("", encoding="utf-8")
 
             _create_recognizer(AsrWorkerConfig(model_dir=model_dir))
+            layout = discover_model_layout(model_dir)
 
         self.assertIsNotNone(_OnlineRecognizer.called)
         name, kwargs = _OnlineRecognizer.called
         self.assertEqual(name, "transducer")
+        self.assertEqual(layout.kind, "transducer")
         self.assertEqual(kwargs["encoder"], str(model_dir / "encoder.onnx"))
         self.assertEqual(kwargs["decoder"], str(model_dir / "decoder.onnx"))
         self.assertEqual(kwargs["joiner"], str(model_dir / "joiner.onnx"))

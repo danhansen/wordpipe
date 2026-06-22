@@ -48,6 +48,12 @@ Run the capability probe:
 PYTHONPATH=src python3 -m wordpipe probe
 ```
 
+Inspect a downloaded sherpa-onnx model directory:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe model-info --model-dir /path/to/model
+```
+
 Dry-run text insertion:
 
 ```sh

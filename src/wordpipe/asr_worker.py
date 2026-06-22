@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import inspect
+import json
 import queue
 import sys
 import threading
@@ -25,6 +26,28 @@ class AsrWorkerConfig:
     decoding_method: str = "greedy_search"
     partial_interval_seconds: float = 0.15
     queue_seconds: float = 2.0
+
+
+@dataclass(frozen=True)
+class ModelLayout:
+    kind: str
+    model_dir: Path
+    tokens: Path
+    model: Path | None = None
+    encoder: Path | None = None
+    decoder: Path | None = None
+    joiner: Path | None = None
+
+    def to_dict(self) -> dict[str, str | None]:
+        return {
+            "kind": self.kind,
+            "model_dir": str(self.model_dir),
+            "tokens": str(self.tokens),
+            "model": str(self.model) if self.model else None,
+            "encoder": str(self.encoder) if self.encoder else None,
+            "decoder": str(self.decoder) if self.decoder else None,
+            "joiner": str(self.joiner) if self.joiner else None,
+        }
 
 
 class JsonLineEmitter:
@@ -169,18 +192,10 @@ def _create_recognizer(config: AsrWorkerConfig) -> object:
             "sherpa_onnx is not installed; install the project with the asr extra"
         ) from exc
 
-    model_dir = config.model_dir.expanduser().resolve()
-    tokens = model_dir / "tokens.txt"
-    if not tokens.exists():
-        raise FileNotFoundError(f"missing tokens file: {tokens}")
-
-    onnx_files = sorted(model_dir.glob("*.onnx"))
-    encoder = _find_one(model_dir, "encoder*.onnx")
-    decoder = _find_one(model_dir, "decoder*.onnx")
-    joiner = _find_one(model_dir, "joiner*.onnx")
+    layout = discover_model_layout(config.model_dir)
 
     common = {
-        "tokens": str(tokens),
+        "tokens": str(layout.tokens),
         "num_threads": config.num_threads,
         "sample_rate": config.sample_rate,
         "feature_dim": config.feature_dim,
@@ -193,30 +208,65 @@ def _create_recognizer(config: AsrWorkerConfig) -> object:
     }
 
     recognizer_cls = sherpa_onnx.OnlineRecognizer
-    if encoder and decoder and joiner:
+    if layout.kind == "transducer":
         return _call_factory(
             recognizer_cls.from_transducer,
             {
                 **common,
-                "encoder": str(encoder),
-                "decoder": str(decoder),
-                "joiner": str(joiner),
+                "encoder": str(layout.encoder),
+                "decoder": str(layout.decoder),
+                "joiner": str(layout.joiner),
             },
         )
 
-    if len(onnx_files) == 1 and hasattr(recognizer_cls, "from_nemo_ctc"):
+    if layout.kind == "nemo_ctc" and hasattr(recognizer_cls, "from_nemo_ctc"):
         return _call_factory(
             recognizer_cls.from_nemo_ctc,
             {
                 **common,
-                "model": str(onnx_files[0]),
+                "model": str(layout.model),
             },
+        )
+
+    raise RuntimeError(f"sherpa-onnx does not support discovered layout: {layout.kind}")
+
+
+def discover_model_layout(model_dir: Path) -> ModelLayout:
+    resolved = model_dir.expanduser().resolve()
+    tokens = resolved / "tokens.txt"
+    if not tokens.exists():
+        raise FileNotFoundError(f"missing tokens file: {tokens}")
+
+    encoder = _find_one(resolved, "encoder*.onnx")
+    decoder = _find_one(resolved, "decoder*.onnx")
+    joiner = _find_one(resolved, "joiner*.onnx")
+    if encoder and decoder and joiner:
+        return ModelLayout(
+            kind="transducer",
+            model_dir=resolved,
+            tokens=tokens,
+            encoder=encoder,
+            decoder=decoder,
+            joiner=joiner,
+        )
+
+    onnx_files = sorted(resolved.glob("*.onnx"))
+    if len(onnx_files) == 1:
+        return ModelLayout(
+            kind="nemo_ctc",
+            model_dir=resolved,
+            tokens=tokens,
+            model=onnx_files[0],
         )
 
     raise FileNotFoundError(
         "could not identify a supported sherpa-onnx streaming model layout in "
-        f"{model_dir}"
+        f"{resolved}"
     )
+
+
+def render_model_info(model_dir: Path) -> str:
+    return json.dumps(discover_model_layout(model_dir).to_dict(), indent=2, sort_keys=True)
 
 
 def _find_one(directory: Path, pattern: str) -> Path | None:

@@ -35,6 +35,13 @@ def _cmd_asr_worker(args: argparse.Namespace) -> int:
     return run_stdio_worker(config)
 
 
+def _cmd_model_info(args: argparse.Namespace) -> int:
+    from .asr_worker import render_model_info
+
+    print(render_model_info(Path(args.model_dir)))
+    return 0
+
+
 def _cmd_type_text(args: argparse.Namespace) -> int:
     from .insertion import DryRunKeyboardBackend, PortalKeyboardBackend
 
@@ -134,6 +141,17 @@ def build_parser() -> argparse.ArgumentParser:
     asr.add_argument("--num-threads", type=int, default=2)
     asr.add_argument("--sample-rate", type=int, default=16000)
     asr.set_defaults(func=_cmd_asr_worker)
+
+    model_info = subparsers.add_parser(
+        "model-info",
+        help="Inspect a sherpa-onnx model directory and report the factory layout.",
+    )
+    model_info.add_argument(
+        "--model-dir",
+        required=True,
+        help="Path to sherpa-onnx streaming model directory.",
+    )
+    model_info.set_defaults(func=_cmd_model_info)
 
     type_text = subparsers.add_parser(
         "type-text",
