@@ -160,3 +160,129 @@ Next candidates:
   need smaller deltas than this fixed-shape result.
 - Continue looking for Sayboard optimizations beyond fixed-shape specialization
   only after this artifact is validated against a larger LibriSpeech sample.
+
+## 2026-06-22: Fixed-Shape MatMul Dequantization Ablation
+
+Sayboard's Parakeet EOU ablation suite tested selective dynamic-int8 MatMul/Gemm
+quantization. For Wordpipe's already-quantized Nemotron export, the analogous
+experiment is to rewrite selected static-RHS `MatMulInteger` blocks back to
+float `MatMul`/`Gemm`, then serialize the final graph through ORT extended.
+
+Applicability check on `build/model-variants/nemotron-c56-fixed-shape/encoder.onnx`:
+
+| Candidate family | Rewritable blocks | Note |
+| --- | ---: | --- |
+| `linear_pos_fp32` | 1 | Shared relative-position projection block |
+| `attn_proj_fp32` | 48 | Self-attention Q/K/V/output projections |
+| `ffn_fp32` | 96 | Feed-forward MatMul/Gemm blocks |
+| attention score/context | 0 | Dynamic-dynamic attention matmuls have no static RHS to dequantize |
+
+Build commands:
+
+```sh
+.venv/bin/python scripts/dequantize_nemotron_matmul_blocks.py \
+  --source-dir build/model-variants/nemotron-c56-fixed-shape \
+  --output-dir build/model-variants/nemotron-c56-fixed-shape-linear-pos-fp32-ort \
+  --include /self_attn/linear_pos/ \
+  --ort-optimize-final extended \
+  --ort-optimize-threads 1
+
+.venv/bin/python scripts/dequantize_nemotron_matmul_blocks.py \
+  --source-dir build/model-variants/nemotron-c56-fixed-shape \
+  --output-dir build/model-variants/nemotron-c56-fixed-shape-attn-proj-fp32-ort \
+  --include /self_attn/linear_q/ \
+  --include /self_attn/linear_k/ \
+  --include /self_attn/linear_v/ \
+  --include /self_attn/linear_out/ \
+  --ort-optimize-final extended \
+  --ort-optimize-threads 1
+
+.venv/bin/python scripts/dequantize_nemotron_matmul_blocks.py \
+  --source-dir build/model-variants/nemotron-c56-fixed-shape \
+  --output-dir build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort \
+  --include /feed_forward \
+  --ort-optimize-final extended \
+  --ort-optimize-threads 1
+```
+
+Artifact sizes:
+
+| Variant | Encoder size |
+| --- | ---: |
+| `fixed_shape_ort` | 575 MiB |
+| `linear_pos_fp32` | 575 MiB |
+| `attn_proj_fp32` | 719 MiB |
+| `ffn_fp32` | 1.7 GiB |
+
+Benchmark command:
+
+```sh
+.venv/bin/python scripts/benchmark_parakeet_variant.py \
+  fixed_shape_ort=build/model-variants/nemotron-c56-fixed-shape-ort-extended \
+  linear_pos_fp32=build/model-variants/nemotron-c56-fixed-shape-linear-pos-fp32-ort \
+  attn_proj_fp32=build/model-variants/nemotron-c56-fixed-shape-attn-proj-fp32-ort \
+  ffn_fp32=build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort \
+  --runs 3 \
+  --min-mem-available-gb 6 \
+  --child-memory-limit-gb 10 \
+  --output build/parakeet-variant-bench/fixed-shape-dequant-001.json
+```
+
+Settings:
+
+- WAV: `build/allocation-ablation/librispeech-long.wav`
+- Intra-op threads: `2`
+- Flush chunks: `3`
+- Runtime graph optimization flag: `all`
+- Memory guard: each run required at least 6 GiB `MemAvailable`; each worker
+  subprocess had `RLIMIT_AS=10 GiB`.
+- Memory metadata: start `MemAvailable=11.1 GiB`, swap used `3.1 GiB`; end
+  `MemAvailable=11.6 GiB`, swap used `2.9 GiB`.
+
+Results:
+
+| Variant | Median RTF | Median real-audio RTF | Median decode seconds | Delta vs `fixed_shape_ort` |
+| --- | ---: | ---: | ---: | ---: |
+| `fixed_shape_ort` | 0.709 | 0.719 | 88.922 | baseline |
+| `linear_pos_fp32` | 0.827 | 0.839 | 103.700 | -16.7% |
+| `attn_proj_fp32` | 0.710 | 0.720 | 89.011 | -0.1% |
+| `ffn_fp32` | 0.618 | 0.627 | 77.506 | +12.8% |
+
+Rough concatenated-reference WER, using the current
+`build/librispeech-backend-eval/manifest.jsonl` parser:
+
+| Variant | Edits / words | WER |
+| --- | ---: | ---: |
+| `fixed_shape_ort` | 10 / 313 | 3.19% |
+| `linear_pos_fp32` | 12 / 313 | 3.83% |
+| `attn_proj_fp32` | 12 / 313 | 3.83% |
+| `ffn_fp32` | 9 / 313 | 2.88% |
+
+Graph diagnostics for `ffn_fp32`:
+
+| Variant | Nodes | `MatMul` | `DynamicQuantizeMatMul` | `ConvInteger` | Float initializer bytes | UINT8 initializer bytes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `ffn_fp32` | 2,235 | 120 | 99 | 77 | 1549.1 MiB | 176.8 MiB |
+
+Observations:
+
+- `linear_pos_fp32` does not carry over as a win after fixed-shape folding. It
+  is slower and worsens the rough WER in this run set.
+- `attn_proj_fp32` is effectively runtime parity but larger and changes text,
+  so it is not attractive by itself.
+- `ffn_fp32` is the first selective dequantization that moves the performance
+  needle after fixed-shape specialization: +12.8% real-audio RTF versus
+  `fixed_shape_ort`, with a slightly better rough WER on this concatenated
+  sample. The tradeoff is model size: 1.7 GiB for the encoder.
+- The likely explanation is CPU-kernel economics: for these large FFN
+  static-RHS matmuls, ORT's FP32 GEMM path beats dynamic activation
+  quantization plus int8 matmul overhead on this machine.
+
+Next candidates:
+
+- Validate `ffn_fp32` on the larger LibriSpeech sampled evaluation before
+  promoting it as the runtime model.
+- Consider an intermediate FFN subset ablation by layer if the 1.7 GiB model
+  size is too expensive.
+- Keep `fixed_shape_ort` as the compact default candidate until the larger WER
+  run confirms `ffn_fp32`.

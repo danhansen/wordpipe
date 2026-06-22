@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +12,8 @@ from pathlib import Path
 import numpy as np
 import onnx
 from onnx import helper, numpy_helper, shape_inference
+
+ORT_OPTIMIZATION_LEVELS = {"disable", "basic", "extended", "all"}
 
 
 @dataclass(frozen=True)
@@ -256,7 +259,66 @@ def apply_rewrites(model: onnx.ModelProto, specs: list[RewriteSpec]) -> int:
     return len(specs)
 
 
-def build_model_dir(source_dir: Path, output_dir: Path, include: list[str], exclude: list[str]) -> None:
+def prune_unused_initializers(model: onnx.ModelProto) -> int:
+    used = {input_name for node in model.graph.node for input_name in node.input if input_name}
+    kept = [initializer for initializer in model.graph.initializer if initializer.name in used]
+    removed = len(model.graph.initializer) - len(kept)
+    if removed:
+        del model.graph.initializer[:]
+        model.graph.initializer.extend(kept)
+    return removed
+
+
+def ort_optimize_to_file(input_path: Path, output_path: Path, level: str, threads: int) -> None:
+    import onnxruntime as ort
+
+    levels = {
+        "disable": ort.GraphOptimizationLevel.ORT_DISABLE_ALL,
+        "basic": ort.GraphOptimizationLevel.ORT_ENABLE_BASIC,
+        "extended": ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED,
+        "all": ort.GraphOptimizationLevel.ORT_ENABLE_ALL,
+    }
+    options = ort.SessionOptions()
+    options.optimized_model_filepath = str(output_path)
+    options.graph_optimization_level = levels[level]
+    options.intra_op_num_threads = threads
+    options.inter_op_num_threads = 1
+    ort.InferenceSession(str(input_path), sess_options=options, providers=["CPUExecutionProvider"])
+    onnx.checker.check_model(str(output_path))
+
+
+def update_config(
+    source_dir: Path,
+    output_dir: Path,
+    *,
+    include: list[str],
+    exclude: list[str],
+    rewritten: int,
+    pruned_initializers: int,
+    ort_optimize_final: str | None,
+) -> None:
+    source_config = source_dir / "config.json"
+    if not source_config.exists():
+        return
+    config = json.loads(source_config.read_text(encoding="utf-8"))
+    config["dequantized_matmul_blocks"] = {
+        "include": include,
+        "exclude": exclude,
+        "rewritten_blocks": rewritten,
+        "pruned_initializers": pruned_initializers,
+        "ort_optimized_final_encoder": ort_optimize_final,
+    }
+    (output_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+
+def build_model_dir(
+    source_dir: Path,
+    output_dir: Path,
+    include: list[str],
+    exclude: list[str],
+    ort_optimize_final: str | None,
+    ort_optimize_threads: int,
+) -> None:
     source_encoder = source_dir / "encoder.onnx"
     if not source_encoder.exists():
         raise SystemExit(f"Missing source encoder: {source_encoder}")
@@ -265,16 +327,33 @@ def build_model_dir(source_dir: Path, output_dir: Path, include: list[str], excl
     model = onnx.load(source_encoder, load_external_data=False)
     specs = build_rewrite_specs(model, include, exclude)
     rewritten = apply_rewrites(model, specs)
+    pruned_initializers = prune_unused_initializers(model)
     output_encoder = output_dir / "encoder.onnx"
-    onnx.checker.check_model(model)
     onnx.save(model, output_encoder)
+    onnx.checker.check_model(str(output_encoder))
+    if ort_optimize_final:
+        optimized_encoder = output_dir / "encoder.ort_optimized.onnx"
+        ort_optimize_to_file(output_encoder, optimized_encoder, ort_optimize_final, ort_optimize_threads)
+        optimized_encoder.replace(output_encoder)
 
-    for sidecar in ("decoder_joint.onnx", "tokenizer.model", "config.json"):
+    for sidecar in ("decoder_joint.onnx", "tokenizer.model"):
         src = source_dir / sidecar
         if src.exists():
             hardlink_or_copy(src, output_dir / sidecar)
+    update_config(
+        source_dir,
+        output_dir,
+        include=include,
+        exclude=exclude,
+        rewritten=rewritten,
+        pruned_initializers=pruned_initializers,
+        ort_optimize_final=ort_optimize_final,
+    )
 
-    print(f"[dequantize] wrote {output_dir} rewritten_blocks={rewritten}")
+    print(
+        f"[dequantize] wrote {output_dir} rewritten_blocks={rewritten} "
+        f"prunedInitializers={pruned_initializers} ortFinal={ort_optimize_final}"
+    )
     for path in sorted(output_dir.iterdir()):
         if path.is_file():
             print(f"  {path.name}: {path.stat().st_size / 1024 / 1024:.1f} MiB")
@@ -286,12 +365,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--include", action="append", default=[], help="Substring that matched MatMulInteger node names must contain.")
     parser.add_argument("--exclude", action="append", default=[], help="Substring that matched MatMulInteger node names must not contain.")
+    parser.add_argument("--ort-optimize-final", choices=sorted(ORT_OPTIMIZATION_LEVELS))
+    parser.add_argument("--ort-optimize-threads", type=int, default=1)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    build_model_dir(args.source_dir, args.output_dir, args.include, args.exclude)
+    build_model_dir(
+        args.source_dir,
+        args.output_dir,
+        args.include,
+        args.exclude,
+        args.ort_optimize_final,
+        args.ort_optimize_threads,
+    )
 
 
 if __name__ == "__main__":

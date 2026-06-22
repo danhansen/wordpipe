@@ -58,7 +58,61 @@ def read_power_metadata() -> dict[str, Any]:
     }
 
 
+def read_meminfo() -> dict[str, int]:
+    values: dict[str, int] = {}
+    for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+        key, raw_value = line.split(":", 1)
+        parts = raw_value.strip().split()
+        if parts and parts[0].isdigit():
+            values[key] = int(parts[0])
+    return values
+
+
+def read_memory_metadata() -> dict[str, Any]:
+    meminfo = read_meminfo()
+    return {
+        "mem_available_kb": meminfo.get("MemAvailable"),
+        "mem_free_kb": meminfo.get("MemFree"),
+        "swap_total_kb": meminfo.get("SwapTotal"),
+        "swap_free_kb": meminfo.get("SwapFree"),
+        "swap_used_kb": (
+            meminfo["SwapTotal"] - meminfo["SwapFree"]
+            if "SwapTotal" in meminfo and "SwapFree" in meminfo
+            else None
+        ),
+    }
+
+
+def check_memory_guard(args: argparse.Namespace) -> None:
+    if args.min_mem_available_gb <= 0:
+        return
+    mem_available_kb = read_memory_metadata().get("mem_available_kb")
+    required_kb = int(args.min_mem_available_gb * 1024 * 1024)
+    if mem_available_kb is None:
+        raise RuntimeError("Cannot read MemAvailable for benchmark memory guard")
+    if mem_available_kb < required_kb:
+        raise RuntimeError(
+            f"Refusing benchmark run: MemAvailable={mem_available_kb / 1024 / 1024:.1f} GiB "
+            f"is below --min-mem-available-gb={args.min_mem_available_gb:.1f}"
+        )
+
+
+def child_resource_limiter(args: argparse.Namespace):
+    if args.child_memory_limit_gb <= 0:
+        return None
+
+    limit_bytes = int(args.child_memory_limit_gb * 1024 * 1024 * 1024)
+
+    def limit_child() -> None:
+        import resource
+
+        resource.setrlimit(resource.RLIMIT_AS, (limit_bytes, limit_bytes))
+
+    return limit_child
+
+
 def run_once(args: argparse.Namespace, label: str, model_dir: Path, run_index: int) -> dict[str, Any]:
+    check_memory_guard(args)
     env = os.environ.copy()
     if "ORT_DYLIB_PATH" not in env and args.ort_dylib.exists():
         env["ORT_DYLIB_PATH"] = str(args.ort_dylib.resolve())
@@ -81,6 +135,7 @@ def run_once(args: argparse.Namespace, label: str, model_dir: Path, run_index: i
     ]
     started = time.perf_counter()
     power_before = read_power_metadata()
+    memory_before = read_memory_metadata()
     proc = subprocess.run(
         command,
         check=True,
@@ -89,9 +144,11 @@ def run_once(args: argparse.Namespace, label: str, model_dir: Path, run_index: i
         stderr=subprocess.PIPE,
         env=env,
         timeout=args.timeout_seconds,
+        preexec_fn=child_resource_limiter(args),
     )
     wall_seconds = time.perf_counter() - started
     power_after = read_power_metadata()
+    memory_after = read_memory_metadata()
     event = final_event(parse_events(proc.stdout))
     metrics = dict(event.get("data") or {})
     return {
@@ -103,6 +160,8 @@ def run_once(args: argparse.Namespace, label: str, model_dir: Path, run_index: i
         "metrics": metrics,
         "power_before": power_before,
         "power_after": power_after,
+        "memory_before": memory_before,
+        "memory_after": memory_after,
         "stderr_tail": proc.stderr[-2000:] if proc.stderr else "",
     }
 
@@ -148,6 +207,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     parser.add_argument("--ort-dylib", type=Path, default=DEFAULT_ORT_DYLIB)
     parser.add_argument("--output", type=Path, default=Path("build/parakeet-variant-bench/summary.json"))
+    parser.add_argument(
+        "--min-mem-available-gb",
+        type=float,
+        default=0.0,
+        help="Refuse to start a run when /proc/meminfo MemAvailable is below this threshold.",
+    )
+    parser.add_argument(
+        "--child-memory-limit-gb",
+        type=float,
+        default=0.0,
+        help="Set RLIMIT_AS for each worker subprocess. 0 disables the limit.",
+    )
     return parser.parse_args()
 
 
@@ -159,6 +230,7 @@ def main() -> None:
         raise SystemExit(f"Missing worker: {args.worker}")
 
     power_at_start = read_power_metadata()
+    memory_at_start = read_memory_metadata()
     results = []
     summaries = []
     for label, model_dir in map(parse_model_arg, args.model):
@@ -189,9 +261,13 @@ def main() -> None:
             "num_threads": args.num_threads,
             "flush_chunks": args.flush_chunks,
             "graph_optimization": args.graph_optimization,
+            "min_mem_available_gb": args.min_mem_available_gb,
+            "child_memory_limit_gb": args.child_memory_limit_gb,
         },
         "power_at_start": power_at_start,
         "power_at_end": read_power_metadata(),
+        "memory_at_start": memory_at_start,
+        "memory_at_end": read_memory_metadata(),
         "summaries": summaries,
         "runs": results,
     }
