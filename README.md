@@ -74,6 +74,14 @@ session.
 When `~/.config/wordpipe/config.toml` contains `model_dir`, `daemon` and
 `hotkey-daemon` can run without `--model-dir`. CLI flags override config values.
 
+Packaging templates live under `packaging/`:
+
+- `packaging/applications/dev.wordpipe.Wordpipe.desktop`
+- `packaging/systemd/wordpipe.service`
+
+They assume `wordpipe` is installed on `PATH` and configuration exists at
+`~/.config/wordpipe/config.toml`.
+
 Run the hotkey-controlled daemon:
 
 ```sh

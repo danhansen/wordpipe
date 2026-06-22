@@ -118,6 +118,12 @@ holds model path, provider, thread count, overlay, hotkey mode, shortcut,
 spoken-punctuation behavior, and dry-run insertion. CLI flags override file
 values.
 
+## Packaging
+
+The repository includes early templates for a desktop entry and user systemd
+service. These are intended for local GNOME session testing after `wordpipe` is
+installed on `PATH`; they are not a complete distro package.
+
 ## MVP Milestones
 
 1. Runtime capability probe

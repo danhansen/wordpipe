@@ -1,0 +1,12 @@
+[Unit]
+Description=Wordpipe GNOME dictation
+Documentation=https://github.com/k2-fsa/sherpa-onnx
+
+[Service]
+Type=simple
+ExecStart=wordpipe hotkey-daemon
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

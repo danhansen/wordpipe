@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Wordpipe
+Comment=Wayland GNOME dictation with streaming ASR
+Exec=wordpipe hotkey-daemon
+Terminal=false
+Categories=Utility;Accessibility;
+StartupNotify=false
+X-GNOME-UsesNotifications=true
