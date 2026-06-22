@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wordpipe"
+version = "0.1.0"
+description = "Wayland-first GNOME dictation with streaming sherpa-onnx ASR"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+asr = [
+  "sherpa-onnx",
+  "sounddevice",
+  "numpy",
+]
+
+[project.scripts]
+wordpipe = "wordpipe.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
