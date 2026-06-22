@@ -32,6 +32,7 @@ class AsrWorkerConfig:
     audio_chunk_seconds: float = 0.03
     queue_seconds: float = 2.0
     stats_interval_seconds: float = 1.0
+    enable_endpoint_detection: bool = True
     endpoint_rule1_min_trailing_silence: float = 0.55
     endpoint_rule2_min_trailing_silence: float = 0.35
     endpoint_rule3_min_utterance_length: float = 20.0
@@ -166,7 +167,7 @@ class SherpaStreamingSession:
                     self._decode_ready(recognizer, stream)
                     self._emit_partial_if_changed(recognizer, stream)
                     self._emit_stats_if_due(recognizer, stream)
-                    if recognizer.is_endpoint(stream):
+                    if self._config.enable_endpoint_detection and recognizer.is_endpoint(stream):
                         self._commit_current(recognizer, stream)
                         recognizer.reset(stream)
 
@@ -268,7 +269,7 @@ def _create_recognizer(config: AsrWorkerConfig) -> object:
         "feature_dim": config.feature_dim,
         "decoding_method": config.decoding_method,
         "provider": config.provider,
-        "enable_endpoint_detection": True,
+        "enable_endpoint_detection": config.enable_endpoint_detection,
         "rule1_min_trailing_silence": config.endpoint_rule1_min_trailing_silence,
         "rule2_min_trailing_silence": config.endpoint_rule2_min_trailing_silence,
         "rule3_min_utterance_length": config.endpoint_rule3_min_utterance_length,

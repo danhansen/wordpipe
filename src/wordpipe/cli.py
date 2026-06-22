@@ -37,6 +37,7 @@ def _cmd_asr_worker(args: argparse.Namespace) -> int:
         audio_chunk_seconds=args.audio_chunk_seconds,
         queue_seconds=args.queue_seconds,
         stats_interval_seconds=args.stats_interval_seconds,
+        enable_endpoint_detection=not args.no_endpoint,
         endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence,
         endpoint_rule2_min_trailing_silence=args.endpoint_rule2_min_trailing_silence,
         endpoint_rule3_min_utterance_length=args.endpoint_rule3_min_utterance_length,
@@ -83,6 +84,7 @@ def _cmd_listen_test(args: argparse.Namespace) -> int:
         audio_chunk_seconds=args.audio_chunk_seconds,
         queue_seconds=args.queue_seconds,
         stats_interval_seconds=args.stats_interval_seconds,
+        enable_endpoint_detection=args.endpoint,
         endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence,
         endpoint_rule2_min_trailing_silence=args.endpoint_rule2_min_trailing_silence,
         endpoint_rule3_min_utterance_length=args.endpoint_rule3_min_utterance_length,
@@ -210,6 +212,7 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
         stats_interval_seconds=args.stats_interval_seconds
         if args.stats_interval_seconds is not None
         else file_config.stats_interval_seconds,
+        enable_endpoint_detection=file_config.enable_endpoint_detection and not args.no_endpoint,
         endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence
         if args.endpoint_rule1_min_trailing_silence is not None
         else file_config.endpoint_rule1_min_trailing_silence,
@@ -251,6 +254,7 @@ def _cmd_hotkey_daemon(args: argparse.Namespace) -> int:
         stats_interval_seconds=args.stats_interval_seconds
         if args.stats_interval_seconds is not None
         else file_config.stats_interval_seconds,
+        enable_endpoint_detection=file_config.enable_endpoint_detection and not args.no_endpoint,
         endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence
         if args.endpoint_rule1_min_trailing_silence is not None
         else file_config.endpoint_rule1_min_trailing_silence,
@@ -349,6 +353,11 @@ def build_parser() -> argparse.ArgumentParser:
     asr.add_argument("--num-threads", type=int, default=2)
     asr.add_argument("--sample-rate", type=int, default=16000)
     asr.add_argument("--input-device", help="sounddevice input device index or name.")
+    asr.add_argument(
+        "--no-endpoint",
+        action="store_true",
+        help="Disable endpoint detection and stream reset.",
+    )
     _add_asr_tuning_args(asr, worker_defaults=True)
     asr.set_defaults(func=_cmd_asr_worker)
 
@@ -402,6 +411,11 @@ def build_parser() -> argparse.ArgumentParser:
     listen_test.add_argument("--num-threads", type=int, default=2)
     listen_test.add_argument("--sample-rate", type=int, default=16000)
     listen_test.add_argument("--input-device", help="sounddevice input device index or name.")
+    listen_test.add_argument(
+        "--endpoint",
+        action="store_true",
+        help="Enable endpoint detection/reset. Disabled by default for raw ASR testing.",
+    )
     listen_test.add_argument(
         "--duration",
         type=float,
@@ -510,6 +524,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Insert raw ASR text instead of converting spoken punctuation commands.",
     )
+    daemon.add_argument(
+        "--no-endpoint",
+        action="store_true",
+        help="Disable endpoint detection and stream reset.",
+    )
     daemon.add_argument("--log-metrics", action="store_true", help="Log ASR timing metrics.")
     daemon.add_argument(
         "--overlay",
@@ -555,6 +574,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-spoken-punctuation",
         action="store_true",
         help="Insert raw ASR text instead of converting spoken punctuation commands.",
+    )
+    hotkey_daemon.add_argument(
+        "--no-endpoint",
+        action="store_true",
+        help="Disable endpoint detection and stream reset.",
     )
     hotkey_daemon.add_argument("--log-metrics", action="store_true", help="Log ASR timing metrics.")
     hotkey_daemon.add_argument(

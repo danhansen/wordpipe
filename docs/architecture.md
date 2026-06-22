@@ -148,6 +148,8 @@ The `download-model` command downloads these files into `models/` by default.
 
 `listen-test` is the primary live tuning mode. It opens the microphone, prints
 partial results, and reports realtime factor (RTF) without inserting text.
+It disables endpoint detection by default so raw continuous ASR behavior is
+visible without phrase-boundary resets.
 `audio-devices` and `record-test` are diagnostic commands for validating the
 capture device independently from ASR.
 `stream-file-test` feeds a known WAV through the streaming recognizer and is the

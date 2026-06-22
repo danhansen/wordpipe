@@ -52,6 +52,20 @@ class ModelDiscoveryTests(unittest.TestCase):
         self.assertEqual(kwargs["model"], str(model_dir / "model.int8.onnx"))
         self.assertTrue(kwargs["enable_endpoint_detection"])
 
+    def test_endpoint_detection_can_be_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            model_dir = Path(tmp)
+            (model_dir / "tokens.txt").write_text("a\n", encoding="utf-8")
+            (model_dir / "model.int8.onnx").write_text("", encoding="utf-8")
+
+            _create_recognizer(
+                AsrWorkerConfig(model_dir=model_dir, enable_endpoint_detection=False)
+            )
+
+        self.assertIsNotNone(_OnlineRecognizer.called)
+        _name, kwargs = _OnlineRecognizer.called
+        self.assertFalse(kwargs["enable_endpoint_detection"])
+
     def test_transducer_layout_uses_transducer_factory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             model_dir = Path(tmp)

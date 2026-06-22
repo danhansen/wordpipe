@@ -83,6 +83,9 @@ inserting text into any app. It also prints periodic `stats` lines with RTF,
 audio level, and dropped-chunk counts. When the recognizer has a current
 hypothesis, each stats tick also repeats it as a `partial` line, so you can see
 stable partial text even when it has not changed. Use Ctrl+C to stop.
+Endpoint detection and stream reset are disabled by default in this mode, so it
+is raw continuous mic audio into ASR. Add `--endpoint` only when testing commit
+boundary behavior.
 
 List input devices:
 
@@ -229,6 +232,8 @@ endpoint_rule2_min_trailing_silence = 0.35
 The live ASR queue is intentionally larger than the audio chunk size requires,
 because this model can run slower than realtime on the test CPU. Buffering avoids
 dropping speech context; it trades some latency for recognition continuity.
+`listen-test` disables endpointing by default for raw ASR diagnostics; dictation
+commands keep endpoint detection enabled unless `--no-endpoint` is passed.
 
 On the current test machine, the 560 ms int8 model decodes slower than realtime
 on CPU. The best measured CPU thread count was 2 threads; higher counts were

@@ -20,6 +20,7 @@ class ListenTestConfig:
     audio_chunk_seconds: float = 0.03
     queue_seconds: float = 10.0
     stats_interval_seconds: float = 1.0
+    enable_endpoint_detection: bool = False
     endpoint_rule1_min_trailing_silence: float = 0.55
     endpoint_rule2_min_trailing_silence: float = 0.35
     endpoint_rule3_min_utterance_length: float = 20.0
@@ -38,6 +39,7 @@ def run_listen_test(config: ListenTestConfig) -> int:
         audio_chunk_seconds=config.audio_chunk_seconds,
         queue_seconds=config.queue_seconds,
         stats_interval_seconds=config.stats_interval_seconds,
+        enable_endpoint_detection=config.enable_endpoint_detection,
         endpoint_rule1_min_trailing_silence=config.endpoint_rule1_min_trailing_silence,
         endpoint_rule2_min_trailing_silence=config.endpoint_rule2_min_trailing_silence,
         endpoint_rule3_min_utterance_length=config.endpoint_rule3_min_utterance_length,
