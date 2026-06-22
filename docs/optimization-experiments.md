@@ -286,3 +286,44 @@ Next candidates:
   size is too expensive.
 - Keep `fixed_shape_ort` as the compact default candidate until the larger WER
   run confirms `ffn_fp32`.
+
+### LibriSpeech Sample Validation
+
+The existing 9-utterance LibriSpeech manifest was rerun with per-utterance
+worker subprocesses and the same memory safety guard:
+
+```sh
+.venv/bin/python scripts/eval_librispeech_backends.py \
+  --manifest build/librispeech-backend-eval/manifest.jsonl \
+  --work-dir build/librispeech-ffn-validation/fixed-shape-ort \
+  --backend parakeet \
+  --parakeet-model-dir build/model-variants/nemotron-c56-fixed-shape-ort-extended \
+  --min-mem-available-gb 6 \
+  --child-memory-limit-gb 10
+
+.venv/bin/python scripts/eval_librispeech_backends.py \
+  --manifest build/librispeech-backend-eval/manifest.jsonl \
+  --work-dir build/librispeech-ffn-validation/ffn-fp32 \
+  --backend parakeet \
+  --parakeet-model-dir build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort \
+  --min-mem-available-gb 6 \
+  --child-memory-limit-gb 10
+```
+
+Results:
+
+| Variant | Samples | WER | Decode RTF | Real-audio decode RTF | Wall RTF |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `fixed_shape_ort` | 9 | 9 / 313 = 2.88% | 0.707 | 0.807 | 0.921 |
+| `ffn_fp32` | 9 | 9 / 313 = 2.88% | 0.610 | 0.697 | 1.017 |
+
+Validation observations:
+
+- `ffn_fp32` preserved aggregate WER on this sampled LibriSpeech set and
+  improved real-audio decode RTF by about 13.7%.
+- Wall RTF was worse for `ffn_fp32` in this eval harness because each utterance
+  starts a fresh worker process/session and the `ffn_fp32` encoder is much
+  larger. The long-WAV benchmark is the better proxy for a persistent dictation
+  worker.
+- This moves `ffn_fp32` from "interesting" to "candidate", with model size and
+  session-load behavior as the remaining tradeoffs to quantify.

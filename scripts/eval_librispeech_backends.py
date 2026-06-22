@@ -39,6 +39,59 @@ def run(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
 
 
+def read_meminfo() -> dict[str, int]:
+    values: dict[str, int] = {}
+    for line in Path("/proc/meminfo").read_text(encoding="utf-8").splitlines():
+        key, raw_value = line.split(":", 1)
+        parts = raw_value.strip().split()
+        if parts and parts[0].isdigit():
+            values[key] = int(parts[0])
+    return values
+
+
+def read_memory_metadata() -> dict[str, Any]:
+    meminfo = read_meminfo()
+    return {
+        "mem_available_kb": meminfo.get("MemAvailable"),
+        "mem_free_kb": meminfo.get("MemFree"),
+        "swap_total_kb": meminfo.get("SwapTotal"),
+        "swap_free_kb": meminfo.get("SwapFree"),
+        "swap_used_kb": (
+            meminfo["SwapTotal"] - meminfo["SwapFree"]
+            if "SwapTotal" in meminfo and "SwapFree" in meminfo
+            else None
+        ),
+    }
+
+
+def check_memory_guard(args: argparse.Namespace) -> None:
+    if args.min_mem_available_gb <= 0:
+        return
+    mem_available_kb = read_memory_metadata().get("mem_available_kb")
+    required_kb = int(args.min_mem_available_gb * 1024 * 1024)
+    if mem_available_kb is None:
+        raise RuntimeError("Cannot read MemAvailable for eval memory guard")
+    if mem_available_kb < required_kb:
+        raise RuntimeError(
+            f"Refusing eval run: MemAvailable={mem_available_kb / 1024 / 1024:.1f} GiB "
+            f"is below --min-mem-available-gb={args.min_mem_available_gb:.1f}"
+        )
+
+
+def child_resource_limiter(args: argparse.Namespace):
+    if args.child_memory_limit_gb <= 0:
+        return None
+
+    limit_bytes = int(args.child_memory_limit_gb * 1024 * 1024 * 1024)
+
+    def limit_child() -> None:
+        import resource
+
+        resource.setrlimit(resource.RLIMIT_AS, (limit_bytes, limit_bytes))
+
+    return limit_child
+
+
 def safe_extract_tar(tar_path: Path, dest_dir: Path) -> Path:
     marker = dest_dir / ".complete"
     if marker.exists():
@@ -232,6 +285,7 @@ def default_ort_dylib() -> Path | None:
 
 
 def run_parakeet(args: argparse.Namespace, wav: Path) -> tuple[str, dict[str, Any], str]:
+    check_memory_guard(args)
     env = os.environ.copy()
     if "ORT_DYLIB_PATH" not in env:
         dylib = default_ort_dylib()
@@ -253,12 +307,13 @@ def run_parakeet(args: argparse.Namespace, wav: Path) -> tuple[str, dict[str, An
         "--flush-chunks",
         str(args.flush_chunks),
     ]
-    proc = run(command, env=env, timeout=args.timeout_seconds)
+    proc = run(command, env=env, timeout=args.timeout_seconds, preexec_fn=child_resource_limiter(args))
     event = final_event(parse_json_events(proc.stdout))
     return str(event.get("text") or ""), dict(event.get("data") or {}), proc.stderr
 
 
 def run_sherpa(args: argparse.Namespace, wav: Path) -> tuple[str, dict[str, Any], str]:
+    check_memory_guard(args)
     env = os.environ.copy()
     env["PYTHONPATH"] = "src"
     command = [
@@ -280,7 +335,7 @@ def run_sherpa(args: argparse.Namespace, wav: Path) -> tuple[str, dict[str, Any]
         str(args.flush_chunks),
         "--json",
     ]
-    proc = run(command, env=env, timeout=args.timeout_seconds)
+    proc = run(command, env=env, timeout=args.timeout_seconds, preexec_fn=child_resource_limiter(args))
     event = final_event(parse_json_events(proc.stdout))
     return str(event.get("text") or ""), dict(event.get("data") or {}), proc.stderr
 
@@ -389,6 +444,18 @@ def main() -> int:
     parser.add_argument("--parakeet-model-dir", type=Path, default=DEFAULT_PARAKEET_MODEL)
     parser.add_argument("--sherpa-model-dir", type=Path, default=DEFAULT_SHERPA_MODEL)
     parser.add_argument("--backend", choices=("both", "parakeet", "sherpa"), default="both")
+    parser.add_argument(
+        "--min-mem-available-gb",
+        type=float,
+        default=0.0,
+        help="Refuse to start an utterance when /proc/meminfo MemAvailable is below this threshold.",
+    )
+    parser.add_argument(
+        "--child-memory-limit-gb",
+        type=float,
+        default=0.0,
+        help="Set RLIMIT_AS for each backend subprocess. 0 disables the limit.",
+    )
     args = parser.parse_args()
 
     args.work_dir.mkdir(parents=True, exist_ok=True)
@@ -422,6 +489,7 @@ def main() -> int:
         raise SystemExit(f"Missing parakeet worker: {args.parakeet_worker}")
 
     backends = ["parakeet", "sherpa"] if args.backend == "both" else [args.backend]
+    memory_at_start = read_memory_metadata()
     summaries = []
     for backend in backends:
         summaries.append(
@@ -442,7 +510,11 @@ def main() -> int:
             "chunk_seconds": args.chunk_seconds,
             "flush_chunks": args.flush_chunks,
             "graph_optimization": args.graph_optimization,
+            "min_mem_available_gb": args.min_mem_available_gb,
+            "child_memory_limit_gb": args.child_memory_limit_gb,
         },
+        "memory_at_start": memory_at_start,
+        "memory_at_end": read_memory_metadata(),
         "backends": summaries,
     }
     summary_path = args.work_dir / "summary.json"
