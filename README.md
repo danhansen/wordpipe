@@ -120,6 +120,19 @@ python3 -m pip install '.[asr]'
 The local development environment has been smoke-tested with
 `sherpa-onnx==1.13.3` on Python 3.14.
 
+Download the default 560 ms int8 Nemotron model:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe download-model
+```
+
+This writes to `models/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11/`
+by default. The repository is:
+
+```text
+csukuangfj2/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11
+```
+
 The model directory must contain `tokens.txt` and either a single `.onnx` model
 for the Nemotron CTC path or `encoder*.onnx`, `decoder*.onnx`, and
 `joiner*.onnx` for a transducer layout.

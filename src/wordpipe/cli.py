@@ -42,6 +42,19 @@ def _cmd_model_info(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_download_model(args: argparse.Namespace) -> int:
+    from .models import download_model, make_download_plan
+
+    plan = make_download_plan(
+        output_dir=Path(args.output_dir),
+        repo_id=args.repo_id,
+        include_test_wavs=args.include_test_wavs,
+    )
+    model_dir = download_model(plan, force=args.force)
+    print(model_dir)
+    return 0
+
+
 def _cmd_type_text(args: argparse.Namespace) -> int:
     from .insertion import DryRunKeyboardBackend, PortalKeyboardBackend
 
@@ -152,6 +165,28 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to sherpa-onnx streaming model directory.",
     )
     model_info.set_defaults(func=_cmd_model_info)
+
+    download_model = subparsers.add_parser(
+        "download-model",
+        help="Download the default Nemotron int8 streaming model from Hugging Face.",
+    )
+    download_model.add_argument(
+        "--repo-id",
+        default="csukuangfj2/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11",
+        help="Hugging Face model repo ID.",
+    )
+    download_model.add_argument(
+        "--output-dir",
+        default="models",
+        help="Directory that will contain the downloaded model directory.",
+    )
+    download_model.add_argument(
+        "--include-test-wavs",
+        action="store_true",
+        help="Also download the small upstream test WAV files.",
+    )
+    download_model.add_argument("--force", action="store_true", help="Redownload existing files.")
+    download_model.set_defaults(func=_cmd_download_model)
 
     type_text = subparsers.add_parser(
         "type-text",

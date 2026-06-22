@@ -118,6 +118,23 @@ holds model path, provider, thread count, overlay, hotkey mode, shortcut,
 spoken-punctuation behavior, and dry-run insertion. CLI flags override file
 values.
 
+## Model
+
+The default target model is hosted on Hugging Face as:
+
+```text
+csukuangfj2/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11
+```
+
+Expected files:
+
+- `tokens.txt`
+- `encoder.int8.onnx`
+- `decoder.int8.onnx`
+- `joiner.int8.onnx`
+
+The `download-model` command downloads these files into `models/` by default.
+
 ## Packaging
 
 The repository includes early templates for a desktop entry and user systemd
