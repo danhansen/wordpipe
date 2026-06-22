@@ -573,3 +573,58 @@ Session-option observations:
   allocator memory retention in other conditions.
 - Parallel graph execution and explicit memory-pattern overrides are both
   slower for this fixed-shape streaming graph.
+
+## 2026-06-22: Current-Best ORT Profile
+
+The current best speed candidate, `ffn_fp32`, was profiled directly through
+ONNX Runtime with fixed synthetic streaming inputs. This isolates the encoder
+graph from file I/O, decoder accumulation, and worker JSON output.
+
+Command:
+
+```sh
+.venv/bin/python scripts/profile_nemotron_ort.py \
+  --model-dir build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort \
+  --threads 2 \
+  --graph-optimization all \
+  --warmup 3 \
+  --iterations 30 \
+  --output-dir build/ort-profile/ffn-fp32-solo
+```
+
+Summary:
+
+| Metric | Value |
+| --- | ---: |
+| Mean encoder run | 302.183 ms |
+| Min encoder run | 290.339 ms |
+| Max encoder run | 322.502 ms |
+| Profiled node time | 9,601.885 ms |
+| Provider | CPUExecutionProvider |
+
+Top operation families by profiled node time:
+
+| Op | Time |
+| --- | ---: |
+| `MatMul` | 2,309.615 ms |
+| `FusedMatMul` | 2,187.441 ms |
+| `ConvInteger` | 2,146.987 ms |
+| `DynamicQuantizeMatMul` | 1,476.772 ms |
+| `LayerNormalization` | 189.985 ms |
+| `DynamicQuantizeLinear` | 161.063 ms |
+| `Mul` | 155.017 ms |
+| `Transpose` | 143.702 ms |
+
+Profile observations:
+
+- Full FFN dequantization did what we expected: the huge
+  `DynamicQuantizeMatMul` block from the compact graph is mostly gone, replaced
+  by FP32 `MatMul`/`FusedMatMul` work.
+- The remaining major costs are now broad and structural: FP32 FFN matmuls,
+  quantized convs, and the still-quantized non-FFN matmuls.
+- All-conv FP32 was faster in the long-WAV benchmark but regressed rough WER, so
+  the `ConvInteger` block is not a clean optimization target unless a larger
+  validation run clears it.
+- The remaining `DynamicQuantizeMatMul` cost is led by non-FFN nodes such as
+  `/encoder/pre_encode/out/MatMul_quant`; attention-projection dequantization
+  already tested poorly on rough WER.
