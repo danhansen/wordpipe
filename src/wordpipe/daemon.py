@@ -35,7 +35,7 @@ class DaemonConfig:
     audio_chunk_seconds: float = 0.03
     queue_seconds: float = 10.0
     stats_interval_seconds: float = 1.0
-    enable_endpoint_detection: bool = True
+    enable_endpoint_detection: bool = False
     endpoint_rule1_min_trailing_silence: float = 0.55
     endpoint_rule2_min_trailing_silence: float = 0.35
     endpoint_rule3_min_utterance_length: float = 20.0
@@ -93,7 +93,7 @@ class AsrProcess:
                 str(self._config.queue_seconds),
                 "--stats-interval-seconds",
                 str(self._config.stats_interval_seconds),
-                *(["--no-endpoint"] if not self._config.enable_endpoint_detection else []),
+                *(["--endpoint"] if self._config.enable_endpoint_detection else []),
                 "--endpoint-rule1-min-trailing-silence",
                 str(self._config.endpoint_rule1_min_trailing_silence),
                 "--endpoint-rule2-min-trailing-silence",

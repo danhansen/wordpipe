@@ -32,7 +32,7 @@ class AsrWorkerConfig:
     audio_chunk_seconds: float = 0.03
     queue_seconds: float = 2.0
     stats_interval_seconds: float = 1.0
-    enable_endpoint_detection: bool = True
+    enable_endpoint_detection: bool = False
     endpoint_rule1_min_trailing_silence: float = 0.55
     endpoint_rule2_min_trailing_silence: float = 0.35
     endpoint_rule3_min_utterance_length: float = 20.0

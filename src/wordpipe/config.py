@@ -19,7 +19,7 @@ partial_interval_seconds = 0.10
 audio_chunk_seconds = 0.03
 queue_seconds = 10.0
 stats_interval_seconds = 1.0
-enable_endpoint_detection = true
+enable_endpoint_detection = false
 endpoint_rule1_min_trailing_silence = 0.55
 endpoint_rule2_min_trailing_silence = 0.35
 endpoint_rule3_min_utterance_length = 20.0
@@ -43,7 +43,7 @@ class WordpipeConfig:
     audio_chunk_seconds: float = 0.03
     queue_seconds: float = 10.0
     stats_interval_seconds: float = 1.0
-    enable_endpoint_detection: bool = True
+    enable_endpoint_detection: bool = False
     endpoint_rule1_min_trailing_silence: float = 0.55
     endpoint_rule2_min_trailing_silence: float = 0.35
     endpoint_rule3_min_utterance_length: float = 20.0
@@ -80,7 +80,7 @@ def load_config(path: Path | None = None) -> WordpipeConfig:
         audio_chunk_seconds=_number(data, "audio_chunk_seconds", 0.03),
         queue_seconds=_number(data, "queue_seconds", 10.0),
         stats_interval_seconds=_number(data, "stats_interval_seconds", 1.0),
-        enable_endpoint_detection=_boolean(data, "enable_endpoint_detection", True),
+        enable_endpoint_detection=_boolean(data, "enable_endpoint_detection", False),
         endpoint_rule1_min_trailing_silence=_number(
             data, "endpoint_rule1_min_trailing_silence", 0.55
         ),

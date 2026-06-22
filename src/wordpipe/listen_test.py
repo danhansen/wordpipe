@@ -26,6 +26,7 @@ class ListenTestConfig:
     endpoint_rule3_min_utterance_length: float = 20.0
     duration_seconds: float | None = None
     json_output: bool = False
+    full_hypotheses: bool = False
 
 
 def run_listen_test(config: ListenTestConfig) -> int:
@@ -46,6 +47,7 @@ def run_listen_test(config: ListenTestConfig) -> int:
     )
     asr = AsrProcess(daemon_config)
     timer: threading.Timer | None = None
+    formatter = ListenTestFormatter(full_hypotheses=config.full_hypotheses)
 
     def start_timer_once() -> None:
         nonlocal timer
@@ -62,7 +64,7 @@ def run_listen_test(config: ListenTestConfig) -> int:
             if config.json_output:
                 print(json.dumps(item, sort_keys=True), flush=True)
             else:
-                print(_format_event(item), flush=True)
+                print(formatter.format(item), flush=True)
             if item.get("event") == "listening":
                 start_timer_once()
             if item.get("event") == "error":
@@ -76,22 +78,67 @@ def run_listen_test(config: ListenTestConfig) -> int:
     return 0
 
 
+class ListenTestFormatter:
+    def __init__(self, full_hypotheses: bool = False) -> None:
+        self._full_hypotheses = full_hypotheses
+        self._last_text = ""
+
+    def format(self, item: dict[str, object]) -> str:
+        return _format_event_with_state(
+            item,
+            previous_text=self._last_text,
+            full_hypotheses=self._full_hypotheses,
+            remember_text=self._remember_text,
+        )
+
+    def _remember_text(self, text: str) -> None:
+        if text:
+            self._last_text = text
+
+
 def _format_event(item: dict[str, object]) -> str:
+    return _format_event_with_state(item, previous_text="", full_hypotheses=True)
+
+
+def _format_event_with_state(
+    item: dict[str, object],
+    *,
+    previous_text: str,
+    full_hypotheses: bool,
+    remember_text=None,  # type: ignore[no-untyped-def]
+) -> str:
     kind = str(item.get("event", "unknown"))
     text = str(item.get("text", ""))
     metrics = _format_metrics(item.get("data"))
     if kind in {"partial", "commit"}:
-        return f"{kind:7} {metrics} {text}".rstrip()
+        display = text if full_hypotheses else _new_suffix(previous_text, text)
+        if remember_text is not None:
+            remember_text(text)
+        label = kind if full_hypotheses else f"{kind}+"
+        return f"{label:7} {metrics} {display}".rstrip()
     if kind == "stats":
         line = f"stats   {metrics}"
         if text:
-            line = f"{line}\npartial {metrics} {text}"
+            display = text if full_hypotheses else _new_suffix(previous_text, text)
+            if display:
+                label = "partial" if full_hypotheses else "partial+"
+                line = f"{line}\n{label:7} {metrics} {display}"
+            if remember_text is not None:
+                remember_text(text)
         return line
     if kind == "listening":
         return f"listening {_format_device(item.get('data'))}"
     if kind == "error":
         return f"error   {item.get('message', '')}"
     return kind
+
+
+def _new_suffix(previous: str, current: str) -> str:
+    if not previous:
+        return current
+    if current.startswith(previous):
+        return current[len(previous) :].lstrip()
+    return current
 
 
 def _format_device(data: object) -> str:

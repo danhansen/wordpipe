@@ -6,9 +6,10 @@ Wordpipe is a Wayland-only GNOME dictation app. It should behave like a
 consented virtual keyboard driven by streaming ASR, not like a screen scraper or
 X11-style automation tool.
 
-The first usable version prioritizes reliable committed text insertion over live
-cursor replacement. Partial results are visible in Wordpipe's own UI, and only
-endpoint/final text is sent to the focused application.
+The first usable version prioritizes reliable raw streaming diagnostics and
+committed text insertion over live cursor replacement. Partial results are
+visible in Wordpipe's own UI, and current text is sent to the focused
+application when dictation stops.
 
 ## Locked Decisions
 
@@ -16,9 +17,10 @@ endpoint/final text is sent to the focused application.
 - Wayland-only.
 - No `xdotool` or X11 fallback path.
 - No external VAD for the MVP.
-- Use sherpa-onnx streaming endpoint detection for commit boundaries.
-- Endpoint detection commits the current phrase and resets the recognizer stream.
-- Endpoint detection does not stop dictation.
+- Keep sherpa-onnx endpoint detection disabled by default while raw continuous
+  streaming behavior is evaluated.
+- Endpoint detection remains an explicit opt-in diagnostic mode for
+  phrase-boundary experiments.
 - Commit non-empty partial text when dictation is stopped.
 - ASR runs out-of-process to avoid making the Python GIL a core design risk.
 - Text insertion uses virtual-keyboard semantics through XDG portals/libei.
@@ -62,15 +64,15 @@ speech arrives
   decode as sherpa-onnx becomes ready
   emit partial transcript updates
 
-endpoint fires
-  emit committed phrase
-  reset recognizer stream
-  continue listening
-
 dictation stops
   commit non-empty current partial
   close microphone
   stop or idle ASR worker
+
+optional endpoint diagnostic mode
+  emit committed phrase
+  reset recognizer stream
+  continue listening
 ```
 
 No external VAD is used. The streaming ASR model receives the audio stream
@@ -81,8 +83,7 @@ Current low-latency defaults:
 - 30 ms microphone chunks
 - 100 ms partial transcript interval
 - 10 s audio queue before dropping microphone chunks
-- 0.55 s endpoint trailing silence for speech phrases
-- 0.35 s endpoint trailing silence for empty/no-speech streams
+- endpoint detection disabled
 - 2 CPU threads, based on local benchmark results
 
 ## Text Insertion
@@ -113,7 +114,7 @@ Recommended initial UI:
 
 - top-bar status indicator for idle/listening/permission/error states
 - small live transcript overlay for partial text
-- committed phrase feedback after endpoint insertion
+- committed text feedback after dictation stops
 
 Partial text is never typed into the target app in v1.
 
@@ -148,8 +149,8 @@ The `download-model` command downloads these files into `models/` by default.
 
 `listen-test` is the primary live tuning mode. It opens the microphone, prints
 partial results, and reports realtime factor (RTF) without inserting text.
-It disables endpoint detection by default so raw continuous ASR behavior is
-visible without phrase-boundary resets.
+Endpoint detection is disabled by default across live paths so raw continuous
+ASR behavior is visible without phrase-boundary resets.
 `audio-devices` and `record-test` are diagnostic commands for validating the
 capture device independently from ASR.
 `stream-file-test` feeds a known WAV through the streaming recognizer and is the
@@ -179,7 +180,7 @@ installed on `PATH`; they are not a complete distro package.
 2. Streaming ASR spike
    - load Nemotron int8 model
    - stream microphone audio
-   - print partial and endpoint-committed text
+   - print raw partial text
    - log real-time factor, queue depth, and commit latency
    - status: implemented; model load, offline WAV decode, and live microphone
      stream have been validated
@@ -207,7 +208,6 @@ installed on `PATH`; they are not a complete distro package.
 6. First integrated dictation
    - hotkey controls dictation
    - overlay shows partials
-   - endpoint commits insert text
    - stop commits non-empty partial
    - status: CLI daemon, hotkey daemon, and optional Adwaita/GTK overlay
      implemented and live-validated in manual-hotkey mode; top-bar indicator

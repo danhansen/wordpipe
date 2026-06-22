@@ -10,9 +10,10 @@ speech recognition with sherpa-onnx.
 - Streaming ASR with `sherpa-onnx`.
 - Target model: `sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8`.
 - No external VAD for the MVP.
-- Endpoint detection creates phrase commit boundaries while dictation continues.
-- Partial recognition appears in Wordpipe UI; committed phrases are inserted into
-  the focused app.
+- Endpoint detection is disabled by default while raw continuous streaming is
+  evaluated.
+- Partial recognition appears in Wordpipe UI; committed text is inserted when
+  dictation stops.
 
 See [docs/architecture.md](docs/architecture.md) for the current design plan.
 
@@ -232,8 +233,9 @@ endpoint_rule2_min_trailing_silence = 0.35
 The live ASR queue is intentionally larger than the audio chunk size requires,
 because this model can run slower than realtime on the test CPU. Buffering avoids
 dropping speech context; it trades some latency for recognition continuity.
-`listen-test` disables endpointing by default for raw ASR diagnostics; dictation
-commands keep endpoint detection enabled unless `--no-endpoint` is passed.
+Endpoint detection is disabled by default for raw ASR diagnostics and normal
+dictation commands. Use `--endpoint` only when deliberately testing sherpa-onnx
+phrase-boundary behavior.
 
 On the current test machine, the 560 ms int8 model decodes slower than realtime
 on CPU. The best measured CPU thread count was 2 threads; higher counts were
