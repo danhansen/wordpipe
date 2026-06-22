@@ -35,6 +35,29 @@ def final_event(events: list[dict[str, Any]]) -> dict[str, Any]:
     return text_events[-1] if text_events else (events[-1] if events else {})
 
 
+def read_text(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+
+
+def read_power_metadata() -> dict[str, Any]:
+    cpu0 = Path("/sys/devices/system/cpu/cpu0/cpufreq")
+    battery = Path("/sys/class/power_supply/BAT0")
+    ac = Path("/sys/class/power_supply/AC")
+    return {
+        "ac_online": read_text(ac / "online"),
+        "battery_capacity_percent": read_text(battery / "capacity"),
+        "battery_status": read_text(battery / "status"),
+        "cpu0_scaling_governor": read_text(cpu0 / "scaling_governor"),
+        "cpu0_scaling_cur_freq_khz": read_text(cpu0 / "scaling_cur_freq"),
+        "cpu0_scaling_max_freq_khz": read_text(cpu0 / "scaling_max_freq"),
+        "intel_pstate_no_turbo": read_text(Path("/sys/devices/system/cpu/intel_pstate/no_turbo")),
+        "platform_profile": read_text(Path("/sys/firmware/acpi/platform_profile")),
+    }
+
+
 def run_once(args: argparse.Namespace, label: str, model_dir: Path, run_index: int) -> dict[str, Any]:
     env = os.environ.copy()
     if "ORT_DYLIB_PATH" not in env and args.ort_dylib.exists():
@@ -57,6 +80,7 @@ def run_once(args: argparse.Namespace, label: str, model_dir: Path, run_index: i
         args.graph_optimization,
     ]
     started = time.perf_counter()
+    power_before = read_power_metadata()
     proc = subprocess.run(
         command,
         check=True,
@@ -67,6 +91,7 @@ def run_once(args: argparse.Namespace, label: str, model_dir: Path, run_index: i
         timeout=args.timeout_seconds,
     )
     wall_seconds = time.perf_counter() - started
+    power_after = read_power_metadata()
     event = final_event(parse_events(proc.stdout))
     metrics = dict(event.get("data") or {})
     return {
@@ -76,6 +101,8 @@ def run_once(args: argparse.Namespace, label: str, model_dir: Path, run_index: i
         "wall_seconds": wall_seconds,
         "text": str(event.get("text") or ""),
         "metrics": metrics,
+        "power_before": power_before,
+        "power_after": power_after,
         "stderr_tail": proc.stderr[-2000:] if proc.stderr else "",
     }
 
@@ -131,6 +158,7 @@ def main() -> None:
     if not args.worker.exists():
         raise SystemExit(f"Missing worker: {args.worker}")
 
+    power_at_start = read_power_metadata()
     results = []
     summaries = []
     for label, model_dir in map(parse_model_arg, args.model):
@@ -162,6 +190,8 @@ def main() -> None:
             "flush_chunks": args.flush_chunks,
             "graph_optimization": args.graph_optimization,
         },
+        "power_at_start": power_at_start,
+        "power_at_end": read_power_metadata(),
         "summaries": summaries,
         "runs": results,
     }
