@@ -104,7 +104,7 @@ def _cmd_stream_file_test(args: argparse.Namespace) -> int:
     from .listen_test import _format_event
 
     if args.asr_runtime == "parakeet":
-        from .daemon import _resolve_parakeet_worker
+        from .daemon import _resolve_parakeet_worker, parakeet_worker_env
 
         command = [
             str(
@@ -132,6 +132,7 @@ def _cmd_stream_file_test(args: argparse.Namespace) -> int:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            env=parakeet_worker_env(),
         )
         assert proc.stdout is not None
         for line in proc.stdout:

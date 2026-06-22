@@ -151,7 +151,9 @@ capture device independently from ASR.
 primary check for whether the model emits partial hypotheses before finalization.
 
 The current test machine exposes only Intel HD Graphics 4000, so CPU tuning and
-cache-aware runtime work are the practical performance paths.
+cache-aware runtime work are the practical performance paths. Its Ivy Bridge
+CPU lacks AVX2, so the Rust worker uses dynamic ONNX Runtime loading and reuses
+the non-AVX2 `libonnxruntime.so` from the local `sherpa_onnx` installation.
 
 ## Packaging
 
@@ -174,8 +176,10 @@ installed on `PATH`; they are not a complete distro package.
    - stream microphone audio
    - print raw partial text
    - log real-time factor, queue depth, and commit latency
-   - status: Rust worker compiles; live Parakeet/Nemotron model validation is
-     next
+   - status: Rust worker loads the int8 Parakeet/Nemotron model and streams a
+     known WAV through partial/stats/commit events; live mic validation is
+     blocked in the current tool session because PipeWire/Pulse input access is
+     unavailable
 
 3. ASR process protocol
    - newline-delimited JSON over stdio or Unix socket

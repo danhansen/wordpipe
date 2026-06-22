@@ -380,9 +380,15 @@ fn build_input_stream(
     dropped_chunks: Arc<AtomicUsize>,
 ) -> Result<cpal::Stream> {
     let err_fn = |err| eprintln!("audio input stream error: {err}");
+    let device_name = device.name().unwrap_or_else(|_| "unknown".to_string());
     let sample_format = device
         .default_input_config()
-        .context("failed to read default input config")?
+        .with_context(|| {
+            format!(
+                "failed to read default input config for device '{device_name}' at requested {} Hz",
+                config.sample_rate.0
+            )
+        })?
         .sample_format();
 
     match sample_format {
@@ -393,7 +399,12 @@ fn build_input_stream(
                 err_fn,
                 None,
             )
-            .context("failed to build f32 input stream"),
+            .with_context(|| {
+                format!(
+                    "failed to build f32 input stream for device '{device_name}' at {} Hz",
+                    config.sample_rate.0
+                )
+            }),
         SampleFormat::I16 => device
             .build_input_stream(
                 config,
@@ -404,7 +415,12 @@ fn build_input_stream(
                 err_fn,
                 None,
             )
-            .context("failed to build i16 input stream"),
+            .with_context(|| {
+                format!(
+                    "failed to build i16 input stream for device '{device_name}' at {} Hz",
+                    config.sample_rate.0
+                )
+            }),
         SampleFormat::U16 => device
             .build_input_stream(
                 config,
@@ -418,7 +434,12 @@ fn build_input_stream(
                 err_fn,
                 None,
             )
-            .context("failed to build u16 input stream"),
+            .with_context(|| {
+                format!(
+                    "failed to build u16 input stream for device '{device_name}' at {} Hz",
+                    config.sample_rate.0
+                )
+            }),
         other => Err(anyhow!("unsupported input sample format: {other:?}")),
     }
 }

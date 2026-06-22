@@ -29,15 +29,38 @@ def _resolve_parakeet_worker(configured_path: Path | None = None) -> Path | str:
         return configured_path
 
     repo_root = Path(__file__).resolve().parents[2]
-    dev_binary = repo_root / "target" / "debug" / "wordpipe-parakeet-worker"
-    if dev_binary.exists():
-        return dev_binary
+    release_binary = repo_root / "target" / "release" / "wordpipe-parakeet-worker"
+    if release_binary.exists():
+        return release_binary
+
+    debug_binary = repo_root / "target" / "debug" / "wordpipe-parakeet-worker"
+    if debug_binary.exists():
+        return debug_binary
 
     installed = shutil.which("wordpipe-parakeet-worker")
     if installed is not None:
         return installed
 
     return "wordpipe-parakeet-worker"
+
+
+def _default_ort_dylib_path() -> Path | None:
+    repo_root = Path(__file__).resolve().parents[2]
+    matches = sorted(
+        (repo_root / ".venv").glob(
+            "lib/python*/site-packages/sherpa_onnx/lib/libonnxruntime.so"
+        )
+    )
+    return matches[0] if matches else None
+
+
+def parakeet_worker_env(base: dict[str, str] | None = None) -> dict[str, str]:
+    env = dict(os.environ if base is None else base)
+    if "ORT_DYLIB_PATH" not in env:
+        dylib = _default_ort_dylib_path()
+        if dylib is not None:
+            env["ORT_DYLIB_PATH"] = str(dylib)
+    return env
 
 
 @dataclass(frozen=True)
@@ -84,6 +107,9 @@ class AsrProcess:
         source_root = str(Path(__file__).resolve().parents[1])
         existing = env.get("PYTHONPATH")
         env["PYTHONPATH"] = source_root if not existing else f"{source_root}{os.pathsep}{existing}"
+
+        if self._config.asr_runtime == "parakeet":
+            env = parakeet_worker_env(env)
 
         self._proc = subprocess.Popen(
             self._command(),

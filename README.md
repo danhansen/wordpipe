@@ -51,7 +51,7 @@ PYTHONPATH=src python3 -m unittest discover -s tests
 Build the Rust Parakeet worker:
 
 ```sh
-cargo build -p wordpipe-parakeet-worker
+cargo build --release -p wordpipe-parakeet-worker
 ```
 
 After creating `.venv`, the `scripts/wordpipe-dev` wrapper runs the local source
@@ -84,7 +84,7 @@ PYTHONPATH=src python3 -m wordpipe transcribe-file \
 Run live partial-only testing with RTF metrics using the Rust Parakeet runtime:
 
 ```sh
-cargo build -p wordpipe-parakeet-worker
+cargo build --release -p wordpipe-parakeet-worker
 scripts/wordpipe-dev listen-test \
   --model-dir /path/to/parakeet-nemotron-streaming-model
 ```
@@ -204,12 +204,13 @@ The local development environment has been smoke-tested with
 The default Rust runtime uses `parakeet-rs`. Build it with:
 
 ```sh
-cargo build -p wordpipe-parakeet-worker
+cargo build --release -p wordpipe-parakeet-worker
 ```
 
 `listen-test`, `daemon`, and `hotkey-daemon` look for
-`target/debug/wordpipe-parakeet-worker` first, then `wordpipe-parakeet-worker`
-on `PATH`. Use `--asr-worker-path` to point at a custom binary.
+`target/release/wordpipe-parakeet-worker` first, then the debug binary, then
+`wordpipe-parakeet-worker` on `PATH`. Use `--asr-worker-path` to point at a
+custom binary.
 
 Download the legacy sherpa 560 ms int8 Nemotron model:
 
@@ -231,6 +232,17 @@ and `joiner*.onnx` for a transducer layout.
 The default Parakeet/Nemotron runtime expects the model layout used by
 `parakeet-rs`: `encoder.onnx`, any associated external data file,
 `decoder_joint.onnx`, and `tokenizer.model`.
+
+The tested int8 English model is:
+
+```text
+models/nemotron-speech-streaming-en-0.6b-int8/
+```
+
+On the current Ivy Bridge CPU, the Rust worker uses dynamic ONNX Runtime
+loading so it can reuse the non-AVX2 `libonnxruntime.so` bundled with
+`sherpa_onnx`. `scripts/wordpipe-dev`, `listen-test`, and daemon launch paths
+set `ORT_DYLIB_PATH` automatically when that library is present in `.venv`.
 
 ## Live Validation
 
@@ -255,9 +267,10 @@ The Rust worker feeds Nemotron in 560 ms chunks, matching the model's streaming
 stride. It reports RTF, audio level, and dropped audio chunks through the same
 JSON events as the legacy worker.
 
-On the current test machine, the sherpa 560 ms int8 model decodes slower than
-realtime on CPU. The Rust Parakeet runtime has compiled successfully but still
-needs live model validation on the Parakeet/Nemotron model layout.
+On the current test machine, both tested CPU runtimes decode slower than
+realtime. The Parakeet int8 English model streams correctly from the known
+test WAV and emits partials/commit events, but the release worker measures
+about 2.5 RTF per 560 ms chunk and about 3.1 RTF including final flush.
 
 The GTK overlay prefers libadwaita (`Adw 1`) and falls back to plain GTK 4 if
 libadwaita is not available. Non-UI daemon paths do not require GTK.
