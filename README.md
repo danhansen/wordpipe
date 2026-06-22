@@ -111,6 +111,16 @@ If the recorded WAV transcribes but `listen-test` does not produce partials, the
 problem is streaming throughput. If the WAV does not transcribe, the issue is
 audio capture, device selection, level, or model suitability for the speech.
 
+Test streaming behavior from a known-good WAV:
+
+```sh
+scripts/wordpipe-dev stream-file-test \
+  --model-dir models/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11 \
+  --wav /tmp/wordpipe-spoken.wav
+```
+
+This should print partials if the model emits them in streaming mode.
+
 Dry-run text insertion:
 
 ```sh
@@ -210,10 +220,15 @@ The default CPU tuning is currently:
 ```text
 num_threads = 2
 audio_chunk_seconds = 0.03
+queue_seconds = 10.0
 partial_interval_seconds = 0.10
 endpoint_rule1_min_trailing_silence = 0.55
 endpoint_rule2_min_trailing_silence = 0.35
 ```
+
+The live ASR queue is intentionally larger than the audio chunk size requires,
+because this model can run slower than realtime on the test CPU. Buffering avoids
+dropping speech context; it trades some latency for recognition continuity.
 
 On the current test machine, the 560 ms int8 model decodes slower than realtime
 on CPU. The best measured CPU thread count was 2 threads; higher counts were

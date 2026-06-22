@@ -5,7 +5,7 @@ import unittest
 import wave
 from pathlib import Path
 
-from wordpipe.asr_worker import read_wav_mono_float32
+from wordpipe.asr_worker import _offline_metrics, read_wav_mono_float32
 
 
 class WavTests(unittest.TestCase):
@@ -25,6 +25,13 @@ class WavTests(unittest.TestCase):
         self.assertEqual(len(samples), 2)
         self.assertAlmostEqual(float(samples[0]), 0.0)
         self.assertAlmostEqual(float(samples[1]), 32767 / 32768)
+
+    def test_offline_metrics_include_rtf(self) -> None:
+        metrics = _offline_metrics(0.0, 2.0, 1.0, 3)
+
+        self.assertEqual(metrics["real_time_factor"], 0.5)
+        self.assertEqual(metrics["decode_calls"], 3)
+        self.assertEqual(metrics["last_rms"], 0.0)
 
 
 if __name__ == "__main__":

@@ -80,6 +80,7 @@ Current low-latency defaults:
 
 - 30 ms microphone chunks
 - 100 ms partial transcript interval
+- 10 s audio queue before dropping microphone chunks
 - 0.55 s endpoint trailing silence for speech phrases
 - 0.35 s endpoint trailing silence for empty/no-speech streams
 - 2 CPU threads, based on local benchmark results
@@ -149,6 +150,8 @@ The `download-model` command downloads these files into `models/` by default.
 partial results, and reports realtime factor (RTF) without inserting text.
 `audio-devices` and `record-test` are diagnostic commands for validating the
 capture device independently from ASR.
+`stream-file-test` feeds a known WAV through the streaming recognizer and is the
+primary check for whether the model emits partial hypotheses before finalization.
 
 GPU acceleration is possible only if the installed sherpa-onnx/ONNX Runtime
 build supports a GPU provider and the machine has the matching driver/runtime.

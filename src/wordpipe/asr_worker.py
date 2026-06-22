@@ -101,7 +101,7 @@ class SherpaStreamingSession:
         self._emit = emit
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        max_chunks = max(4, int(config.queue_seconds * 1000 / 50))
+        max_chunks = max(4, int(config.queue_seconds / config.audio_chunk_seconds))
         self._audio: queue.Queue[object] = queue.Queue(maxsize=max_chunks)
         self._dropped_chunks = 0
         self._last_partial = ""
@@ -372,6 +372,108 @@ def transcribe_wav_file(config: AsrWorkerConfig, wav_path: Path) -> tuple[str, d
         else 0.0,
     }
     return _result_text(recognizer.get_result(stream)), metrics
+
+
+def stream_wav_file_events(
+    config: AsrWorkerConfig,
+    wav_path: Path,
+    *,
+    chunk_seconds: float = 0.1,
+    reset_on_endpoint: bool = False,
+) -> list[dict[str, object]]:
+    samples, sample_rate = read_wav_mono_float32(wav_path)
+    if sample_rate != config.sample_rate:
+        raise ValueError(f"expected {config.sample_rate} Hz audio, got {sample_rate} Hz")
+
+    recognizer = _create_recognizer(config)
+    stream = recognizer.create_stream()
+    started = time.monotonic()
+    decode_seconds = 0.0
+    decode_calls = 0
+    last_partial = ""
+    events: list[dict[str, object]] = []
+    chunk_size = max(1, int(config.sample_rate * chunk_seconds))
+
+    for offset in range(0, len(samples), chunk_size):
+        chunk = samples[offset : offset + chunk_size]
+        stream.accept_waveform(config.sample_rate, chunk)
+        while recognizer.is_ready(stream):
+            decode_started = time.monotonic()
+            recognizer.decode_stream(stream)
+            decode_seconds += time.monotonic() - decode_started
+            decode_calls += 1
+
+        text = _result_text(recognizer.get_result(stream))
+        audio_seconds = min(len(samples), offset + len(chunk)) / config.sample_rate
+        metrics = _offline_metrics(
+            started,
+            audio_seconds,
+            decode_seconds,
+            decode_calls,
+            samples=chunk,
+        )
+        if text and text != last_partial:
+            last_partial = text
+            events.append({"event": "partial", "text": text, "data": metrics})
+        events.append({"event": "stats", "text": text, "data": metrics})
+
+        if reset_on_endpoint and recognizer.is_endpoint(stream):
+            committed = _result_text(recognizer.get_result(stream)).strip()
+            if committed:
+                events.append({"event": "commit", "text": committed, "data": metrics})
+            recognizer.reset(stream)
+            last_partial = ""
+
+    stream.input_finished()
+    while recognizer.is_ready(stream):
+        decode_started = time.monotonic()
+        recognizer.decode_stream(stream)
+        decode_seconds += time.monotonic() - decode_started
+        decode_calls += 1
+
+    final_text = _result_text(recognizer.get_result(stream)).strip()
+    metrics = _offline_metrics(
+        started,
+        len(samples) / config.sample_rate,
+        decode_seconds,
+        decode_calls,
+        samples=samples,
+    )
+    if final_text:
+        events.append({"event": "commit", "text": final_text, "data": metrics})
+    return events
+
+
+def _offline_metrics(
+    started: float,
+    audio_seconds: float,
+    decode_seconds: float,
+    decode_calls: int,
+    samples: object | None = None,
+) -> dict[str, float | int]:
+    rms = 0.0
+    peak = 0.0
+    if samples is not None:
+        try:
+            import numpy as np
+
+            rms = float(np.sqrt(np.mean(samples * samples)))  # type: ignore[operator]
+            peak = float(np.max(np.abs(samples)))  # type: ignore[arg-type]
+        except Exception:
+            rms = 0.0
+            peak = 0.0
+    return {
+        "audio_seconds": round(audio_seconds, 3),
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+        "decode_seconds": round(decode_seconds, 3),
+        "decode_calls": decode_calls,
+        "dropped_audio_chunks": 0,
+        "last_rms": round(rms, 5),
+        "peak_rms": round(peak, 5),
+        "real_time_factor": round(decode_seconds / audio_seconds, 3)
+        if audio_seconds > 0
+        else 0.0,
+    }
 
 
 def read_wav_mono_float32(path: Path):

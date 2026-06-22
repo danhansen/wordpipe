@@ -35,6 +35,7 @@ def _cmd_asr_worker(args: argparse.Namespace) -> int:
         input_device=parse_audio_device(args.input_device),
         partial_interval_seconds=args.partial_interval_seconds,
         audio_chunk_seconds=args.audio_chunk_seconds,
+        queue_seconds=args.queue_seconds,
         stats_interval_seconds=args.stats_interval_seconds,
         endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence,
         endpoint_rule2_min_trailing_silence=args.endpoint_rule2_min_trailing_silence,
@@ -80,6 +81,7 @@ def _cmd_listen_test(args: argparse.Namespace) -> int:
         input_device=parse_audio_device(args.input_device),
         partial_interval_seconds=args.partial_interval_seconds,
         audio_chunk_seconds=args.audio_chunk_seconds,
+        queue_seconds=args.queue_seconds,
         stats_interval_seconds=args.stats_interval_seconds,
         endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence,
         endpoint_rule2_min_trailing_silence=args.endpoint_rule2_min_trailing_silence,
@@ -88,6 +90,36 @@ def _cmd_listen_test(args: argparse.Namespace) -> int:
         json_output=args.json,
     )
     return run_listen_test(config)
+
+
+def _cmd_stream_file_test(args: argparse.Namespace) -> int:
+    from .asr_worker import AsrWorkerConfig, stream_wav_file_events
+    from .listen_test import _format_event
+
+    config = AsrWorkerConfig(
+        model_dir=Path(args.model_dir),
+        provider=args.provider,
+        num_threads=args.num_threads,
+        sample_rate=args.sample_rate,
+        partial_interval_seconds=args.partial_interval_seconds,
+        audio_chunk_seconds=args.audio_chunk_seconds,
+        queue_seconds=args.queue_seconds,
+        stats_interval_seconds=args.stats_interval_seconds,
+        endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence,
+        endpoint_rule2_min_trailing_silence=args.endpoint_rule2_min_trailing_silence,
+        endpoint_rule3_min_utterance_length=args.endpoint_rule3_min_utterance_length,
+    )
+    for item in stream_wav_file_events(
+        config,
+        Path(args.wav),
+        chunk_seconds=args.chunk_seconds,
+        reset_on_endpoint=args.reset_on_endpoint,
+    ):
+        if args.json:
+            print(json.dumps(item, sort_keys=True), flush=True)
+        else:
+            print(_format_event(item), flush=True)
+    return 0
 
 
 def _cmd_audio_devices(_args: argparse.Namespace) -> int:
@@ -172,6 +204,9 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
         audio_chunk_seconds=args.audio_chunk_seconds
         if args.audio_chunk_seconds is not None
         else file_config.audio_chunk_seconds,
+        queue_seconds=args.queue_seconds
+        if args.queue_seconds is not None
+        else file_config.queue_seconds,
         stats_interval_seconds=args.stats_interval_seconds
         if args.stats_interval_seconds is not None
         else file_config.stats_interval_seconds,
@@ -210,6 +245,9 @@ def _cmd_hotkey_daemon(args: argparse.Namespace) -> int:
         audio_chunk_seconds=args.audio_chunk_seconds
         if args.audio_chunk_seconds is not None
         else file_config.audio_chunk_seconds,
+        queue_seconds=args.queue_seconds
+        if args.queue_seconds is not None
+        else file_config.queue_seconds,
         stats_interval_seconds=args.stats_interval_seconds
         if args.stats_interval_seconds is not None
         else file_config.stats_interval_seconds,
@@ -251,6 +289,12 @@ def _add_asr_tuning_args(parser: argparse.ArgumentParser, *, worker_defaults: bo
         type=float,
         default=0.03 if worker_defaults else None,
         help="Microphone audio chunk size sent to the streaming recognizer.",
+    )
+    parser.add_argument(
+        "--queue-seconds",
+        type=float,
+        default=10.0 if worker_defaults else None,
+        help="Maximum queued microphone audio before chunks are dropped.",
     )
     parser.add_argument(
         "--stats-interval-seconds",
@@ -366,6 +410,25 @@ def build_parser() -> argparse.ArgumentParser:
     listen_test.add_argument("--json", action="store_true", help="Print raw JSON events.")
     _add_asr_tuning_args(listen_test, worker_defaults=True)
     listen_test.set_defaults(func=_cmd_listen_test)
+
+    stream_file_test = subparsers.add_parser(
+        "stream-file-test",
+        help="Feed a WAV through the streaming recognizer and print partial/stats events.",
+    )
+    stream_file_test.add_argument("--model-dir", required=True)
+    stream_file_test.add_argument("--wav", required=True)
+    stream_file_test.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
+    stream_file_test.add_argument("--num-threads", type=int, default=2)
+    stream_file_test.add_argument("--sample-rate", type=int, default=16000)
+    stream_file_test.add_argument("--chunk-seconds", type=float, default=0.1)
+    stream_file_test.add_argument(
+        "--reset-on-endpoint",
+        action="store_true",
+        help="Reset the recognizer whenever endpoint detection fires.",
+    )
+    stream_file_test.add_argument("--json", action="store_true", help="Print raw JSON events.")
+    _add_asr_tuning_args(stream_file_test, worker_defaults=True)
+    stream_file_test.set_defaults(func=_cmd_stream_file_test)
 
     audio_devices = subparsers.add_parser(
         "audio-devices",
