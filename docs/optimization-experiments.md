@@ -495,3 +495,34 @@ Thread observations:
 - Three and four threads are much worse than two threads, likely because this
   workload does not benefit from SMT oversubscription on the i5-3320M and pays
   extra scheduling/cache overhead.
+
+## 2026-06-22: Live Audio Buffer Reuse
+
+Sayboard's native bridge work emphasized avoiding avoidable allocation in the
+hot recognition path. Wordpipe's CPAL live-input path still allocated a fresh
+`Vec<f32>` in every audio callback before sending samples to the recognition
+thread.
+
+Change:
+
+- Added a bounded audio buffer pool alongside the bounded audio queue in
+  `wordpipe-parakeet-worker`.
+- The CPAL callback now reuses a returned `Vec<f32>` when one is available,
+  reserving only if the callback delivers a larger buffer than previously seen.
+- The recognition thread recycles each buffer after extending the pending audio
+  accumulator.
+
+Validation:
+
+```sh
+cargo fmt
+cargo check -p wordpipe-parakeet-worker
+```
+
+Notes:
+
+- This targets live dictation stability and callback overhead, not long-WAV
+  benchmark RTF. The benchmark path reads from a file and already reuses its
+  chunk buffer.
+- The bounded queue/drop behavior is unchanged: if the recognition thread falls
+  behind, incoming callback buffers are still dropped and counted.

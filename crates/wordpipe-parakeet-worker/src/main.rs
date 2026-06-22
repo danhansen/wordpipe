@@ -171,11 +171,13 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
 
     let queue_chunks = ((args.queue_seconds * 100.0).ceil() as usize).max(64);
     let (audio_tx, audio_rx) = bounded::<Vec<f32>>(queue_chunks);
+    let (audio_pool_tx, audio_pool_rx) = bounded::<Vec<f32>>(queue_chunks + 4);
     let dropped_chunks = Arc::new(AtomicUsize::new(0));
     let stream = build_input_stream(
         &device,
         &stream_config,
         audio_tx,
+        audio_pool_rx,
         Arc::clone(&dropped_chunks),
     )?;
     stream.play().context("failed to start input stream")?;
@@ -211,6 +213,7 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
                 last_rms = rms;
                 peak_rms = peak_rms.max(peak);
                 pending.extend_from_slice(&samples);
+                recycle_audio_buffer(samples, &audio_pool_tx);
 
                 while pending.len() >= args.chunk_samples {
                     chunk_buf.copy_from_slice(&pending[..args.chunk_samples]);
@@ -437,6 +440,7 @@ fn build_input_stream(
     device: &cpal::Device,
     config: &StreamConfig,
     audio_tx: Sender<Vec<f32>>,
+    audio_pool_rx: Receiver<Vec<f32>>,
     dropped_chunks: Arc<AtomicUsize>,
 ) -> Result<cpal::Stream> {
     let err_fn = |err| eprintln!("audio input stream error: {err}");
@@ -455,7 +459,11 @@ fn build_input_stream(
         SampleFormat::F32 => device
             .build_input_stream(
                 config,
-                move |data: &[f32], _| send_audio(data.to_vec(), &audio_tx, &dropped_chunks),
+                move |data: &[f32], _| {
+                    let mut samples = take_audio_buffer(&audio_pool_rx, data.len());
+                    samples.extend_from_slice(data);
+                    send_audio(samples, &audio_tx, &dropped_chunks);
+                },
                 err_fn,
                 None,
             )
@@ -469,7 +477,8 @@ fn build_input_stream(
             .build_input_stream(
                 config,
                 move |data: &[i16], _| {
-                    let samples = data.iter().map(|sample| *sample as f32 / 32768.0).collect();
+                    let mut samples = take_audio_buffer(&audio_pool_rx, data.len());
+                    samples.extend(data.iter().map(|sample| *sample as f32 / 32768.0));
                     send_audio(samples, &audio_tx, &dropped_chunks);
                 },
                 err_fn,
@@ -485,10 +494,11 @@ fn build_input_stream(
             .build_input_stream(
                 config,
                 move |data: &[u16], _| {
-                    let samples = data
-                        .iter()
-                        .map(|sample| (*sample as f32 - 32768.0) / 32768.0)
-                        .collect();
+                    let mut samples = take_audio_buffer(&audio_pool_rx, data.len());
+                    samples.extend(
+                        data.iter()
+                            .map(|sample| (*sample as f32 - 32768.0) / 32768.0),
+                    );
                     send_audio(samples, &audio_tx, &dropped_chunks);
                 },
                 err_fn,
@@ -544,6 +554,22 @@ fn send_audio(samples: Vec<f32>, audio_tx: &Sender<Vec<f32>>, dropped_chunks: &A
     if audio_tx.try_send(samples).is_err() {
         dropped_chunks.fetch_add(1, Ordering::Relaxed);
     }
+}
+
+fn take_audio_buffer(audio_pool_rx: &Receiver<Vec<f32>>, requested_len: usize) -> Vec<f32> {
+    let mut samples = audio_pool_rx
+        .try_recv()
+        .unwrap_or_else(|_| Vec::with_capacity(requested_len));
+    samples.clear();
+    if samples.capacity() < requested_len {
+        samples.reserve(requested_len - samples.capacity());
+    }
+    samples
+}
+
+fn recycle_audio_buffer(mut samples: Vec<f32>, audio_pool_tx: &Sender<Vec<f32>>) {
+    samples.clear();
+    let _ = audio_pool_tx.try_send(samples);
 }
 
 fn audio_level(samples: &[f32]) -> (f32, f32) {
