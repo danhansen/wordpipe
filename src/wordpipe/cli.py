@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 
+from .config import DEFAULT_CONFIG, WordpipeConfig, load_config
 from .probe import ProbeResult, run_probe
 
 
@@ -30,7 +31,6 @@ def _cmd_asr_worker(args: argparse.Namespace) -> int:
         provider=args.provider,
         num_threads=args.num_threads,
         sample_rate=args.sample_rate,
-        spoken_punctuation=not args.no_spoken_punctuation,
     )
     return run_stdio_worker(config)
 
@@ -51,39 +51,60 @@ def _cmd_type_text(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_cli_config(args: argparse.Namespace) -> WordpipeConfig:
+    path = Path(args.config).expanduser() if getattr(args, "config", None) else None
+    return load_config(path)
+
+
+def _resolve_model_dir(args: argparse.Namespace, config: WordpipeConfig) -> Path:
+    raw = getattr(args, "model_dir", None)
+    model_dir = Path(raw).expanduser() if raw else config.model_dir
+    if model_dir is None:
+        raise SystemExit("--model-dir is required when config.toml does not set model_dir")
+    return model_dir
+
+
 def _cmd_daemon(args: argparse.Namespace) -> int:
     from .daemon import DaemonConfig, run_daemon
     from .transcript import make_transcript_sink
 
+    file_config = _load_cli_config(args)
     config = DaemonConfig(
-        model_dir=Path(args.model_dir),
-        dry_run_insertion=args.dry_run_insertion,
-        provider=args.provider,
-        num_threads=args.num_threads,
-        sample_rate=args.sample_rate,
-        spoken_punctuation=not args.no_spoken_punctuation,
+        model_dir=_resolve_model_dir(args, file_config),
+        dry_run_insertion=args.dry_run_insertion or file_config.dry_run_insertion,
+        provider=args.provider or file_config.provider,
+        num_threads=args.num_threads if args.num_threads is not None else file_config.num_threads,
+        sample_rate=args.sample_rate if args.sample_rate is not None else file_config.sample_rate,
+        spoken_punctuation=file_config.spoken_punctuation and not args.no_spoken_punctuation,
     )
-    return run_daemon(config, make_transcript_sink(args.overlay))
+    return run_daemon(config, make_transcript_sink(args.overlay or file_config.overlay))
 
 
 def _cmd_hotkey_daemon(args: argparse.Namespace) -> int:
     from .daemon import DaemonConfig, run_hotkey_daemon
     from .transcript import make_transcript_sink
 
+    file_config = _load_cli_config(args)
     config = DaemonConfig(
-        model_dir=Path(args.model_dir),
-        dry_run_insertion=args.dry_run_insertion,
-        provider=args.provider,
-        num_threads=args.num_threads,
-        sample_rate=args.sample_rate,
+        model_dir=_resolve_model_dir(args, file_config),
+        dry_run_insertion=args.dry_run_insertion or file_config.dry_run_insertion,
+        provider=args.provider or file_config.provider,
+        num_threads=args.num_threads if args.num_threads is not None else file_config.num_threads,
+        sample_rate=args.sample_rate if args.sample_rate is not None else file_config.sample_rate,
+        spoken_punctuation=file_config.spoken_punctuation and not args.no_spoken_punctuation,
     )
     return run_hotkey_daemon(
         config,
-        mode=args.mode,
-        shortcut=args.shortcut,
+        mode=args.mode or file_config.mode,
+        shortcut=args.shortcut or file_config.shortcut,
         manual_hotkey=args.manual_hotkey,
-        transcript=make_transcript_sink(args.overlay),
+        transcript=make_transcript_sink(args.overlay or file_config.overlay),
     )
+
+
+def _cmd_config_example(_args: argparse.Namespace) -> int:
+    print(DEFAULT_CONFIG, end="")
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -126,23 +147,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     type_text.set_defaults(func=_cmd_type_text)
 
+    config_example = subparsers.add_parser(
+        "config-example",
+        help="Print an example XDG config.toml.",
+    )
+    config_example.set_defaults(func=_cmd_config_example)
+
     daemon = subparsers.add_parser(
         "daemon",
         help="Run the MVP dictation loop: ASR subprocess plus text insertion.",
     )
     daemon.add_argument(
         "--model-dir",
-        required=True,
         help="Path to sherpa-onnx Nemotron int8 streaming model directory.",
     )
+    daemon.add_argument("--config", help="Path to config.toml.")
     daemon.add_argument(
         "--dry-run-insertion",
         action="store_true",
         help="Print keyboard events instead of opening a portal keyboard session.",
     )
-    daemon.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
-    daemon.add_argument("--num-threads", type=int, default=2)
-    daemon.add_argument("--sample-rate", type=int, default=16000)
+    daemon.add_argument("--provider", help="ONNX Runtime provider.")
+    daemon.add_argument("--num-threads", type=int)
+    daemon.add_argument("--sample-rate", type=int)
     daemon.add_argument(
         "--no-spoken-punctuation",
         action="store_true",
@@ -151,7 +178,6 @@ def build_parser() -> argparse.ArgumentParser:
     daemon.add_argument(
         "--overlay",
         choices=("stderr", "gtk"),
-        default="stderr",
         help="Where partial transcript/status text is shown.",
     )
     daemon.set_defaults(func=_cmd_daemon)
@@ -162,18 +188,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     hotkey_daemon.add_argument(
         "--model-dir",
-        required=True,
         help="Path to sherpa-onnx Nemotron int8 streaming model directory.",
     )
+    hotkey_daemon.add_argument("--config", help="Path to config.toml.")
     hotkey_daemon.add_argument(
         "--mode",
         choices=("hold", "toggle"),
-        default="hold",
         help="Shortcut behavior. Hold starts on activation and stops on deactivation.",
     )
     hotkey_daemon.add_argument(
         "--shortcut",
-        default="CTRL+ALT+space",
         help="Preferred GlobalShortcuts trigger string.",
     )
     hotkey_daemon.add_argument(
@@ -186,9 +210,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print keyboard events instead of opening a portal keyboard session.",
     )
-    hotkey_daemon.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
-    hotkey_daemon.add_argument("--num-threads", type=int, default=2)
-    hotkey_daemon.add_argument("--sample-rate", type=int, default=16000)
+    hotkey_daemon.add_argument("--provider", help="ONNX Runtime provider.")
+    hotkey_daemon.add_argument("--num-threads", type=int)
+    hotkey_daemon.add_argument("--sample-rate", type=int)
     hotkey_daemon.add_argument(
         "--no-spoken-punctuation",
         action="store_true",
@@ -197,7 +221,6 @@ def build_parser() -> argparse.ArgumentParser:
     hotkey_daemon.add_argument(
         "--overlay",
         choices=("stderr", "gtk"),
-        default="stderr",
         help="Where partial transcript/status text is shown.",
     )
     hotkey_daemon.set_defaults(func=_cmd_hotkey_daemon)

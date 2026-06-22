@@ -54,6 +54,13 @@ Dry-run text insertion:
 PYTHONPATH=src python3 -m wordpipe type-text --dry-run "hello world"
 ```
 
+Create a config file:
+
+```sh
+mkdir -p ~/.config/wordpipe
+PYTHONPATH=src python3 -m wordpipe config-example > ~/.config/wordpipe/config.toml
+```
+
 Run the MVP daemon:
 
 ```sh
@@ -63,6 +70,9 @@ PYTHONPATH=src python3 -m wordpipe daemon \
 
 Use `--dry-run-insertion` to exercise ASR without opening a portal keyboard
 session.
+
+When `~/.config/wordpipe/config.toml` contains `model_dir`, `daemon` and
+`hotkey-daemon` can run without `--model-dir`. CLI flags override config values.
 
 Run the hotkey-controlled daemon:
 

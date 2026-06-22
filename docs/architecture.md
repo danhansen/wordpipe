@@ -111,6 +111,13 @@ Partial text is never typed into the target app in v1.
 The current overlay backend uses libadwaita when available, with a GTK 4
 fallback. A GNOME Shell top-bar indicator remains future work.
 
+## Configuration
+
+The daemon reads `~/.config/wordpipe/config.toml` by default. Configuration
+holds model path, provider, thread count, overlay, hotkey mode, shortcut,
+spoken-punctuation behavior, and dry-run insertion. CLI flags override file
+values.
+
 ## MVP Milestones
 
 1. Runtime capability probe
