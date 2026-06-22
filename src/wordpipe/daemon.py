@@ -18,6 +18,7 @@ from .hotkeys import (
     ManualHotkeyLoop,
 )
 from .insertion import DryRunKeyboardBackend, KeyboardBackend, PortalKeyboardBackend
+from .transcript import StderrTranscriptSink, TranscriptSink
 
 
 @dataclass(frozen=True)
@@ -106,8 +107,13 @@ class AsrProcess:
 
 
 class DictationDaemon:
-    def __init__(self, config: DaemonConfig, keyboard: KeyboardBackend) -> None:
-        self._controller = DictationController(config, keyboard)
+    def __init__(
+        self,
+        config: DaemonConfig,
+        keyboard: KeyboardBackend,
+        transcript: TranscriptSink | None = None,
+    ) -> None:
+        self._controller = DictationController(config, keyboard, transcript)
 
     def run(self) -> int:
         self._controller.open()
@@ -119,9 +125,15 @@ class DictationDaemon:
 
 
 class DictationController:
-    def __init__(self, config: DaemonConfig, keyboard: KeyboardBackend) -> None:
+    def __init__(
+        self,
+        config: DaemonConfig,
+        keyboard: KeyboardBackend,
+        transcript: TranscriptSink | None = None,
+    ) -> None:
         self._config = config
         self._keyboard = keyboard
+        self._transcript = transcript if transcript is not None else StderrTranscriptSink()
         self._asr = AsrProcess(config)
         self._reader: threading.Thread | None = None
         self._done = threading.Event()
@@ -138,6 +150,7 @@ class DictationController:
     def open(self) -> None:
         if self._opened:
             return
+        self._transcript.open()
         self._keyboard.open()
         if isinstance(self._keyboard, DryRunKeyboardBackend):
             self._keyboard.events.clear()
@@ -152,7 +165,7 @@ class DictationController:
             if self._listening:
                 return
             self._listening = True
-        print("wordpipe: starting dictation", file=sys.stderr)
+        self._transcript.status("starting dictation")
         self._asr.send("start")
 
     def stop_dictation(self) -> None:
@@ -160,7 +173,7 @@ class DictationController:
             if not self._listening:
                 return
             self._listening = False
-        print("wordpipe: stopping dictation", file=sys.stderr)
+        self._transcript.status("stopping dictation")
         self._asr.send("stop")
 
     def wait(self) -> int:
@@ -172,6 +185,7 @@ class DictationController:
             self._asr.close()
         finally:
             self._keyboard.close()
+            self._transcript.close()
             with self._lock:
                 self._listening = False
             self._done.set()
@@ -181,29 +195,29 @@ class DictationController:
             for item in self._asr.events():
                 self._handle_event(item)
         except Exception as exc:  # noqa: BLE001 - daemon must surface subprocess failures.
-            print(f"wordpipe error: {type(exc).__name__}: {exc}", file=sys.stderr)
+            self._transcript.error(f"{type(exc).__name__}: {exc}")
             self._exit_code = 1
             self._done.set()
 
     def _handle_event(self, item: dict[str, object]) -> None:
         kind = item.get("event")
         if kind == "ready":
-            print("wordpipe: ASR worker ready", file=sys.stderr)
+            self._transcript.status("ASR worker ready")
         elif kind == "listening":
-            print("wordpipe: listening", file=sys.stderr)
+            self._transcript.status("listening")
         elif kind == "partial":
-            print(f"partial: {item.get('text', '')}", file=sys.stderr)
+            self._transcript.partial(str(item.get("text", "")))
         elif kind == "commit":
             text = format_committed_text(str(item.get("text", "")))
             if text:
-                print(f"commit: {text}", file=sys.stderr)
+                self._transcript.commit(text)
                 self._keyboard.insert_text(text)
                 if isinstance(self._keyboard, DryRunKeyboardBackend):
                     for rendered in self._keyboard.events:
                         print(f"key: {rendered}", file=sys.stderr)
                     self._keyboard.events.clear()
         elif kind == "error":
-            print(f"wordpipe error: {item.get('message', '')}", file=sys.stderr)
+            self._transcript.error(str(item.get("message", "")))
             self._exit_code = 1
             self._done.set()
         elif kind == "stopped":
@@ -211,10 +225,10 @@ class DictationController:
                 self._listening = False
 
 
-def run_daemon(config: DaemonConfig) -> int:
+def run_daemon(config: DaemonConfig, transcript: TranscriptSink | None = None) -> int:
     keyboard: KeyboardBackend
     keyboard = DryRunKeyboardBackend() if config.dry_run_insertion else PortalKeyboardBackend()
-    daemon = DictationDaemon(config, keyboard)
+    daemon = DictationDaemon(config, keyboard, transcript)
     return daemon.run()
 
 
@@ -223,10 +237,11 @@ def run_hotkey_daemon(
     mode: HotkeyMode,
     shortcut: str,
     manual_hotkey: bool = False,
+    transcript: TranscriptSink | None = None,
 ) -> int:
     keyboard: KeyboardBackend
     keyboard = DryRunKeyboardBackend() if config.dry_run_insertion else PortalKeyboardBackend()
-    controller = DictationController(config, keyboard)
+    controller = DictationController(config, keyboard, transcript)
     hotkey_loop: HotkeyLoop
     if manual_hotkey:
         hotkey_loop = ManualHotkeyLoop(sys.stdin, sys.stderr)

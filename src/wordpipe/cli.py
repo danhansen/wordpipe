@@ -52,6 +52,7 @@ def _cmd_type_text(args: argparse.Namespace) -> int:
 
 def _cmd_daemon(args: argparse.Namespace) -> int:
     from .daemon import DaemonConfig, run_daemon
+    from .transcript import make_transcript_sink
 
     config = DaemonConfig(
         model_dir=Path(args.model_dir),
@@ -60,11 +61,12 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
         num_threads=args.num_threads,
         sample_rate=args.sample_rate,
     )
-    return run_daemon(config)
+    return run_daemon(config, make_transcript_sink(args.overlay))
 
 
 def _cmd_hotkey_daemon(args: argparse.Namespace) -> int:
     from .daemon import DaemonConfig, run_hotkey_daemon
+    from .transcript import make_transcript_sink
 
     config = DaemonConfig(
         model_dir=Path(args.model_dir),
@@ -78,6 +80,7 @@ def _cmd_hotkey_daemon(args: argparse.Namespace) -> int:
         mode=args.mode,
         shortcut=args.shortcut,
         manual_hotkey=args.manual_hotkey,
+        transcript=make_transcript_sink(args.overlay),
     )
 
 
@@ -138,6 +141,12 @@ def build_parser() -> argparse.ArgumentParser:
     daemon.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
     daemon.add_argument("--num-threads", type=int, default=2)
     daemon.add_argument("--sample-rate", type=int, default=16000)
+    daemon.add_argument(
+        "--overlay",
+        choices=("stderr", "gtk"),
+        default="stderr",
+        help="Where partial transcript/status text is shown.",
+    )
     daemon.set_defaults(func=_cmd_daemon)
 
     hotkey_daemon = subparsers.add_parser(
@@ -173,6 +182,12 @@ def build_parser() -> argparse.ArgumentParser:
     hotkey_daemon.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
     hotkey_daemon.add_argument("--num-threads", type=int, default=2)
     hotkey_daemon.add_argument("--sample-rate", type=int, default=16000)
+    hotkey_daemon.add_argument(
+        "--overlay",
+        choices=("stderr", "gtk"),
+        default="stderr",
+        help="Where partial transcript/status text is shown.",
+    )
     hotkey_daemon.set_defaults(func=_cmd_hotkey_daemon)
 
     return parser

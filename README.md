@@ -70,7 +70,8 @@ Run the hotkey-controlled daemon:
 PYTHONPATH=src python3 -m wordpipe hotkey-daemon \
   --model-dir /path/to/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8 \
   --mode hold \
-  --shortcut 'CTRL+ALT+space'
+  --shortcut 'CTRL+ALT+space' \
+  --overlay gtk
 ```
 
 For development without the GlobalShortcuts portal:
@@ -95,3 +96,6 @@ python3 -m pip install '.[asr]'
 The model directory must contain `tokens.txt` and either a single `.onnx` model
 for the Nemotron CTC path or `encoder*.onnx`, `decoder*.onnx`, and
 `joiner*.onnx` for a transducer layout.
+
+The GTK overlay prefers libadwaita (`Adw 1`) and falls back to plain GTK 4 if
+libadwaita is not available. Non-UI daemon paths do not require GTK.

@@ -108,6 +108,9 @@ Recommended initial UI:
 
 Partial text is never typed into the target app in v1.
 
+The current overlay backend uses libadwaita when available, with a GTK 4
+fallback. A GNOME Shell top-bar indicator remains future work.
+
 ## MVP Milestones
 
 1. Runtime capability probe
@@ -150,8 +153,8 @@ Partial text is never typed into the target app in v1.
    - overlay shows partials
    - endpoint commits insert text
    - stop commits non-empty partial
-   - status: CLI daemon and hotkey daemon implemented; GNOME overlay not
-     implemented
+   - status: CLI daemon, hotkey daemon, and optional Adwaita/GTK overlay
+     implemented; top-bar indicator not implemented
 
 ## Validation Matrix
 
