@@ -46,16 +46,121 @@ def read_power_metadata() -> dict[str, Any]:
     cpu0 = Path("/sys/devices/system/cpu/cpu0/cpufreq")
     battery = Path("/sys/class/power_supply/BAT0")
     ac = Path("/sys/class/power_supply/AC")
+    gnome_profile, gnome_profile_error = read_gnome_power_profile()
     return {
         "ac_online": read_text(ac / "online"),
         "battery_capacity_percent": read_text(battery / "capacity"),
         "battery_status": read_text(battery / "status"),
+        "gnome_power_profile": gnome_profile,
+        "gnome_power_profile_error": gnome_profile_error,
         "cpu0_scaling_governor": read_text(cpu0 / "scaling_governor"),
         "cpu0_scaling_cur_freq_khz": read_text(cpu0 / "scaling_cur_freq"),
         "cpu0_scaling_max_freq_khz": read_text(cpu0 / "scaling_max_freq"),
         "intel_pstate_no_turbo": read_text(Path("/sys/devices/system/cpu/intel_pstate/no_turbo")),
         "platform_profile": read_text(Path("/sys/firmware/acpi/platform_profile")),
     }
+
+
+def read_gnome_power_profile() -> tuple[str | None, str | None]:
+    try:
+        proc = subprocess.run(
+            [
+                "busctl",
+                "--system",
+                "get-property",
+                "net.hadess.PowerProfiles",
+                "/net/hadess/PowerProfiles",
+                "net.hadess.PowerProfiles",
+                "ActiveProfile",
+            ],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=2.0,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, str(exc)
+    output = proc.stdout.strip()
+    if output.startswith('s "') and output.endswith('"'):
+        return output[3:-1], None
+    if output.startswith("s "):
+        return output[2:].strip().strip('"'), None
+    return output or None, None
+
+
+def set_gnome_power_profile(profile: str) -> None:
+    subprocess.run(
+        [
+            "busctl",
+            "--system",
+            "set-property",
+            "net.hadess.PowerProfiles",
+            "/net/hadess/PowerProfiles",
+            "net.hadess.PowerProfiles",
+            "ActiveProfile",
+            "s",
+            profile,
+        ],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=5.0,
+    )
+
+
+def hold_gnome_power_profile(profile: str) -> tuple[int | None, str | None]:
+    command = [
+        "busctl",
+        "--system",
+        "call",
+        "net.hadess.PowerProfiles",
+        "/net/hadess/PowerProfiles",
+        "net.hadess.PowerProfiles",
+        "HoldProfile",
+        "sss",
+        profile,
+        "Wordpipe benchmark",
+        "wordpipe",
+    ]
+    try:
+        proc = subprocess.run(
+            command,
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=5.0,
+        )
+    except subprocess.CalledProcessError as exc:
+        message = (exc.stderr or exc.stdout or str(exc)).strip()
+        return None, message
+    output = proc.stdout.strip()
+    if not output.startswith("u "):
+        return None, f"Unexpected HoldProfile response: {output!r}"
+    return int(output[2:].strip()), None
+
+
+def release_gnome_power_profile(cookie: int) -> None:
+    subprocess.run(
+        [
+            "busctl",
+            "--system",
+            "call",
+            "net.hadess.PowerProfiles",
+            "/net/hadess/PowerProfiles",
+            "net.hadess.PowerProfiles",
+            "ReleaseProfile",
+            "u",
+            str(cookie),
+        ],
+        check=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=5.0,
+    )
 
 
 def read_meminfo() -> dict[str, int]:
@@ -97,6 +202,28 @@ def check_memory_guard(args: argparse.Namespace) -> None:
         )
 
 
+def check_power_guard(args: argparse.Namespace) -> None:
+    if not args.require_ac and not args.require_power_profile and not args.set_power_profile:
+        return
+    if args.set_power_profile:
+        set_gnome_power_profile(args.set_power_profile)
+    power = read_power_metadata()
+    if args.require_ac and power.get("ac_online") != "1":
+        raise RuntimeError(
+            "Refusing benchmark run: AC power is not online "
+            f"(ac_online={power.get('ac_online')!r}, battery={power.get('battery_capacity_percent')!r}%)."
+        )
+    expected_profile = args.require_power_profile or args.set_power_profile
+    if expected_profile:
+        profile = power.get("gnome_power_profile")
+        if profile != expected_profile:
+            raise RuntimeError(
+                f"Refusing benchmark run: GNOME power profile is {profile!r}, "
+                f"expected {expected_profile!r}. "
+                f"error={power.get('gnome_power_profile_error')!r}"
+            )
+
+
 def child_resource_limiter(args: argparse.Namespace):
     if args.child_memory_limit_gb <= 0:
         return None
@@ -112,6 +239,7 @@ def child_resource_limiter(args: argparse.Namespace):
 
 
 def run_once(args: argparse.Namespace, label: str, model_dir: Path, run_index: int) -> dict[str, Any]:
+    check_power_guard(args)
     check_memory_guard(args)
     env = os.environ.copy()
     if "ORT_DYLIB_PATH" not in env and args.ort_dylib.exists():
@@ -206,6 +334,13 @@ def make_output(
             "graph_optimization": args.graph_optimization,
             "min_mem_available_gb": args.min_mem_available_gb,
             "child_memory_limit_gb": args.child_memory_limit_gb,
+            "require_ac": args.require_ac,
+            "require_power_profile": args.require_power_profile,
+            "set_power_profile": args.set_power_profile,
+            "restore_power_profile": args.restore_power_profile,
+            "previous_gnome_power_profile": args.previous_gnome_power_profile,
+            "power_profile_hold_cookie": args.power_profile_hold_cookie,
+            "power_profile_hold_error": args.power_profile_hold_error,
         },
         "power_at_start": power_at_start,
         "power_at_end": read_power_metadata(),
@@ -269,6 +404,31 @@ def parse_args() -> argparse.Namespace:
         default=0.0,
         help="Set RLIMIT_AS for each worker subprocess. 0 disables the limit.",
     )
+    parser.add_argument(
+        "--require-ac",
+        action="store_true",
+        help="Refuse to start each run unless /sys/class/power_supply/AC/online is 1.",
+    )
+    parser.add_argument(
+        "--require-power-profile",
+        help="Refuse to start each run unless GNOME power-profiles-daemon ActiveProfile matches this value.",
+    )
+    parser.add_argument(
+        "--set-power-profile",
+        help="Set GNOME power-profiles-daemon ActiveProfile for the benchmark; hold it when the daemon supports that profile.",
+    )
+    parser.add_argument(
+        "--no-restore-power-profile",
+        dest="restore_power_profile",
+        action="store_false",
+        help="Leave --set-power-profile active after the benchmark instead of restoring the previous profile.",
+    )
+    parser.set_defaults(
+        restore_power_profile=True,
+        previous_gnome_power_profile=None,
+        power_profile_hold_cookie=None,
+        power_profile_hold_error=None,
+    )
     return parser.parse_args()
 
 
@@ -279,56 +439,77 @@ def main() -> None:
     if not args.worker.exists():
         raise SystemExit(f"Missing worker: {args.worker}")
 
-    power_at_start = read_power_metadata()
-    memory_at_start = read_memory_metadata()
-    results = []
-    summaries = []
-    for label, model_dir in map(parse_model_arg, args.model):
-        if not model_dir.exists():
-            raise SystemExit(f"Missing model dir for {label}: {model_dir}")
-        rows = []
-        for run_index in range(1, args.runs + 1):
-            print(f"[bench] {label} run {run_index}/{args.runs}", flush=True)
-            row = run_once(args, label, model_dir, run_index)
-            rows.append(row)
-            metrics = row["metrics"]
-            print(
-                f"[bench] {label} run {run_index}: "
-                f"rtf={metrics.get('real_time_factor')} "
-                f"real_audio_rtf={metrics.get('real_audio_real_time_factor')} "
-                f"decode={metrics.get('decode_seconds')} wall={row['wall_seconds']:.3f}",
-                flush=True,
-            )
+    if args.set_power_profile:
+        profile, error = read_gnome_power_profile()
+        if error:
+            raise SystemExit(f"Could not read current GNOME power profile: {error}")
+        args.previous_gnome_power_profile = profile
+        args.power_profile_hold_cookie, args.power_profile_hold_error = hold_gnome_power_profile(
+            args.set_power_profile
+        )
+        set_gnome_power_profile(args.set_power_profile)
+
+    try:
+        power_at_start = read_power_metadata()
+        memory_at_start = read_memory_metadata()
+        results = []
+        summaries = []
+        for label, model_dir in map(parse_model_arg, args.model):
+            if not model_dir.exists():
+                raise SystemExit(f"Missing model dir for {label}: {model_dir}")
+            rows = []
+            for run_index in range(1, args.runs + 1):
+                print(f"[bench] {label} run {run_index}/{args.runs}", flush=True)
+                row = run_once(args, label, model_dir, run_index)
+                rows.append(row)
+                metrics = row["metrics"]
+                print(
+                    f"[bench] {label} run {run_index}: "
+                    f"rtf={metrics.get('real_time_factor')} "
+                    f"real_audio_rtf={metrics.get('real_audio_real_time_factor')} "
+                    f"decode={metrics.get('decode_seconds')} wall={row['wall_seconds']:.3f}",
+                    flush=True,
+                )
+                write_output(
+                    args,
+                    power_at_start=power_at_start,
+                    memory_at_start=memory_at_start,
+                    summaries=summaries,
+                    results=results + rows,
+                    status="partial",
+                )
+            results.extend(rows)
+            summary = summarize(label, rows)
+            summaries.append(summary)
+            print(f"[bench] {label} median {json.dumps(summary, sort_keys=True)}", flush=True)
             write_output(
                 args,
                 power_at_start=power_at_start,
                 memory_at_start=memory_at_start,
                 summaries=summaries,
-                results=results + rows,
+                results=results,
                 status="partial",
             )
-        results.extend(rows)
-        summary = summarize(label, rows)
-        summaries.append(summary)
-        print(f"[bench] {label} median {json.dumps(summary, sort_keys=True)}", flush=True)
+
         write_output(
             args,
             power_at_start=power_at_start,
             memory_at_start=memory_at_start,
             summaries=summaries,
             results=results,
-            status="partial",
+            status="complete",
         )
-
-    write_output(
-        args,
-        power_at_start=power_at_start,
-        memory_at_start=memory_at_start,
-        summaries=summaries,
-        results=results,
-        status="complete",
-    )
-    print(f"[bench] wrote {args.output}")
+        print(f"[bench] wrote {args.output}")
+    finally:
+        if args.power_profile_hold_cookie is not None:
+            release_gnome_power_profile(args.power_profile_hold_cookie)
+        if (
+            args.set_power_profile
+            and args.restore_power_profile
+            and args.previous_gnome_power_profile
+            and args.previous_gnome_power_profile != args.set_power_profile
+        ):
+            set_gnome_power_profile(args.previous_gnome_power_profile)
 
 
 if __name__ == "__main__":

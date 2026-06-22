@@ -380,3 +380,80 @@ Slice observations:
   rough WER. Even is not attractive because rough WER worsened; odd is slower.
 - Full `ffn_fp32` remains the best speed candidate. The half variants are
   fallback compromises only if the 1.7 GiB encoder is unacceptable.
+
+## 2026-06-22: Conv Dequantization Ablation
+
+Sayboard rejected conv quantization for its Parakeet EOU export. Wordpipe's
+Nemotron export still contains quantized `ConvInteger` blocks after fixed-shape
+specialization, so `scripts/dequantize_nemotron_conv_blocks.py` tests the
+analogous rewrite: replace selected dynamic-quantized conv blocks with float
+`Conv`, then serialize through ORT extended.
+
+Applicability on `build/model-variants/nemotron-c56-fixed-shape/encoder.onnx`:
+
+| Candidate family | Rewritable blocks | Encoder size |
+| --- | ---: | ---: |
+| `preconv_fp32` | 5 | 575 MiB |
+| `allconv_fp32` | 77 | 792 MiB |
+
+Build commands:
+
+```sh
+.venv/bin/python scripts/dequantize_nemotron_conv_blocks.py \
+  --source-dir build/model-variants/nemotron-c56-fixed-shape \
+  --output-dir build/model-variants/nemotron-c56-fixed-shape-preconv-fp32-ort \
+  --include /pre_encode/conv/ \
+  --ort-optimize-final extended \
+  --ort-optimize-threads 1
+
+.venv/bin/python scripts/dequantize_nemotron_conv_blocks.py \
+  --source-dir build/model-variants/nemotron-c56-fixed-shape \
+  --output-dir build/model-variants/nemotron-c56-fixed-shape-allconv-fp32-ort \
+  --ort-optimize-final extended \
+  --ort-optimize-threads 1
+```
+
+Benchmark command:
+
+```sh
+.venv/bin/python scripts/benchmark_parakeet_variant.py \
+  fixed_shape_ort=build/model-variants/nemotron-c56-fixed-shape-ort-extended \
+  preconv_fp32=build/model-variants/nemotron-c56-fixed-shape-preconv-fp32-ort \
+  allconv_fp32=build/model-variants/nemotron-c56-fixed-shape-allconv-fp32-ort \
+  --runs 3 \
+  --min-mem-available-gb 6 \
+  --child-memory-limit-gb 10 \
+  --set-power-profile balanced \
+  --output build/parakeet-variant-bench/conv-dequant-002.json
+```
+
+Settings:
+
+- WAV: `build/allocation-ablation/librispeech-long.wav`
+- Intra-op threads: `2`
+- Flush chunks: `3`
+- Runtime graph optimization flag: `all`
+- Power profile: GNOME `balanced` at benchmark start and end. AC changed from
+  offline to online during the run, but the profile stayed `balanced`.
+
+Results:
+
+| Variant | Encoder size | Median real-audio RTF | Delta vs `fixed_shape_ort` | Median decode seconds | Rough WER |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `fixed_shape_ort` | 575 MiB | 0.703 | baseline | 86.877 | 10 / 313 = 3.19% |
+| `preconv_fp32` | 575 MiB | 0.698 | +0.7% | 86.263 | 12 / 313 = 3.83% |
+| `allconv_fp32` | 792 MiB | 0.637 | +9.4% | 78.753 | 12 / 313 = 3.83% |
+
+Conv observations:
+
+- Dequantizing only the five pre-encoder conv blocks is essentially runtime
+  parity and worsens rough WER, so it is not attractive.
+- Dequantizing all conv blocks is a real speed win on this benchmark, but it
+  also worsens rough WER and previously changed the short smoke sample from
+  "gold" to "code". Treat it as rejected unless a larger WER run shows that the
+  regression is sample noise.
+- The benchmark harness now records GNOME power-profiles-daemon state and can
+  set a profile with `--set-power-profile`, which makes future runs more
+  comparable than AC status alone. This daemon rejects `HoldProfile` for
+  `balanced`, so the harness records that and falls back to set-and-verify for
+  balanced-profile runs.
