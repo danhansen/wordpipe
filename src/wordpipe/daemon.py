@@ -46,12 +46,16 @@ def _resolve_parakeet_worker(configured_path: Path | None = None) -> Path | str:
 
 def _default_ort_dylib_path() -> Path | None:
     repo_root = Path(__file__).resolve().parents[2]
-    matches = sorted(
-        (repo_root / ".venv").glob(
-            "lib/python*/site-packages/sherpa_onnx/lib/libonnxruntime.so"
-        )
+    patterns = (
+        ".venv/lib/python*/site-packages/onnxruntime/capi/libonnxruntime.so*",
+        ".venv-nemo-export/lib/python*/site-packages/onnxruntime/capi/libonnxruntime.so*",
+        ".venv/lib/python*/site-packages/sherpa_onnx/lib/libonnxruntime.so*",
     )
-    return matches[0] if matches else None
+    for pattern in patterns:
+        matches = sorted(repo_root.glob(pattern))
+        if matches:
+            return matches[0]
+    return None
 
 
 def parakeet_worker_env(base: dict[str, str] | None = None) -> dict[str, str]:

@@ -36,7 +36,7 @@ struct Args {
     flush_chunks: usize,
     #[arg(long)]
     wav: Option<PathBuf>,
-    #[arg(long, value_enum, default_value_t = CliGraphOptimization::Level3)]
+    #[arg(long, value_enum, default_value_t = CliGraphOptimization::All)]
     graph_optimization: CliGraphOptimization,
 }
 
@@ -188,6 +188,8 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
     let started = Instant::now();
     let mut last_stats = Instant::now();
     let mut pending = Vec::<f32>::with_capacity(args.chunk_samples * 2);
+    let mut chunk_buf = vec![0.0f32; args.chunk_samples];
+    let silence = vec![0.0f32; args.chunk_samples];
     let mut transcript = String::new();
     let mut accepted_samples = 0usize;
     let mut processed_samples = 0usize;
@@ -211,9 +213,10 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
                 pending.extend_from_slice(&samples);
 
                 while pending.len() >= args.chunk_samples {
-                    let chunk: Vec<f32> = pending.drain(..args.chunk_samples).collect();
-                    processed_samples += chunk.len();
-                    let decoded = decode_chunk(&mut model, &chunk, &mut decode_seconds, &mut decode_calls)?;
+                    chunk_buf.copy_from_slice(&pending[..args.chunk_samples]);
+                    pending.drain(..args.chunk_samples);
+                    processed_samples += chunk_buf.len();
+                    let decoded = decode_chunk(&mut model, &chunk_buf, &mut decode_seconds, &mut decode_calls)?;
                     if !decoded.is_empty() {
                         transcript.push_str(&decoded);
                         emitter.emit(json!({
@@ -238,9 +241,15 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
     }
 
     if !pending.is_empty() {
-        pending.resize(args.chunk_samples, 0.0);
-        processed_samples += pending.len();
-        let decoded = decode_chunk(&mut model, &pending, &mut decode_seconds, &mut decode_calls)?;
+        chunk_buf.fill(0.0);
+        chunk_buf[..pending.len()].copy_from_slice(&pending);
+        processed_samples += chunk_buf.len();
+        let decoded = decode_chunk(
+            &mut model,
+            &chunk_buf,
+            &mut decode_seconds,
+            &mut decode_calls,
+        )?;
         if !decoded.is_empty() {
             transcript.push_str(&decoded);
             emitter.emit(json!({
@@ -252,7 +261,6 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
     }
 
     for _ in 0..args.flush_chunks {
-        let silence = vec![0.0; args.chunk_samples];
         processed_samples += silence.len();
         let decoded = decode_chunk(&mut model, &silence, &mut decode_seconds, &mut decode_calls)?;
         if !decoded.is_empty() {
@@ -294,29 +302,29 @@ fn run_wav_file(args: Arc<Args>, emitter: Arc<JsonEmitter>) -> Result<()> {
     let mut peak_rms = 0.0f32;
     let mut accepted_samples = 0usize;
     let mut processed_samples = 0usize;
+    let mut chunk_buf = vec![0.0f32; args.chunk_samples];
+    let silence = vec![0.0f32; args.chunk_samples];
 
     for chunk in samples.chunks(args.chunk_samples) {
         let chunk_index = decode_calls;
-        let mut chunk_vec = chunk.to_vec();
-        if chunk_vec.len() < args.chunk_samples {
-            chunk_vec.resize(args.chunk_samples, 0.0);
-        }
+        chunk_buf.fill(0.0);
+        chunk_buf[..chunk.len()].copy_from_slice(chunk);
         accepted_samples += chunk.len();
-        processed_samples += chunk_vec.len();
+        processed_samples += chunk_buf.len();
         let (last_rms, peak) = audio_level(chunk);
         peak_rms = peak_rms.max(peak);
         emitter.emit(json!({
             "event": "decoding_chunk",
-            "data": {
-                "chunk_index": chunk_index,
-                "samples": chunk.len(),
-                "processed_samples": chunk_vec.len(),
-                "synthetic_samples": chunk_vec.len().saturating_sub(chunk.len()),
-            },
+                "data": {
+                    "chunk_index": chunk_index,
+                    "samples": chunk.len(),
+                    "processed_samples": chunk_buf.len(),
+                    "synthetic_samples": chunk_buf.len().saturating_sub(chunk.len()),
+                },
         }));
         let decoded = decode_chunk(
             &mut model,
-            &chunk_vec,
+            &chunk_buf,
             &mut decode_seconds,
             &mut decode_calls,
         )?;
@@ -347,7 +355,6 @@ fn run_wav_file(args: Arc<Args>, emitter: Arc<JsonEmitter>) -> Result<()> {
                 "synthetic_samples": args.chunk_samples,
             },
         }));
-        let silence = vec![0.0; args.chunk_samples];
         processed_samples += silence.len();
         let decoded = decode_chunk(&mut model, &silence, &mut decode_seconds, &mut decode_calls)?;
         if !decoded.is_empty() {

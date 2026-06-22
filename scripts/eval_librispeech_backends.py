@@ -221,6 +221,7 @@ def final_event(events: list[dict[str, Any]]) -> dict[str, Any]:
 
 def default_ort_dylib() -> Path | None:
     for pattern in (
+        ".venv/lib/python*/site-packages/onnxruntime/capi/libonnxruntime.so*",
         ".venv-nemo-export/lib/python*/site-packages/onnxruntime/capi/libonnxruntime.so*",
         ".venv/lib/python*/site-packages/sherpa_onnx/lib/libonnxruntime.so*",
     ):

@@ -97,6 +97,20 @@ stable partial text even when it has not changed. Use Ctrl+C to stop.
 The default Parakeet runtime takes raw continuous mic audio into ASR and commits
 the accumulated transcript when dictation stops. The legacy sherpa runtime can
 still be selected with `--asr-runtime sherpa`.
+The Rust worker defaults to ONNX Runtime's `all` graph optimization level; use
+`--graph-optimization` only for ablations or debugging.
+
+If you run `target/release/wordpipe-parakeet-worker` directly, set
+`ORT_DYLIB_PATH` to the ONNX Runtime library from the local Python wheel. The
+`ort` crate's default runtime can hang while loading this encoder on the current
+machine:
+
+```sh
+ORT_DYLIB_PATH="$PWD/.venv/lib/python3.14/site-packages/onnxruntime/capi/libonnxruntime.so.1.27.0" \
+  target/release/wordpipe-parakeet-worker \
+  --model-dir /path/to/parakeet-nemotron-streaming-model \
+  --wav /path/to/test.wav
+```
 
 List input devices:
 
@@ -240,9 +254,10 @@ models/nemotron-speech-streaming-en-0.6b-int8/
 ```
 
 On the current Ivy Bridge CPU, the Rust worker uses dynamic ONNX Runtime
-loading so it can reuse the non-AVX2 `libonnxruntime.so` bundled with
-`sherpa_onnx`. `scripts/wordpipe-dev`, `listen-test`, and daemon launch paths
-set `ORT_DYLIB_PATH` automatically when that library is present in `.venv`.
+loading. `scripts/wordpipe-dev`, `listen-test`, and daemon launch paths set
+`ORT_DYLIB_PATH` automatically when a local `onnxruntime` or `sherpa_onnx`
+library is present in `.venv`; the `onnxruntime` wheel library is preferred
+because it loads the projected-cache Nemotron encoder reliably here.
 
 ## Live Validation
 
