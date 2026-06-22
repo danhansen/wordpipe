@@ -6,11 +6,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, StreamConfig};
 use crossbeam_channel::{bounded, select, Receiver, Sender};
-use parakeet_rs::{ExecutionConfig, Nemotron};
+use parakeet_rs::{ExecutionConfig, GraphOptimization, Nemotron};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -36,6 +36,29 @@ struct Args {
     flush_chunks: usize,
     #[arg(long)]
     wav: Option<PathBuf>,
+    #[arg(long, value_enum, default_value_t = CliGraphOptimization::Level3)]
+    graph_optimization: CliGraphOptimization,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CliGraphOptimization {
+    Disable,
+    Level1,
+    Level2,
+    Level3,
+    All,
+}
+
+impl From<CliGraphOptimization> for GraphOptimization {
+    fn from(value: CliGraphOptimization) -> Self {
+        match value {
+            CliGraphOptimization::Disable => GraphOptimization::Disable,
+            CliGraphOptimization::Level1 => GraphOptimization::Level1,
+            CliGraphOptimization::Level2 => GraphOptimization::Level2,
+            CliGraphOptimization::Level3 => GraphOptimization::Level3,
+            CliGraphOptimization::All => GraphOptimization::All,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -255,8 +278,11 @@ fn run_wav_file(args: Arc<Args>, emitter: Arc<JsonEmitter>) -> Result<()> {
         .wav
         .as_ref()
         .ok_or_else(|| anyhow!("--wav is required for WAV mode"))?;
+    emitter.emit(json!({"event": "loading_wav", "data": {"path": wav_path}}));
     let samples = read_wav_mono_float32(wav_path, args.sample_rate)?;
+    emitter.emit(json!({"event": "loading_model", "data": {"model_dir": args.model_dir}}));
     let mut model = load_model(&args)?;
+    emitter.emit(json!({"event": "model_loaded"}));
     let started = Instant::now();
     let mut transcript = String::new();
     let mut decode_seconds = 0.0f64;
@@ -265,6 +291,7 @@ fn run_wav_file(args: Arc<Args>, emitter: Arc<JsonEmitter>) -> Result<()> {
     let mut accepted_samples = 0usize;
 
     for chunk in samples.chunks(args.chunk_samples) {
+        let chunk_index = decode_calls;
         let mut chunk_vec = chunk.to_vec();
         if chunk_vec.len() < args.chunk_samples {
             chunk_vec.resize(args.chunk_samples, 0.0);
@@ -272,6 +299,10 @@ fn run_wav_file(args: Arc<Args>, emitter: Arc<JsonEmitter>) -> Result<()> {
         accepted_samples += chunk.len();
         let (last_rms, peak) = audio_level(chunk);
         peak_rms = peak_rms.max(peak);
+        emitter.emit(json!({
+            "event": "decoding_chunk",
+            "data": {"chunk_index": chunk_index, "samples": chunk.len()},
+        }));
         let decoded = decode_chunk(
             &mut model,
             &chunk_vec,
@@ -295,6 +326,11 @@ fn run_wav_file(args: Arc<Args>, emitter: Arc<JsonEmitter>) -> Result<()> {
 
     let last_rms = 0.0f32;
     for _ in 0..args.flush_chunks {
+        let chunk_index = decode_calls;
+        emitter.emit(json!({
+            "event": "decoding_flush_chunk",
+            "data": {"chunk_index": chunk_index, "samples": args.chunk_samples},
+        }));
         let silence = vec![0.0; args.chunk_samples];
         let decoded = decode_chunk(&mut model, &silence, &mut decode_seconds, &mut decode_calls)?;
         if !decoded.is_empty() {
@@ -321,7 +357,8 @@ fn run_wav_file(args: Arc<Args>, emitter: Arc<JsonEmitter>) -> Result<()> {
 fn load_model(args: &Args) -> Result<Nemotron> {
     let config = ExecutionConfig::new()
         .with_intra_threads(args.num_threads)
-        .with_inter_threads(1);
+        .with_inter_threads(1)
+        .with_graph_optimization(args.graph_optimization.into());
     Nemotron::from_pretrained(args.model_dir.to_string_lossy().as_ref(), Some(config)).with_context(
         || {
             format!(
