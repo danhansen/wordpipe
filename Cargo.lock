@@ -2114,6 +2114,7 @@ dependencies = [
  "clap",
  "cpal",
  "crossbeam-channel",
+ "hound",
  "parakeet-rs",
  "serde",
  "serde_json",

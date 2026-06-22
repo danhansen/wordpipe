@@ -32,6 +32,10 @@ struct Args {
     stats_interval_seconds: f32,
     #[arg(long, default_value_t = NEMOTRON_CHUNK_SAMPLES)]
     chunk_samples: usize,
+    #[arg(long, default_value_t = 3)]
+    flush_chunks: usize,
+    #[arg(long)]
+    wav: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -67,6 +71,11 @@ struct RunningSession {
 fn main() -> Result<()> {
     let args = Arc::new(Args::parse());
     let emitter = Arc::new(JsonEmitter::new());
+
+    if args.wav.is_some() {
+        return run_wav_file(args, emitter);
+    }
+
     emitter.emit(json!({"event": "ready"}));
 
     let stdin = io::stdin();
@@ -207,7 +216,27 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
     if !pending.is_empty() {
         pending.resize(args.chunk_samples, 0.0);
         let decoded = decode_chunk(&mut model, &pending, &mut decode_seconds, &mut decode_calls)?;
-        transcript.push_str(&decoded);
+        if !decoded.is_empty() {
+            transcript.push_str(&decoded);
+            emitter.emit(json!({
+                "event": "partial",
+                "text": transcript,
+                "data": metrics(started, accepted_samples, args.sample_rate, decode_seconds, decode_calls, dropped_chunks.load(Ordering::Relaxed), last_rms, peak_rms),
+            }));
+        }
+    }
+
+    for _ in 0..args.flush_chunks {
+        let silence = vec![0.0; args.chunk_samples];
+        let decoded = decode_chunk(&mut model, &silence, &mut decode_seconds, &mut decode_calls)?;
+        if !decoded.is_empty() {
+            transcript.push_str(&decoded);
+            emitter.emit(json!({
+                "event": "partial",
+                "text": transcript,
+                "data": metrics(started, accepted_samples, args.sample_rate, decode_seconds, decode_calls, dropped_chunks.load(Ordering::Relaxed), last_rms, peak_rms),
+            }));
+        }
     }
 
     let committed = transcript.trim();
@@ -219,6 +248,74 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
         }));
     }
     drop(stream);
+    Ok(())
+}
+
+fn run_wav_file(args: Arc<Args>, emitter: Arc<JsonEmitter>) -> Result<()> {
+    let wav_path = args
+        .wav
+        .as_ref()
+        .ok_or_else(|| anyhow!("--wav is required for WAV mode"))?;
+    let samples = read_wav_mono_float32(wav_path, args.sample_rate)?;
+    let mut model = load_model(&args)?;
+    let started = Instant::now();
+    let mut transcript = String::new();
+    let mut decode_seconds = 0.0f64;
+    let mut decode_calls = 0usize;
+    let mut peak_rms = 0.0f32;
+    let mut accepted_samples = 0usize;
+
+    for chunk in samples.chunks(args.chunk_samples) {
+        let mut chunk_vec = chunk.to_vec();
+        if chunk_vec.len() < args.chunk_samples {
+            chunk_vec.resize(args.chunk_samples, 0.0);
+        }
+        accepted_samples += chunk.len();
+        let (last_rms, peak) = audio_level(chunk);
+        peak_rms = peak_rms.max(peak);
+        let decoded = decode_chunk(
+            &mut model,
+            &chunk_vec,
+            &mut decode_seconds,
+            &mut decode_calls,
+        )?;
+        if !decoded.is_empty() {
+            transcript.push_str(&decoded);
+            emitter.emit(json!({
+                "event": "partial",
+                "text": transcript,
+                "data": metrics(started, accepted_samples, args.sample_rate, decode_seconds, decode_calls, 0, last_rms, peak_rms),
+            }));
+        }
+        emitter.emit(json!({
+            "event": "stats",
+            "text": transcript,
+            "data": metrics(started, accepted_samples, args.sample_rate, decode_seconds, decode_calls, 0, last_rms, peak_rms),
+        }));
+    }
+
+    let last_rms = 0.0f32;
+    for _ in 0..args.flush_chunks {
+        let silence = vec![0.0; args.chunk_samples];
+        let decoded = decode_chunk(&mut model, &silence, &mut decode_seconds, &mut decode_calls)?;
+        if !decoded.is_empty() {
+            transcript.push_str(&decoded);
+            emitter.emit(json!({
+                "event": "partial",
+                "text": transcript,
+                "data": metrics(started, accepted_samples, args.sample_rate, decode_seconds, decode_calls, 0, last_rms, peak_rms),
+            }));
+        }
+    }
+
+    let committed = transcript.trim();
+    if !committed.is_empty() {
+        emitter.emit(json!({
+            "event": "commit",
+            "text": committed,
+            "data": metrics(started, accepted_samples, args.sample_rate, decode_seconds, decode_calls, 0, last_rms, peak_rms),
+        }));
+    }
     Ok(())
 }
 
@@ -324,6 +421,42 @@ fn build_input_stream(
             .context("failed to build u16 input stream"),
         other => Err(anyhow!("unsupported input sample format: {other:?}")),
     }
+}
+
+fn read_wav_mono_float32(path: &PathBuf, expected_sample_rate: u32) -> Result<Vec<f32>> {
+    let mut reader = hound::WavReader::open(path)
+        .with_context(|| format!("failed to open WAV file {}", path.display()))?;
+    let spec = reader.spec();
+    if spec.sample_rate != expected_sample_rate {
+        return Err(anyhow!(
+            "expected {} Hz WAV, got {} Hz",
+            expected_sample_rate,
+            spec.sample_rate
+        ));
+    }
+
+    let mut samples = match spec.sample_format {
+        hound::SampleFormat::Float => reader
+            .samples::<f32>()
+            .collect::<Result<Vec<_>, _>>()
+            .context("failed to read float WAV samples")?,
+        hound::SampleFormat::Int => match spec.bits_per_sample {
+            16 => reader
+                .samples::<i16>()
+                .map(|sample| sample.map(|sample| sample as f32 / 32768.0))
+                .collect::<Result<Vec<_>, _>>()
+                .context("failed to read i16 WAV samples")?,
+            other => return Err(anyhow!("unsupported integer WAV bit depth: {other}")),
+        },
+    };
+
+    if spec.channels > 1 {
+        samples = samples
+            .chunks(spec.channels as usize)
+            .map(|chunk| chunk.iter().sum::<f32>() / spec.channels as f32)
+            .collect();
+    }
+    Ok(samples)
 }
 
 fn send_audio(samples: Vec<f32>, audio_tx: &Sender<Vec<f32>>, dropped_chunks: &AtomicUsize) {

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -100,8 +101,53 @@ def _cmd_listen_test(args: argparse.Namespace) -> int:
 
 
 def _cmd_stream_file_test(args: argparse.Namespace) -> int:
-    from .asr_worker import AsrWorkerConfig, stream_wav_file_events
     from .listen_test import _format_event
+
+    if args.asr_runtime == "parakeet":
+        from .daemon import _resolve_parakeet_worker
+
+        command = [
+            str(
+                _resolve_parakeet_worker(
+                    Path(args.asr_worker_path).expanduser()
+                    if args.asr_worker_path
+                    else None
+                )
+            ),
+            "--model-dir",
+            str(Path(args.model_dir)),
+            "--num-threads",
+            str(args.num_threads),
+            "--sample-rate",
+            str(args.sample_rate),
+            "--stats-interval-seconds",
+            str(args.stats_interval_seconds),
+            "--chunk-samples",
+            str(max(1, int(args.sample_rate * args.chunk_seconds))),
+            "--wav",
+            str(Path(args.wav)),
+        ]
+        proc = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            item = json.loads(line)
+            if args.json:
+                print(json.dumps(item, sort_keys=True), flush=True)
+            else:
+                print(_format_event(item), flush=True)
+        _, stderr = proc.communicate()
+        if proc.returncode != 0:
+            if stderr:
+                print(stderr, file=sys.stderr, end="")
+            return proc.returncode or 1
+        return 0
+
+    from .asr_worker import AsrWorkerConfig, stream_wav_file_events
 
     config = AsrWorkerConfig(
         model_dir=Path(args.model_dir),
@@ -466,7 +512,8 @@ def build_parser() -> argparse.ArgumentParser:
     stream_file_test.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
     stream_file_test.add_argument("--num-threads", type=int, default=2)
     stream_file_test.add_argument("--sample-rate", type=int, default=16000)
-    stream_file_test.add_argument("--chunk-seconds", type=float, default=0.1)
+    _add_runtime_args(stream_file_test, default="parakeet")
+    stream_file_test.add_argument("--chunk-seconds", type=float, default=0.56)
     stream_file_test.add_argument(
         "--reset-on-endpoint",
         action="store_true",
