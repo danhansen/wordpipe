@@ -327,3 +327,56 @@ Validation observations:
   worker.
 - This moves `ffn_fp32` from "interesting" to "candidate", with model size and
   session-load behavior as the remaining tradeoffs to quantify.
+
+### FFN Slice Ablation
+
+To test whether the 1.7 GiB full-FFN artifact could be reduced, four 48-block
+FFN variants were built from the same fixed-shape source:
+
+- `ffn_early_fp32`: layers 0-11 feed-forward blocks.
+- `ffn_late_fp32`: layers 12-23 feed-forward blocks.
+- `ffn_even_fp32`: even-numbered layer feed-forward blocks.
+- `ffn_odd_fp32`: odd-numbered layer feed-forward blocks.
+
+Each slice rewrote 48 blocks, pruned 96 now-unused initializers, and produced a
+1.2 GiB encoder.
+
+Benchmark command:
+
+```sh
+.venv/bin/python scripts/benchmark_parakeet_variant.py \
+  fixed_shape_ort=build/model-variants/nemotron-c56-fixed-shape-ort-extended \
+  ffn_fp32=build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort \
+  ffn_early_fp32=build/model-variants/nemotron-c56-fixed-shape-ffn-early-fp32-ort \
+  ffn_late_fp32=build/model-variants/nemotron-c56-fixed-shape-ffn-late-fp32-ort \
+  ffn_even_fp32=build/model-variants/nemotron-c56-fixed-shape-ffn-even-fp32-ort \
+  ffn_odd_fp32=build/model-variants/nemotron-c56-fixed-shape-ffn-odd-fp32-ort \
+  --runs 3 \
+  --min-mem-available-gb 6 \
+  --child-memory-limit-gb 10 \
+  --output build/parakeet-variant-bench/ffn-slices-002.json
+```
+
+The benchmark harness now writes checkpoint JSON after each completed run, so
+long ablation batches leave `status=partial` evidence if interrupted.
+
+Results:
+
+| Variant | Encoder size | Median real-audio RTF | Delta vs `fixed_shape_ort` | Rough WER |
+| --- | ---: | ---: | ---: | ---: |
+| `fixed_shape_ort` | 575 MiB | 0.708 | baseline | 10 / 313 = 3.19% |
+| `ffn_fp32` | 1.7 GiB | 0.608 | +14.1% | 9 / 313 = 2.88% |
+| `ffn_early_fp32` | 1.2 GiB | 0.655 | +7.5% | 10 / 313 = 3.19% |
+| `ffn_late_fp32` | 1.2 GiB | 0.657 | +7.2% | 10 / 313 = 3.19% |
+| `ffn_even_fp32` | 1.2 GiB | 0.655 | +7.5% | 11 / 313 = 3.51% |
+| `ffn_odd_fp32` | 1.2 GiB | 0.676 | +4.5% | 10 / 313 = 3.19% |
+
+Slice observations:
+
+- Half-FFN dequantization gives roughly half the full-FFN speedup, not most of
+  it. The runtime benefit appears fairly proportional to the number of FFN
+  blocks moved back to FP32.
+- Early and late contiguous halves are equivalent on this benchmark and preserve
+  rough WER. Even is not attractive because rough WER worsened; odd is slower.
+- Full `ffn_fp32` remains the best speed candidate. The half variants are
+  fallback compromises only if the 1.7 GiB encoder is unacceptable.

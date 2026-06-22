@@ -187,6 +187,56 @@ def summarize(label: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def make_output(
+    args: argparse.Namespace,
+    *,
+    power_at_start: dict[str, Any],
+    memory_at_start: dict[str, Any],
+    summaries: list[dict[str, Any]],
+    results: list[dict[str, Any]],
+    status: str,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "settings": {
+            "wav": str(args.wav),
+            "runs": args.runs,
+            "num_threads": args.num_threads,
+            "flush_chunks": args.flush_chunks,
+            "graph_optimization": args.graph_optimization,
+            "min_mem_available_gb": args.min_mem_available_gb,
+            "child_memory_limit_gb": args.child_memory_limit_gb,
+        },
+        "power_at_start": power_at_start,
+        "power_at_end": read_power_metadata(),
+        "memory_at_start": memory_at_start,
+        "memory_at_end": read_memory_metadata(),
+        "summaries": summaries,
+        "runs": results,
+    }
+
+
+def write_output(
+    args: argparse.Namespace,
+    *,
+    power_at_start: dict[str, Any],
+    memory_at_start: dict[str, Any],
+    summaries: list[dict[str, Any]],
+    results: list[dict[str, Any]],
+    status: str,
+) -> None:
+    output = make_output(
+        args,
+        power_at_start=power_at_start,
+        memory_at_start=memory_at_start,
+        summaries=summaries,
+        results=results,
+        status=status,
+    )
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(json.dumps(output, indent=2), encoding="utf-8")
+
+
 def parse_model_arg(value: str) -> tuple[str, Path]:
     if "=" in value:
         label, path = value.split("=", 1)
@@ -249,30 +299,35 @@ def main() -> None:
                 f"decode={metrics.get('decode_seconds')} wall={row['wall_seconds']:.3f}",
                 flush=True,
             )
+            write_output(
+                args,
+                power_at_start=power_at_start,
+                memory_at_start=memory_at_start,
+                summaries=summaries,
+                results=results + rows,
+                status="partial",
+            )
         results.extend(rows)
         summary = summarize(label, rows)
         summaries.append(summary)
         print(f"[bench] {label} median {json.dumps(summary, sort_keys=True)}", flush=True)
+        write_output(
+            args,
+            power_at_start=power_at_start,
+            memory_at_start=memory_at_start,
+            summaries=summaries,
+            results=results,
+            status="partial",
+        )
 
-    output = {
-        "settings": {
-            "wav": str(args.wav),
-            "runs": args.runs,
-            "num_threads": args.num_threads,
-            "flush_chunks": args.flush_chunks,
-            "graph_optimization": args.graph_optimization,
-            "min_mem_available_gb": args.min_mem_available_gb,
-            "child_memory_limit_gb": args.child_memory_limit_gb,
-        },
-        "power_at_start": power_at_start,
-        "power_at_end": read_power_metadata(),
-        "memory_at_start": memory_at_start,
-        "memory_at_end": read_memory_metadata(),
-        "summaries": summaries,
-        "runs": results,
-    }
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(output, indent=2), encoding="utf-8")
+    write_output(
+        args,
+        power_at_start=power_at_start,
+        memory_at_start=memory_at_start,
+        summaries=summaries,
+        results=results,
+        status="complete",
+    )
     print(f"[bench] wrote {args.output}")
 
 
