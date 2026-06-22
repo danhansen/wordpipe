@@ -34,6 +34,22 @@ def _cmd_asr_worker(args: argparse.Namespace) -> int:
     return run_stdio_worker(config)
 
 
+def _cmd_type_text(args: argparse.Namespace) -> int:
+    from .insertion import DryRunKeyboardBackend, PortalKeyboardBackend
+
+    backend = DryRunKeyboardBackend() if args.dry_run else PortalKeyboardBackend()
+    backend.open()
+    try:
+        backend.insert_text(args.text)
+    finally:
+        backend.close()
+
+    if args.dry_run:
+        for event in backend.events:
+            print(event)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="wordpipe",
@@ -61,6 +77,18 @@ def build_parser() -> argparse.ArgumentParser:
     asr.add_argument("--num-threads", type=int, default=2)
     asr.add_argument("--sample-rate", type=int, default=16000)
     asr.set_defaults(func=_cmd_asr_worker)
+
+    type_text = subparsers.add_parser(
+        "type-text",
+        help="Insert text using the keyboard insertion backend.",
+    )
+    type_text.add_argument("text", help="Text to insert.")
+    type_text.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print generated keysyms instead of opening a portal session.",
+    )
+    type_text.set_defaults(func=_cmd_type_text)
 
     return parser
 
