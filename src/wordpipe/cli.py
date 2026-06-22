@@ -30,6 +30,7 @@ def _cmd_asr_worker(args: argparse.Namespace) -> int:
         provider=args.provider,
         num_threads=args.num_threads,
         sample_rate=args.sample_rate,
+        spoken_punctuation=not args.no_spoken_punctuation,
     )
     return run_stdio_worker(config)
 
@@ -60,6 +61,7 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
         provider=args.provider,
         num_threads=args.num_threads,
         sample_rate=args.sample_rate,
+        spoken_punctuation=not args.no_spoken_punctuation,
     )
     return run_daemon(config, make_transcript_sink(args.overlay))
 
@@ -142,6 +144,11 @@ def build_parser() -> argparse.ArgumentParser:
     daemon.add_argument("--num-threads", type=int, default=2)
     daemon.add_argument("--sample-rate", type=int, default=16000)
     daemon.add_argument(
+        "--no-spoken-punctuation",
+        action="store_true",
+        help="Insert raw ASR text instead of converting spoken punctuation commands.",
+    )
+    daemon.add_argument(
         "--overlay",
         choices=("stderr", "gtk"),
         default="stderr",
@@ -182,6 +189,11 @@ def build_parser() -> argparse.ArgumentParser:
     hotkey_daemon.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
     hotkey_daemon.add_argument("--num-threads", type=int, default=2)
     hotkey_daemon.add_argument("--sample-rate", type=int, default=16000)
+    hotkey_daemon.add_argument(
+        "--no-spoken-punctuation",
+        action="store_true",
+        help="Insert raw ASR text instead of converting spoken punctuation commands.",
+    )
     hotkey_daemon.add_argument(
         "--overlay",
         choices=("stderr", "gtk"),

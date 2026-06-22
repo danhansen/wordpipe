@@ -99,3 +99,13 @@ for the Nemotron CTC path or `encoder*.onnx`, `decoder*.onnx`, and
 
 The GTK overlay prefers libadwaita (`Adw 1`) and falls back to plain GTK 4 if
 libadwaita is not available. Non-UI daemon paths do not require GTK.
+
+Committed text converts common spoken punctuation commands by default:
+
+```text
+hello comma world period -> hello, world.
+new line -> Enter
+new paragraph -> blank line
+```
+
+Use `--no-spoken-punctuation` to insert raw ASR output.

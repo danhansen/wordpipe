@@ -172,4 +172,5 @@ fallback. A GNOME Shell top-bar indicator remains future work.
 - Whether the first GNOME integration should use portals only or include a Shell
   extension immediately.
 - Model installation: manually configured model directory or managed downloader.
-- Whether v1 supports spoken punctuation commands or inserts raw ASR output.
+- Whether spoken punctuation should remain always-on by default after live
+  testing.

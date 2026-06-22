@@ -18,6 +18,7 @@ from .hotkeys import (
     ManualHotkeyLoop,
 )
 from .insertion import DryRunKeyboardBackend, KeyboardBackend, PortalKeyboardBackend
+from .normalization import normalize_spoken_punctuation
 from .transcript import StderrTranscriptSink, TranscriptSink
 
 
@@ -28,14 +29,15 @@ class DaemonConfig:
     provider: str = "cpu"
     num_threads: int = 2
     sample_rate: int = 16000
+    spoken_punctuation: bool = True
 
 
 def format_committed_text(text: str) -> str:
-    stripped = text.strip()
+    stripped = text.strip(" \t")
     if not stripped:
         return ""
-    if stripped.endswith((".", ",", "!", "?", ";", ":", "\n")):
-        return f"{stripped} "
+    if stripped.endswith("\n"):
+        return stripped
     return f"{stripped} "
 
 
@@ -208,7 +210,10 @@ class DictationController:
         elif kind == "partial":
             self._transcript.partial(str(item.get("text", "")))
         elif kind == "commit":
-            text = format_committed_text(str(item.get("text", "")))
+            raw_text = str(item.get("text", ""))
+            if self._config.spoken_punctuation:
+                raw_text = normalize_spoken_punctuation(raw_text)
+            text = format_committed_text(raw_text)
             if text:
                 self._transcript.commit(text)
                 self._keyboard.insert_text(text)
