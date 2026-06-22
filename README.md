@@ -1,14 +1,16 @@
 # Wordpipe
 
 Wordpipe is a Wayland-only GNOME dictation app built around true streaming
-speech recognition with sherpa-onnx.
+speech recognition. The ASR runtime is pivoting to a Rust worker based on
+`parakeet-rs`; the earlier sherpa-onnx worker remains available for legacy
+diagnostics.
 
 ## Direction
 
 - GNOME-first Linux desktop integration.
 - Wayland only; no X11 tooling.
-- Streaming ASR with `sherpa-onnx`.
-- Target model: `sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8`.
+- Streaming ASR with `parakeet-rs`.
+- Target model family: Parakeet/Nemotron cache-aware streaming ASR.
 - No external VAD for the MVP.
 - Endpoint detection is disabled by default while raw continuous streaming is
   evaluated.
@@ -22,7 +24,8 @@ See [docs/architecture.md](docs/architecture.md) for the current design plan.
 The current implementation provides:
 
 - `wordpipe probe` capability checks for GNOME, portals, and Python modules.
-- `wordpipe asr-worker` newline-JSON streaming worker protocol.
+- `wordpipe-parakeet-worker` Rust newline-JSON streaming worker.
+- `wordpipe asr-worker` legacy sherpa-onnx newline-JSON worker.
 - `wordpipe type-text` keyboard insertion through the RemoteDesktop portal.
 - `wordpipe daemon` MVP loop that connects the ASR worker to text insertion.
 - `wordpipe hotkey-daemon` manual or GlobalShortcuts-controlled dictation.
@@ -43,6 +46,12 @@ Run tests:
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests
+```
+
+Build the Rust Parakeet worker:
+
+```sh
+cargo build -p wordpipe-parakeet-worker
 ```
 
 After creating `.venv`, the `scripts/wordpipe-dev` wrapper runs the local source
@@ -72,11 +81,12 @@ PYTHONPATH=src python3 -m wordpipe transcribe-file \
   --wav models/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11/test_wavs/en.wav
 ```
 
-Run live partial-only testing with RTF metrics:
+Run live partial-only testing with RTF metrics using the Rust Parakeet runtime:
 
 ```sh
+cargo build -p wordpipe-parakeet-worker
 scripts/wordpipe-dev listen-test \
-  --model-dir models/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11
+  --model-dir /path/to/parakeet-nemotron-streaming-model
 ```
 
 This opens the microphone and prints `partial` and `commit` events without
@@ -84,9 +94,9 @@ inserting text into any app. It also prints periodic `stats` lines with RTF,
 audio level, and dropped-chunk counts. When the recognizer has a current
 hypothesis, each stats tick also repeats it as a `partial` line, so you can see
 stable partial text even when it has not changed. Use Ctrl+C to stop.
-Endpoint detection and stream reset are disabled by default in this mode, so it
-is raw continuous mic audio into ASR. Add `--endpoint` only when testing commit
-boundary behavior.
+The default Parakeet runtime takes raw continuous mic audio into ASR and commits
+the accumulated transcript when dictation stops. The legacy sherpa runtime can
+still be selected with `--asr-runtime sherpa`.
 
 List input devices:
 
@@ -99,7 +109,7 @@ Try a specific input device:
 ```sh
 scripts/wordpipe-dev listen-test \
   --input-device 12 \
-  --model-dir models/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11
+  --model-dir /path/to/parakeet-nemotron-streaming-model
 ```
 
 Record what Wordpipe is hearing:
@@ -142,7 +152,7 @@ Run the MVP daemon:
 
 ```sh
 PYTHONPATH=src python3 -m wordpipe daemon \
-  --model-dir /path/to/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8
+  --model-dir /path/to/parakeet-nemotron-streaming-model
 ```
 
 Use `--dry-run-insertion` to exercise ASR without opening a portal keyboard
@@ -163,7 +173,7 @@ Run the hotkey-controlled daemon:
 
 ```sh
 PYTHONPATH=src python3 -m wordpipe hotkey-daemon \
-  --model-dir /path/to/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8 \
+  --model-dir /path/to/parakeet-nemotron-streaming-model \
   --mode hold \
   --shortcut 'CTRL+ALT+space' \
   --overlay gtk
@@ -173,7 +183,7 @@ For development without the GlobalShortcuts portal:
 
 ```sh
 PYTHONPATH=src python3 -m wordpipe hotkey-daemon \
-  --model-dir /path/to/model \
+  --model-dir /path/to/parakeet-nemotron-streaming-model \
   --manual-hotkey \
   --dry-run-insertion
 ```
@@ -182,16 +192,26 @@ Manual commands are `down`, `up`, `toggle`, and `quit`.
 
 ## Runtime Dependencies
 
-Install ASR dependencies in the environment that runs Wordpipe:
+Install Python ASR dependencies only when using the legacy sherpa worker:
 
 ```sh
 python3 -m pip install '.[asr]'
 ```
 
 The local development environment has been smoke-tested with
-`sherpa-onnx==1.13.3` on Python 3.14.
+`sherpa-onnx==1.13.3` on Python 3.14 for the legacy worker.
 
-Download the default 560 ms int8 Nemotron model:
+The default Rust runtime uses `parakeet-rs`. Build it with:
+
+```sh
+cargo build -p wordpipe-parakeet-worker
+```
+
+`listen-test`, `daemon`, and `hotkey-daemon` look for
+`target/debug/wordpipe-parakeet-worker` first, then `wordpipe-parakeet-worker`
+on `PATH`. Use `--asr-worker-path` to point at a custom binary.
+
+Download the legacy sherpa 560 ms int8 Nemotron model:
 
 ```sh
 PYTHONPATH=src python3 -m wordpipe download-model
@@ -204,9 +224,13 @@ by default. The repository is:
 csukuangfj2/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11
 ```
 
-The model directory must contain `tokens.txt` and either a single `.onnx` model
-for the Nemotron CTC path or `encoder*.onnx`, `decoder*.onnx`, and
-`joiner*.onnx` for a transducer layout.
+The legacy sherpa model directory must contain `tokens.txt` and either a single
+`.onnx` model for the Nemotron CTC path or `encoder*.onnx`, `decoder*.onnx`,
+and `joiner*.onnx` for a transducer layout.
+
+The default Parakeet/Nemotron runtime expects the model layout used by
+`parakeet-rs`: `encoder.onnx`, any associated external data file,
+`decoder_joint.onnx`, and `tokenizer.model`.
 
 ## Live Validation
 
@@ -219,29 +243,21 @@ Validated in GNOME 50.2 on Wayland:
 
 ## Performance Notes
 
-The default CPU tuning is currently:
+The default runtime is:
 
 ```text
+asr_runtime = "parakeet"
 num_threads = 2
-audio_chunk_seconds = 0.03
 queue_seconds = 10.0
-partial_interval_seconds = 0.10
-endpoint_rule1_min_trailing_silence = 0.55
-endpoint_rule2_min_trailing_silence = 0.35
 ```
 
-The live ASR queue is intentionally larger than the audio chunk size requires,
-because this model can run slower than realtime on the test CPU. Buffering avoids
-dropping speech context; it trades some latency for recognition continuity.
-Endpoint detection is disabled by default for raw ASR diagnostics and normal
-dictation commands. Use `--endpoint` only when deliberately testing sherpa-onnx
-phrase-boundary behavior.
+The Rust worker feeds Nemotron in 560 ms chunks, matching the model's streaming
+stride. It reports RTF, audio level, and dropped audio chunks through the same
+JSON events as the legacy worker.
 
-On the current test machine, the 560 ms int8 model decodes slower than realtime
-on CPU. The best measured CPU thread count was 2 threads; higher counts were
-slower. GPU acceleration remains exposed through `--provider`, but this machine
-does not have a CUDA-capable GPU and the installed wheel did not expose a GPU
-provider.
+On the current test machine, the sherpa 560 ms int8 model decodes slower than
+realtime on CPU. The Rust Parakeet runtime has compiled successfully but still
+needs live model validation on the Parakeet/Nemotron model layout.
 
 The GTK overlay prefers libadwaita (`Adw 1`) and falls back to plain GTK 4 if
 libadwaita is not available. Non-UI daemon paths do not require GTK.

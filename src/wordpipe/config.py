@@ -10,7 +10,9 @@ from .hotkeys import HotkeyMode
 
 
 DEFAULT_CONFIG = """# Wordpipe configuration
-model_dir = "/path/to/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8"
+model_dir = "/path/to/parakeet-nemotron-streaming-model"
+asr_runtime = "parakeet"
+asr_worker_path = ""
 provider = "cpu"
 num_threads = 2
 sample_rate = 16000
@@ -35,6 +37,8 @@ log_metrics = false
 @dataclass(frozen=True)
 class WordpipeConfig:
     model_dir: Path | None = None
+    asr_runtime: str = "parakeet"
+    asr_worker_path: Path | None = None
     provider: str = "cpu"
     num_threads: int = 2
     sample_rate: int = 16000
@@ -72,6 +76,8 @@ def load_config(path: Path | None = None) -> WordpipeConfig:
 
     return WordpipeConfig(
         model_dir=_optional_path(data.get("model_dir")),
+        asr_runtime=_runtime(data.get("asr_runtime", "parakeet")),
+        asr_worker_path=_optional_path(data.get("asr_worker_path")),
         provider=_string(data, "provider", "cpu"),
         num_threads=_integer(data, "num_threads", 2),
         sample_rate=_integer(data, "sample_rate", 16000),
@@ -105,6 +111,13 @@ def _optional_path(value: object) -> Path | None:
     if not isinstance(value, str):
         raise ValueError("model_dir must be a string")
     return Path(value).expanduser()
+
+
+def _runtime(value: object) -> str:
+    runtime = _string({"asr_runtime": value}, "asr_runtime", "parakeet")
+    if runtime not in {"parakeet", "sherpa"}:
+        raise ValueError("asr_runtime must be 'parakeet' or 'sherpa'")
+    return runtime
 
 
 def _optional_device(value: object) -> int | str | None:

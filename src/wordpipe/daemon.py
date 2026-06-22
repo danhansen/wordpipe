@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import shutil
 import json
 import os
 from pathlib import Path
@@ -23,9 +24,27 @@ from .normalization import normalize_spoken_punctuation
 from .transcript import StderrTranscriptSink, TranscriptSink
 
 
+def _resolve_parakeet_worker(configured_path: Path | None = None) -> Path | str:
+    if configured_path is not None:
+        return configured_path
+
+    repo_root = Path(__file__).resolve().parents[2]
+    dev_binary = repo_root / "target" / "debug" / "wordpipe-parakeet-worker"
+    if dev_binary.exists():
+        return dev_binary
+
+    installed = shutil.which("wordpipe-parakeet-worker")
+    if installed is not None:
+        return installed
+
+    return "wordpipe-parakeet-worker"
+
+
 @dataclass(frozen=True)
 class DaemonConfig:
     model_dir: Path
+    asr_runtime: str = "parakeet"
+    asr_worker_path: Path | None = None
     dry_run_insertion: bool = False
     provider: str = "cpu"
     num_threads: int = 2
@@ -67,7 +86,17 @@ class AsrProcess:
         env["PYTHONPATH"] = source_root if not existing else f"{source_root}{os.pathsep}{existing}"
 
         self._proc = subprocess.Popen(
-            [
+            self._command(),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+
+    def _command(self) -> list[str]:
+        if self._config.asr_runtime == "sherpa":
+            return [
                 sys.executable,
                 "-m",
                 "wordpipe",
@@ -100,13 +129,29 @@ class AsrProcess:
                 str(self._config.endpoint_rule2_min_trailing_silence),
                 "--endpoint-rule3-min-utterance-length",
                 str(self._config.endpoint_rule3_min_utterance_length),
-            ],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=env,
-        )
+            ]
+
+        if self._config.asr_runtime == "parakeet":
+            return [
+                str(_resolve_parakeet_worker(self._config.asr_worker_path)),
+                "--model-dir",
+                str(self._config.model_dir),
+                "--num-threads",
+                str(self._config.num_threads),
+                "--sample-rate",
+                str(self._config.sample_rate),
+                *(
+                    ["--input-device", str(self._config.input_device)]
+                    if self._config.input_device is not None
+                    else []
+                ),
+                "--queue-seconds",
+                str(self._config.queue_seconds),
+                "--stats-interval-seconds",
+                str(self._config.stats_interval_seconds),
+            ]
+
+        raise ValueError(f"unsupported ASR runtime: {self._config.asr_runtime}")
 
     def send(self, command: str) -> None:
         if self._proc is None or self._proc.stdin is None:

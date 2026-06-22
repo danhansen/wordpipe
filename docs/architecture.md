@@ -17,10 +17,9 @@ application when dictation stops.
 - Wayland-only.
 - No `xdotool` or X11 fallback path.
 - No external VAD for the MVP.
-- Keep sherpa-onnx endpoint detection disabled by default while raw continuous
-  streaming behavior is evaluated.
-- Endpoint detection remains an explicit opt-in diagnostic mode for
-  phrase-boundary experiments.
+- Use a Rust `parakeet-rs` ASR worker as the default runtime.
+- Keep the Python sherpa-onnx worker only as a legacy diagnostic path.
+- Avoid endpointing as a commit boundary for the default runtime.
 - Commit non-empty partial text when dictation is stopped.
 - ASR runs out-of-process to avoid making the Python GIL a core design risk.
 - Text insertion uses virtual-keyboard semantics through XDG portals/libei.
@@ -41,16 +40,16 @@ wordpipe-daemon
   - receives partial/final transcript events
   - inserts committed text through the keyboard injection backend
 
-wordpipe-asr
-  - loads sherpa-onnx model
+wordpipe-parakeet-worker
+  - loads Parakeet/Nemotron model through parakeet-rs
   - captures microphone audio while active
-  - feeds audio chunks into OnlineRecognizer
+  - feeds 560 ms chunks into Nemotron
   - emits partial and committed transcript events
 ```
 
-The ASR worker can start as Python using the sherpa-onnx Python API. The process
-boundary lets us replace it later with C++ or Rust without rewriting GNOME
-integration.
+The ASR worker is a subprocess speaking newline-delimited JSON. The GNOME
+daemon does not depend on the model runtime; it can spawn the default Rust
+Parakeet worker or the legacy Python sherpa worker.
 
 ## ASR Session Behavior
 
@@ -61,7 +60,7 @@ dictation starts
   accept audio continuously
 
 speech arrives
-  decode as sherpa-onnx becomes ready
+  decode fixed 560 ms Nemotron chunks
   emit partial transcript updates
 
 dictation stops
@@ -69,10 +68,8 @@ dictation stops
   close microphone
   stop or idle ASR worker
 
-optional endpoint diagnostic mode
-  emit committed phrase
-  reset recognizer stream
-  continue listening
+legacy sherpa diagnostic mode
+  optionally test endpoint detection/reset behavior
 ```
 
 No external VAD is used. The streaming ASR model receives the audio stream
@@ -80,8 +77,7 @@ directly.
 
 Current low-latency defaults:
 
-- 30 ms microphone chunks
-- 100 ms partial transcript interval
+- 560 ms Nemotron chunks in the Rust worker
 - 10 s audio queue before dropping microphone chunks
 - endpoint detection disabled
 - 2 CPU threads, based on local benchmark results
@@ -124,26 +120,24 @@ fallback. A GNOME Shell top-bar indicator remains future work.
 ## Configuration
 
 The daemon reads `~/.config/wordpipe/config.toml` by default. Configuration
-holds model path, provider, thread count, overlay, hotkey mode, shortcut,
-spoken-punctuation behavior, and dry-run insertion. CLI flags override file
-values.
+holds model path, ASR runtime, worker path, provider, thread count, overlay,
+hotkey mode, shortcut, spoken-punctuation behavior, and dry-run insertion. CLI
+flags override file values.
 
 ## Model
 
-The default target model is hosted on Hugging Face as:
+The default runtime expects the Parakeet/Nemotron model layout used by
+`parakeet-rs`:
 
 ```text
-csukuangfj2/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11
+encoder.onnx
+encoder.onnx.data
+decoder_joint.onnx
+tokenizer.model
 ```
 
-Expected files:
-
-- `tokens.txt`
-- `encoder.int8.onnx`
-- `decoder.int8.onnx`
-- `joiner.int8.onnx`
-
-The `download-model` command downloads these files into `models/` by default.
+The earlier sherpa-onnx int8 model remains useful for legacy diagnostics, but it
+is not the default runtime target.
 
 ## Performance
 
@@ -156,10 +150,8 @@ capture device independently from ASR.
 `stream-file-test` feeds a known WAV through the streaming recognizer and is the
 primary check for whether the model emits partial hypotheses before finalization.
 
-GPU acceleration is possible only if the installed sherpa-onnx/ONNX Runtime
-build supports a GPU provider and the machine has the matching driver/runtime.
-The current test machine exposes only Intel HD Graphics 4000, so CPU tuning is
-the practical path here.
+The current test machine exposes only Intel HD Graphics 4000, so CPU tuning and
+cache-aware runtime work are the practical performance paths.
 
 ## Packaging
 
@@ -178,12 +170,12 @@ installed on `PATH`; they are not a complete distro package.
    - status: implemented and live-validated on GNOME 50.2 Wayland
 
 2. Streaming ASR spike
-   - load Nemotron int8 model
+   - load Parakeet/Nemotron model
    - stream microphone audio
    - print raw partial text
    - log real-time factor, queue depth, and commit latency
-   - status: implemented; model load, offline WAV decode, and live microphone
-     stream have been validated
+   - status: Rust worker compiles; live Parakeet/Nemotron model validation is
+     next
 
 3. ASR process protocol
    - newline-delimited JSON over stdio or Unix socket

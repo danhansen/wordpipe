@@ -76,6 +76,10 @@ def _cmd_listen_test(args: argparse.Namespace) -> int:
 
     config = ListenTestConfig(
         model_dir=Path(args.model_dir),
+        asr_runtime=args.asr_runtime,
+        asr_worker_path=Path(args.asr_worker_path).expanduser()
+        if args.asr_worker_path
+        else None,
         provider=args.provider,
         num_threads=args.num_threads,
         sample_rate=args.sample_rate,
@@ -194,6 +198,10 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
     file_config = _load_cli_config(args)
     config = DaemonConfig(
         model_dir=_resolve_model_dir(args, file_config),
+        asr_runtime=args.asr_runtime or file_config.asr_runtime,
+        asr_worker_path=Path(args.asr_worker_path).expanduser()
+        if args.asr_worker_path
+        else file_config.asr_worker_path,
         dry_run_insertion=args.dry_run_insertion or file_config.dry_run_insertion,
         provider=args.provider or file_config.provider,
         num_threads=args.num_threads if args.num_threads is not None else file_config.num_threads,
@@ -236,6 +244,10 @@ def _cmd_hotkey_daemon(args: argparse.Namespace) -> int:
     file_config = _load_cli_config(args)
     config = DaemonConfig(
         model_dir=_resolve_model_dir(args, file_config),
+        asr_runtime=args.asr_runtime or file_config.asr_runtime,
+        asr_worker_path=Path(args.asr_worker_path).expanduser()
+        if args.asr_worker_path
+        else file_config.asr_worker_path,
         dry_run_insertion=args.dry_run_insertion or file_config.dry_run_insertion,
         provider=args.provider or file_config.provider,
         num_threads=args.num_threads if args.num_threads is not None else file_config.num_threads,
@@ -327,10 +339,23 @@ def _add_asr_tuning_args(parser: argparse.ArgumentParser, *, worker_defaults: bo
     )
 
 
+def _add_runtime_args(parser: argparse.ArgumentParser, *, default: str | None) -> None:
+    parser.add_argument(
+        "--asr-runtime",
+        choices=("parakeet", "sherpa"),
+        default=default,
+        help="ASR worker runtime. Parakeet is the new Rust runtime; sherpa is the legacy worker.",
+    )
+    parser.add_argument(
+        "--asr-worker-path",
+        help="Path to wordpipe-parakeet-worker. Defaults to target/debug or PATH.",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="wordpipe",
-        description="Wayland-first GNOME dictation with streaming sherpa-onnx ASR.",
+        description="Wayland-first GNOME dictation with streaming Parakeet/Nemotron ASR.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -348,7 +373,7 @@ def build_parser() -> argparse.ArgumentParser:
     asr.add_argument(
         "--model-dir",
         required=True,
-        help="Path to sherpa-onnx Nemotron int8 streaming model directory.",
+        help="Path to legacy sherpa-onnx Nemotron streaming model directory.",
     )
     asr.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
     asr.add_argument("--num-threads", type=int, default=2)
@@ -408,6 +433,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Open the microphone and print live partials/commits with RTF metrics.",
     )
     listen_test.add_argument("--model-dir", required=True)
+    _add_runtime_args(listen_test, default="parakeet")
     listen_test.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
     listen_test.add_argument("--num-threads", type=int, default=2)
     listen_test.add_argument("--sample-rate", type=int, default=16000)
@@ -512,7 +538,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     daemon.add_argument(
         "--model-dir",
-        help="Path to sherpa-onnx Nemotron int8 streaming model directory.",
+        help="Path to Parakeet/Nemotron model directory, or legacy sherpa model when --asr-runtime sherpa.",
     )
     daemon.add_argument("--config", help="Path to config.toml.")
     daemon.add_argument(
@@ -521,6 +547,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print keyboard events instead of opening a portal keyboard session.",
     )
     daemon.add_argument("--provider", help="ONNX Runtime provider.")
+    _add_runtime_args(daemon, default=None)
     daemon.add_argument("--num-threads", type=int)
     daemon.add_argument("--sample-rate", type=int)
     daemon.add_argument("--input-device", help="sounddevice input device index or name.")
@@ -549,7 +576,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     hotkey_daemon.add_argument(
         "--model-dir",
-        help="Path to sherpa-onnx Nemotron int8 streaming model directory.",
+        help="Path to Parakeet/Nemotron model directory, or legacy sherpa model when --asr-runtime sherpa.",
     )
     hotkey_daemon.add_argument("--config", help="Path to config.toml.")
     hotkey_daemon.add_argument(
@@ -572,6 +599,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print keyboard events instead of opening a portal keyboard session.",
     )
     hotkey_daemon.add_argument("--provider", help="ONNX Runtime provider.")
+    _add_runtime_args(hotkey_daemon, default=None)
     hotkey_daemon.add_argument("--num-threads", type=int)
     hotkey_daemon.add_argument("--sample-rate", type=int)
     hotkey_daemon.add_argument("--input-device", help="sounddevice input device index or name.")

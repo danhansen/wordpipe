@@ -12,6 +12,8 @@ class ConfigTests(unittest.TestCase):
         config = load_config(Path("/tmp/wordpipe-definitely-missing.toml"))
 
         self.assertIsNone(config.model_dir)
+        self.assertEqual(config.asr_runtime, "parakeet")
+        self.assertIsNone(config.asr_worker_path)
         self.assertEqual(config.mode, "hold")
         self.assertEqual(config.num_threads, 2)
         self.assertEqual(config.queue_seconds, 10.0)
@@ -23,6 +25,8 @@ class ConfigTests(unittest.TestCase):
                 "\n".join(
                     [
                         'model_dir = "/models/nemotron"',
+                        'asr_runtime = "sherpa"',
+                        'asr_worker_path = "/tmp/worker"',
                         'provider = "cpu"',
                         "num_threads = 4",
                         'overlay = "gtk"',
@@ -38,6 +42,8 @@ class ConfigTests(unittest.TestCase):
             config = load_config(path)
 
         self.assertEqual(config.model_dir, Path("/models/nemotron"))
+        self.assertEqual(config.asr_runtime, "sherpa")
+        self.assertEqual(config.asr_worker_path, Path("/tmp/worker"))
         self.assertEqual(config.num_threads, 4)
         self.assertEqual(config.overlay, "gtk")
         self.assertEqual(config.mode, "toggle")

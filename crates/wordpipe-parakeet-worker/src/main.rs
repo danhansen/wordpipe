@@ -1,0 +1,377 @@
+use std::io::{self, BufRead, Write};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use anyhow::{anyhow, Context, Result};
+use clap::Parser;
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::{SampleFormat, StreamConfig};
+use crossbeam_channel::{bounded, select, Receiver, Sender};
+use parakeet_rs::{ExecutionConfig, Nemotron};
+use serde::Deserialize;
+use serde_json::{json, Value};
+
+const NEMOTRON_CHUNK_SAMPLES: usize = 8960;
+
+#[derive(Debug, Parser)]
+struct Args {
+    #[arg(long)]
+    model_dir: PathBuf,
+    #[arg(long, default_value_t = 2)]
+    num_threads: usize,
+    #[arg(long, default_value_t = 16000)]
+    sample_rate: u32,
+    #[arg(long)]
+    input_device: Option<String>,
+    #[arg(long, default_value_t = 10.0)]
+    queue_seconds: f32,
+    #[arg(long, default_value_t = 1.0)]
+    stats_interval_seconds: f32,
+    #[arg(long, default_value_t = NEMOTRON_CHUNK_SAMPLES)]
+    chunk_samples: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct Command {
+    command: String,
+}
+
+struct JsonEmitter {
+    output: Mutex<io::Stdout>,
+}
+
+impl JsonEmitter {
+    fn new() -> Self {
+        Self {
+            output: Mutex::new(io::stdout()),
+        }
+    }
+
+    fn emit(&self, value: Value) {
+        if let Ok(mut output) = self.output.lock() {
+            let _ = serde_json::to_writer(&mut *output, &value);
+            let _ = writeln!(output);
+            let _ = output.flush();
+        }
+    }
+}
+
+struct RunningSession {
+    stop_tx: Sender<()>,
+    join: thread::JoinHandle<()>,
+}
+
+fn main() -> Result<()> {
+    let args = Arc::new(Args::parse());
+    let emitter = Arc::new(JsonEmitter::new());
+    emitter.emit(json!({"event": "ready"}));
+
+    let stdin = io::stdin();
+    let mut session: Option<RunningSession> = None;
+    for line in stdin.lock().lines() {
+        let line = line?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let command: Command = match serde_json::from_str(&line) {
+            Ok(command) => command,
+            Err(err) => {
+                emitter.emit(
+                    json!({"event": "error", "message": format!("invalid JSON command: {err}")}),
+                );
+                continue;
+            }
+        };
+        match command.command.as_str() {
+            "start" => {
+                if session.is_some() {
+                    continue;
+                }
+                let (stop_tx, stop_rx) = bounded::<()>(1);
+                let worker_args = Arc::clone(&args);
+                let worker_emitter = Arc::clone(&emitter);
+                let join = thread::spawn(move || {
+                    if let Err(err) = run_session(worker_args, worker_emitter.clone(), stop_rx) {
+                        worker_emitter.emit(json!({"event": "error", "message": err.to_string()}));
+                    }
+                    worker_emitter.emit(json!({"event": "stopped"}));
+                });
+                session = Some(RunningSession { stop_tx, join });
+            }
+            "stop" => {
+                if let Some(running) = session.take() {
+                    let _ = running.stop_tx.send(());
+                    let _ = running.join.join();
+                } else {
+                    emitter.emit(json!({"event": "stopped"}));
+                }
+            }
+            "shutdown" => {
+                if let Some(running) = session.take() {
+                    let _ = running.stop_tx.send(());
+                    let _ = running.join.join();
+                }
+                break;
+            }
+            other => {
+                emitter.emit(
+                    json!({"event": "error", "message": format!("unknown command: {other}")}),
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>) -> Result<()> {
+    let mut model = load_model(&args)?;
+    let host = cpal::default_host();
+    let device = select_input_device(&host, args.input_device.as_deref())?;
+    let device_name = device.name().unwrap_or_else(|_| "unknown".to_string());
+    let stream_config = StreamConfig {
+        channels: 1,
+        sample_rate: cpal::SampleRate(args.sample_rate),
+        buffer_size: cpal::BufferSize::Default,
+    };
+
+    let queue_chunks =
+        ((args.queue_seconds * args.sample_rate as f32) as usize / args.chunk_samples).max(2);
+    let (audio_tx, audio_rx) = bounded::<Vec<f32>>(queue_chunks);
+    let dropped_chunks = Arc::new(AtomicUsize::new(0));
+    let stream = build_input_stream(
+        &device,
+        &stream_config,
+        audio_tx,
+        Arc::clone(&dropped_chunks),
+    )?;
+    stream.play().context("failed to start input stream")?;
+
+    emitter.emit(json!({
+        "event": "listening",
+        "data": {"input_device": {"name": device_name, "requested": args.input_device}}
+    }));
+
+    let started = Instant::now();
+    let mut last_stats = Instant::now();
+    let mut pending = Vec::<f32>::with_capacity(args.chunk_samples * 2);
+    let mut transcript = String::new();
+    let mut accepted_samples = 0usize;
+    let mut decode_seconds = 0.0f64;
+    let mut decode_calls = 0usize;
+    let mut last_rms = 0.0f32;
+    let mut peak_rms = 0.0f32;
+
+    loop {
+        select! {
+            recv(stop_rx) -> _ => break,
+            recv(audio_rx) -> msg => {
+                let samples = match msg {
+                    Ok(samples) => samples,
+                    Err(_) => break,
+                };
+                accepted_samples += samples.len();
+                let (rms, peak) = audio_level(&samples);
+                last_rms = rms;
+                peak_rms = peak_rms.max(peak);
+                pending.extend_from_slice(&samples);
+
+                while pending.len() >= args.chunk_samples {
+                    let chunk: Vec<f32> = pending.drain(..args.chunk_samples).collect();
+                    let decoded = decode_chunk(&mut model, &chunk, &mut decode_seconds, &mut decode_calls)?;
+                    if !decoded.is_empty() {
+                        transcript.push_str(&decoded);
+                        emitter.emit(json!({
+                            "event": "partial",
+                            "text": transcript,
+                            "data": metrics(started, accepted_samples, args.sample_rate, decode_seconds, decode_calls, dropped_chunks.load(Ordering::Relaxed), last_rms, peak_rms),
+                        }));
+                    }
+                }
+            }
+            default(Duration::from_millis(20)) => {}
+        }
+
+        if last_stats.elapsed() >= Duration::from_secs_f32(args.stats_interval_seconds.max(0.1)) {
+            last_stats = Instant::now();
+            emitter.emit(json!({
+                "event": "stats",
+                "text": transcript,
+                "data": metrics(started, accepted_samples, args.sample_rate, decode_seconds, decode_calls, dropped_chunks.load(Ordering::Relaxed), last_rms, peak_rms),
+            }));
+        }
+    }
+
+    if !pending.is_empty() {
+        pending.resize(args.chunk_samples, 0.0);
+        let decoded = decode_chunk(&mut model, &pending, &mut decode_seconds, &mut decode_calls)?;
+        transcript.push_str(&decoded);
+    }
+
+    let committed = transcript.trim();
+    if !committed.is_empty() {
+        emitter.emit(json!({
+            "event": "commit",
+            "text": committed,
+            "data": metrics(started, accepted_samples, args.sample_rate, decode_seconds, decode_calls, dropped_chunks.load(Ordering::Relaxed), last_rms, peak_rms),
+        }));
+    }
+    drop(stream);
+    Ok(())
+}
+
+fn load_model(args: &Args) -> Result<Nemotron> {
+    let config = ExecutionConfig::new()
+        .with_intra_threads(args.num_threads)
+        .with_inter_threads(1);
+    Nemotron::from_pretrained(args.model_dir.to_string_lossy().as_ref(), Some(config)).with_context(
+        || {
+            format!(
+                "failed to load Nemotron model from {}",
+                args.model_dir.display()
+            )
+        },
+    )
+}
+
+fn decode_chunk(
+    model: &mut Nemotron,
+    chunk: &[f32],
+    decode_seconds: &mut f64,
+    decode_calls: &mut usize,
+) -> Result<String> {
+    let started = Instant::now();
+    let text = model
+        .transcribe_chunk(chunk)
+        .context("Nemotron chunk decode failed")?;
+    *decode_seconds += started.elapsed().as_secs_f64();
+    *decode_calls += 1;
+    Ok(text)
+}
+
+fn select_input_device(host: &cpal::Host, requested: Option<&str>) -> Result<cpal::Device> {
+    let devices = host
+        .input_devices()
+        .context("failed to enumerate input devices")?;
+    if let Some(requested) = requested {
+        if let Ok(index) = requested.parse::<usize>() {
+            return devices
+                .into_iter()
+                .nth(index)
+                .ok_or_else(|| anyhow!("input device index not found: {index}"));
+        }
+
+        for device in devices {
+            let name = device.name().unwrap_or_default();
+            if name == requested || name.contains(requested) {
+                return Ok(device);
+            }
+        }
+        return Err(anyhow!("input device not found: {requested}"));
+    }
+
+    host.default_input_device()
+        .ok_or_else(|| anyhow!("no default input device"))
+}
+
+fn build_input_stream(
+    device: &cpal::Device,
+    config: &StreamConfig,
+    audio_tx: Sender<Vec<f32>>,
+    dropped_chunks: Arc<AtomicUsize>,
+) -> Result<cpal::Stream> {
+    let err_fn = |err| eprintln!("audio input stream error: {err}");
+    let sample_format = device
+        .default_input_config()
+        .context("failed to read default input config")?
+        .sample_format();
+
+    match sample_format {
+        SampleFormat::F32 => device
+            .build_input_stream(
+                config,
+                move |data: &[f32], _| send_audio(data.to_vec(), &audio_tx, &dropped_chunks),
+                err_fn,
+                None,
+            )
+            .context("failed to build f32 input stream"),
+        SampleFormat::I16 => device
+            .build_input_stream(
+                config,
+                move |data: &[i16], _| {
+                    let samples = data.iter().map(|sample| *sample as f32 / 32768.0).collect();
+                    send_audio(samples, &audio_tx, &dropped_chunks);
+                },
+                err_fn,
+                None,
+            )
+            .context("failed to build i16 input stream"),
+        SampleFormat::U16 => device
+            .build_input_stream(
+                config,
+                move |data: &[u16], _| {
+                    let samples = data
+                        .iter()
+                        .map(|sample| (*sample as f32 - 32768.0) / 32768.0)
+                        .collect();
+                    send_audio(samples, &audio_tx, &dropped_chunks);
+                },
+                err_fn,
+                None,
+            )
+            .context("failed to build u16 input stream"),
+        other => Err(anyhow!("unsupported input sample format: {other:?}")),
+    }
+}
+
+fn send_audio(samples: Vec<f32>, audio_tx: &Sender<Vec<f32>>, dropped_chunks: &AtomicUsize) {
+    if audio_tx.try_send(samples).is_err() {
+        dropped_chunks.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+fn audio_level(samples: &[f32]) -> (f32, f32) {
+    if samples.is_empty() {
+        return (0.0, 0.0);
+    }
+    let mut sum = 0.0f32;
+    let mut peak = 0.0f32;
+    for sample in samples {
+        sum += sample * sample;
+        peak = peak.max(sample.abs());
+    }
+    ((sum / samples.len() as f32).sqrt(), peak)
+}
+
+fn metrics(
+    started: Instant,
+    accepted_samples: usize,
+    sample_rate: u32,
+    decode_seconds: f64,
+    decode_calls: usize,
+    dropped_audio_chunks: usize,
+    last_rms: f32,
+    peak_rms: f32,
+) -> Value {
+    let audio_seconds = accepted_samples as f64 / sample_rate as f64;
+    json!({
+        "audio_seconds": round3(audio_seconds),
+        "elapsed_seconds": round3(started.elapsed().as_secs_f64()),
+        "decode_seconds": round3(decode_seconds),
+        "decode_calls": decode_calls,
+        "dropped_audio_chunks": dropped_audio_chunks,
+        "last_rms": round5(last_rms as f64),
+        "peak_rms": round5(peak_rms as f64),
+        "real_time_factor": if audio_seconds > 0.0 { round3(decode_seconds / audio_seconds) } else { 0.0 },
+    })
+}
+
+fn round3(value: f64) -> f64 {
+    (value * 1000.0).round() / 1000.0
+}
+
+fn round5(value: f64) -> f64 {
+    (value * 100000.0).round() / 100000.0
+}

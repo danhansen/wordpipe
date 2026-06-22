@@ -12,6 +12,8 @@ from .daemon import AsrProcess, DaemonConfig
 @dataclass(frozen=True)
 class ListenTestConfig:
     model_dir: Path
+    asr_runtime: str = "parakeet"
+    asr_worker_path: Path | None = None
     provider: str = "cpu"
     num_threads: int = 2
     sample_rate: int = 16000
@@ -32,6 +34,8 @@ class ListenTestConfig:
 def run_listen_test(config: ListenTestConfig) -> int:
     daemon_config = DaemonConfig(
         model_dir=config.model_dir,
+        asr_runtime=config.asr_runtime,
+        asr_worker_path=config.asr_worker_path,
         provider=config.provider,
         num_threads=config.num_threads,
         sample_rate=config.sample_rate,
