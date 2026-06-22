@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import unittest
 from pathlib import Path
 
-from wordpipe.models import DEFAULT_MODEL_REPO, make_download_plan, model_file_url
+from wordpipe.models import DEFAULT_MODEL_REPO, _progress_reporter, make_download_plan, model_file_url
 
 
 class ModelDownloadTests(unittest.TestCase):
@@ -25,6 +27,12 @@ class ModelDownloadTests(unittest.TestCase):
         plan = make_download_plan(Path("models"), include_test_wavs=True)
 
         self.assertIn("test_wavs/en.wav", plan.files)
+
+    def test_progress_reporter_is_callable(self) -> None:
+        reporter = _progress_reporter(Path("model.onnx"))
+
+        with contextlib.redirect_stderr(io.StringIO()):
+            reporter(0, 8192, 100)
 
 
 if __name__ == "__main__":

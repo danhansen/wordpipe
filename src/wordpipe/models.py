@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import sys
+import time
 from urllib.request import urlretrieve
 
 
@@ -51,9 +52,33 @@ def download_model(plan: DownloadPlan, force: bool = False) -> Path:
             continue
         url = model_file_url(plan.repo_id, filename)
         print(f"download {url}", file=sys.stderr)
-        urlretrieve(url, destination)
+        temporary = destination.with_name(destination.name + ".part")
+        urlretrieve(url, temporary, _progress_reporter(destination))
+        temporary.replace(destination)
     return model_dir
 
 
 def model_file_url(repo_id: str, filename: str) -> str:
     return f"https://huggingface.co/{repo_id}/resolve/main/{filename}"
+
+
+def _progress_reporter(destination: Path):
+    last_report = 0.0
+
+    def report(block_count: int, block_size: int, total_size: int) -> None:
+        nonlocal last_report
+        now = time.monotonic()
+        if now - last_report < 5 and block_count != 0:
+            return
+        last_report = now
+        downloaded = block_count * block_size
+        if total_size > 0:
+            percent = min(100.0, downloaded * 100.0 / total_size)
+            print(
+                f"  {destination.name}: {downloaded}/{total_size} bytes ({percent:.1f}%)",
+                file=sys.stderr,
+            )
+        else:
+            print(f"  {destination.name}: {downloaded} bytes", file=sys.stderr)
+
+    return report
