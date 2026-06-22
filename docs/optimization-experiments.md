@@ -457,3 +457,41 @@ Conv observations:
   comparable than AC status alone. This daemon rejects `HoldProfile` for
   `balanced`, so the harness records that and falls back to set-and-verify for
   balanced-profile runs.
+
+## 2026-06-22: FFN FP32 Thread-Count Sweep
+
+The current best speed candidate, `ffn_fp32`, was benchmarked with ORT intra-op
+threads set to 1, 2, 3, and 4 on the Ivy Bridge i5-3320M machine
+(2 physical cores / 4 hardware threads). Each setting used three runs of the
+long WAV benchmark under GNOME `balanced`.
+
+Commands followed this pattern:
+
+```sh
+.venv/bin/python scripts/benchmark_parakeet_variant.py \
+  ffn_fp32=build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort \
+  --runs 3 \
+  --num-threads <N> \
+  --min-mem-available-gb 6 \
+  --child-memory-limit-gb 10 \
+  --set-power-profile balanced \
+  --output build/parakeet-variant-bench/ffn-thread-sweep-t<N>.json
+```
+
+Results:
+
+| ORT threads | Median real-audio RTF | Median RTF | Median decode seconds | Median wall seconds |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 0.879 | 0.866 | 108.632 | 112.647 |
+| 2 | 0.606 | 0.597 | 74.930 | 78.985 |
+| 3 | 0.860 | 0.848 | 106.333 | 110.653 |
+| 4 | 0.820 | 0.808 | 101.338 | 105.483 |
+
+Thread observations:
+
+- The existing default, `--num-threads 2`, is the clear winner and should stay
+  the default for this CPU.
+- One thread underutilizes the two physical cores.
+- Three and four threads are much worse than two threads, likely because this
+  workload does not benefit from SMT oversubscription on the i5-3320M and pays
+  extra scheduling/cache overhead.
