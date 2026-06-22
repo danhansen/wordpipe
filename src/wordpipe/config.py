@@ -14,6 +14,7 @@ model_dir = "/path/to/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8"
 provider = "cpu"
 num_threads = 2
 sample_rate = 16000
+input_device = ""
 partial_interval_seconds = 0.10
 audio_chunk_seconds = 0.03
 stats_interval_seconds = 1.0
@@ -35,6 +36,7 @@ class WordpipeConfig:
     provider: str = "cpu"
     num_threads: int = 2
     sample_rate: int = 16000
+    input_device: int | str | None = None
     partial_interval_seconds: float = 0.10
     audio_chunk_seconds: float = 0.03
     stats_interval_seconds: float = 1.0
@@ -69,6 +71,7 @@ def load_config(path: Path | None = None) -> WordpipeConfig:
         provider=_string(data, "provider", "cpu"),
         num_threads=_integer(data, "num_threads", 2),
         sample_rate=_integer(data, "sample_rate", 16000),
+        input_device=_optional_device(data.get("input_device")),
         partial_interval_seconds=_number(data, "partial_interval_seconds", 0.10),
         audio_chunk_seconds=_number(data, "audio_chunk_seconds", 0.03),
         stats_interval_seconds=_number(data, "stats_interval_seconds", 1.0),
@@ -96,6 +99,14 @@ def _optional_path(value: object) -> Path | None:
     if not isinstance(value, str):
         raise ValueError("model_dir must be a string")
     return Path(value).expanduser()
+
+
+def _optional_device(value: object) -> int | str | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, int | str):
+        return value
+    raise ValueError("input_device must be an integer index or string name")
 
 
 def _string(data: dict[str, Any], key: str, default: str) -> str:

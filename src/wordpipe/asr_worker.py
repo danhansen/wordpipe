@@ -12,6 +12,7 @@ import wave
 from pathlib import Path
 from typing import Callable, TextIO
 
+from .audio import AudioDevice, describe_input_device
 from .protocol import Event, event, parse_command
 
 
@@ -24,6 +25,7 @@ class AsrWorkerConfig:
     provider: str = "cpu"
     num_threads: int = 2
     sample_rate: int = 16000
+    input_device: AudioDevice | None = None
     feature_dim: int = 80
     decoding_method: str = "greedy_search"
     partial_interval_seconds: float = 0.10
@@ -138,13 +140,19 @@ class SherpaStreamingSession:
 
             blocksize = max(1, int(self._config.sample_rate * self._config.audio_chunk_seconds))
             with sd.InputStream(
+                device=self._config.input_device,
                 channels=1,
                 samplerate=self._config.sample_rate,
                 dtype="float32",
                 blocksize=blocksize,
                 callback=callback,
             ):
-                self._emit(event("listening"))
+                self._emit(
+                    event(
+                        "listening",
+                        data={"input_device": describe_input_device(self._config.input_device)},
+                    )
+                )
                 while not self._stop.is_set():
                     try:
                         samples = self._audio.get(timeout=0.1)

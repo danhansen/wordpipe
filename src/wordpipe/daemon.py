@@ -17,6 +17,7 @@ from .hotkeys import (
     HotkeyStateMachine,
     ManualHotkeyLoop,
 )
+from .audio import AudioDevice
 from .insertion import DryRunKeyboardBackend, KeyboardBackend, PortalKeyboardBackend
 from .normalization import normalize_spoken_punctuation
 from .transcript import StderrTranscriptSink, TranscriptSink
@@ -29,6 +30,7 @@ class DaemonConfig:
     provider: str = "cpu"
     num_threads: int = 2
     sample_rate: int = 16000
+    input_device: AudioDevice | None = None
     partial_interval_seconds: float = 0.10
     audio_chunk_seconds: float = 0.03
     stats_interval_seconds: float = 1.0
@@ -76,6 +78,11 @@ class AsrProcess:
                 str(self._config.num_threads),
                 "--sample-rate",
                 str(self._config.sample_rate),
+                *(
+                    ["--input-device", str(self._config.input_device)]
+                    if self._config.input_device is not None
+                    else []
+                ),
                 "--partial-interval-seconds",
                 str(self._config.partial_interval_seconds),
                 "--audio-chunk-seconds",

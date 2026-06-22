@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .config import DEFAULT_CONFIG, WordpipeConfig, load_config
 from .probe import ProbeResult, run_probe
+from .audio import parse_audio_device
 
 
 def _print_json(data: object) -> None:
@@ -31,6 +32,7 @@ def _cmd_asr_worker(args: argparse.Namespace) -> int:
         provider=args.provider,
         num_threads=args.num_threads,
         sample_rate=args.sample_rate,
+        input_device=parse_audio_device(args.input_device),
         partial_interval_seconds=args.partial_interval_seconds,
         audio_chunk_seconds=args.audio_chunk_seconds,
         stats_interval_seconds=args.stats_interval_seconds,
@@ -75,6 +77,7 @@ def _cmd_listen_test(args: argparse.Namespace) -> int:
         provider=args.provider,
         num_threads=args.num_threads,
         sample_rate=args.sample_rate,
+        input_device=parse_audio_device(args.input_device),
         partial_interval_seconds=args.partial_interval_seconds,
         audio_chunk_seconds=args.audio_chunk_seconds,
         stats_interval_seconds=args.stats_interval_seconds,
@@ -85,6 +88,26 @@ def _cmd_listen_test(args: argparse.Namespace) -> int:
         json_output=args.json,
     )
     return run_listen_test(config)
+
+
+def _cmd_audio_devices(_args: argparse.Namespace) -> int:
+    from .audio import render_input_devices
+
+    print(render_input_devices())
+    return 0
+
+
+def _cmd_record_test(args: argparse.Namespace) -> int:
+    from .audio import record_wav
+
+    record_wav(
+        Path(args.output),
+        duration_seconds=args.duration,
+        sample_rate=args.sample_rate,
+        device=parse_audio_device(args.input_device),
+    )
+    print(args.output)
+    return 0
 
 
 def _cmd_download_model(args: argparse.Namespace) -> int:
@@ -140,6 +163,9 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
         provider=args.provider or file_config.provider,
         num_threads=args.num_threads if args.num_threads is not None else file_config.num_threads,
         sample_rate=args.sample_rate if args.sample_rate is not None else file_config.sample_rate,
+        input_device=parse_audio_device(args.input_device)
+        if args.input_device is not None
+        else file_config.input_device,
         partial_interval_seconds=args.partial_interval_seconds
         if args.partial_interval_seconds is not None
         else file_config.partial_interval_seconds,
@@ -175,6 +201,9 @@ def _cmd_hotkey_daemon(args: argparse.Namespace) -> int:
         provider=args.provider or file_config.provider,
         num_threads=args.num_threads if args.num_threads is not None else file_config.num_threads,
         sample_rate=args.sample_rate if args.sample_rate is not None else file_config.sample_rate,
+        input_device=parse_audio_device(args.input_device)
+        if args.input_device is not None
+        else file_config.input_device,
         partial_interval_seconds=args.partial_interval_seconds
         if args.partial_interval_seconds is not None
         else file_config.partial_interval_seconds,
@@ -275,6 +304,7 @@ def build_parser() -> argparse.ArgumentParser:
     asr.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
     asr.add_argument("--num-threads", type=int, default=2)
     asr.add_argument("--sample-rate", type=int, default=16000)
+    asr.add_argument("--input-device", help="sounddevice input device index or name.")
     _add_asr_tuning_args(asr, worker_defaults=True)
     asr.set_defaults(func=_cmd_asr_worker)
 
@@ -327,6 +357,7 @@ def build_parser() -> argparse.ArgumentParser:
     listen_test.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
     listen_test.add_argument("--num-threads", type=int, default=2)
     listen_test.add_argument("--sample-rate", type=int, default=16000)
+    listen_test.add_argument("--input-device", help="sounddevice input device index or name.")
     listen_test.add_argument(
         "--duration",
         type=float,
@@ -335,6 +366,22 @@ def build_parser() -> argparse.ArgumentParser:
     listen_test.add_argument("--json", action="store_true", help="Print raw JSON events.")
     _add_asr_tuning_args(listen_test, worker_defaults=True)
     listen_test.set_defaults(func=_cmd_listen_test)
+
+    audio_devices = subparsers.add_parser(
+        "audio-devices",
+        help="List available sounddevice input devices.",
+    )
+    audio_devices.set_defaults(func=_cmd_audio_devices)
+
+    record_test = subparsers.add_parser(
+        "record-test",
+        help="Record raw microphone audio to a 16 kHz mono WAV for diagnostics.",
+    )
+    record_test.add_argument("--output", default="/tmp/wordpipe-record-test.wav")
+    record_test.add_argument("--duration", type=float, default=5.0)
+    record_test.add_argument("--sample-rate", type=int, default=16000)
+    record_test.add_argument("--input-device", help="sounddevice input device index or name.")
+    record_test.set_defaults(func=_cmd_record_test)
 
     download_model = subparsers.add_parser(
         "download-model",
@@ -393,6 +440,7 @@ def build_parser() -> argparse.ArgumentParser:
     daemon.add_argument("--provider", help="ONNX Runtime provider.")
     daemon.add_argument("--num-threads", type=int)
     daemon.add_argument("--sample-rate", type=int)
+    daemon.add_argument("--input-device", help="sounddevice input device index or name.")
     _add_asr_tuning_args(daemon, worker_defaults=False)
     daemon.add_argument(
         "--no-spoken-punctuation",
@@ -438,6 +486,7 @@ def build_parser() -> argparse.ArgumentParser:
     hotkey_daemon.add_argument("--provider", help="ONNX Runtime provider.")
     hotkey_daemon.add_argument("--num-threads", type=int)
     hotkey_daemon.add_argument("--sample-rate", type=int)
+    hotkey_daemon.add_argument("--input-device", help="sounddevice input device index or name.")
     _add_asr_tuning_args(hotkey_daemon, worker_defaults=False)
     hotkey_daemon.add_argument(
         "--no-spoken-punctuation",

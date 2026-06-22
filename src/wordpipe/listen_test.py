@@ -5,6 +5,7 @@ from pathlib import Path
 import json
 import threading
 
+from .audio import AudioDevice
 from .daemon import AsrProcess, DaemonConfig
 
 
@@ -14,6 +15,7 @@ class ListenTestConfig:
     provider: str = "cpu"
     num_threads: int = 2
     sample_rate: int = 16000
+    input_device: AudioDevice | None = None
     partial_interval_seconds: float = 0.05
     audio_chunk_seconds: float = 0.03
     stats_interval_seconds: float = 1.0
@@ -30,6 +32,7 @@ def run_listen_test(config: ListenTestConfig) -> int:
         provider=config.provider,
         num_threads=config.num_threads,
         sample_rate=config.sample_rate,
+        input_device=config.input_device,
         partial_interval_seconds=config.partial_interval_seconds,
         audio_chunk_seconds=config.audio_chunk_seconds,
         stats_interval_seconds=config.stats_interval_seconds,
@@ -58,6 +61,8 @@ def run_listen_test(config: ListenTestConfig) -> int:
                 print(_format_event(item), flush=True)
             if item.get("event") == "listening":
                 start_timer_once()
+            if item.get("event") == "error":
+                return 1
             if item.get("event") == "stopped":
                 return 0
     finally:
@@ -78,9 +83,22 @@ def _format_event(item: dict[str, object]) -> str:
         if text:
             line = f"{line}\npartial {metrics} {text}"
         return line
+    if kind == "listening":
+        return f"listening {_format_device(item.get('data'))}"
     if kind == "error":
         return f"error   {item.get('message', '')}"
     return kind
+
+
+def _format_device(data: object) -> str:
+    if not isinstance(data, dict):
+        return ""
+    device = data.get("input_device")
+    if not isinstance(device, dict):
+        return ""
+    if "error" in device:
+        return f"input_device_error={device.get('error')}"
+    return f"input_device={device.get('name')} requested={device.get('requested')}"
 
 
 def _format_metrics(data: object) -> str:

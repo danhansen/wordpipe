@@ -84,6 +84,33 @@ audio level, and dropped-chunk counts. When the recognizer has a current
 hypothesis, each stats tick also repeats it as a `partial` line, so you can see
 stable partial text even when it has not changed. Use Ctrl+C to stop.
 
+List input devices:
+
+```sh
+scripts/wordpipe-dev audio-devices
+```
+
+Try a specific input device:
+
+```sh
+scripts/wordpipe-dev listen-test \
+  --input-device 12 \
+  --model-dir models/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11
+```
+
+Record what Wordpipe is hearing:
+
+```sh
+scripts/wordpipe-dev record-test --duration 5 --output /tmp/wordpipe-spoken.wav
+scripts/wordpipe-dev transcribe-file \
+  --model-dir models/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11 \
+  --wav /tmp/wordpipe-spoken.wav
+```
+
+If the recorded WAV transcribes but `listen-test` does not produce partials, the
+problem is streaming throughput. If the WAV does not transcribe, the issue is
+audio capture, device selection, level, or model suitability for the speech.
+
 Dry-run text insertion:
 
 ```sh

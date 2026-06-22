@@ -147,6 +147,8 @@ The `download-model` command downloads these files into `models/` by default.
 
 `listen-test` is the primary live tuning mode. It opens the microphone, prints
 partial results, and reports realtime factor (RTF) without inserting text.
+`audio-devices` and `record-test` are diagnostic commands for validating the
+capture device independently from ASR.
 
 GPU acceleration is possible only if the installed sherpa-onnx/ONNX Runtime
 build supports a GPU provider and the machine has the matching driver/runtime.
