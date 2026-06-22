@@ -100,6 +100,19 @@ still be selected with `--asr-runtime sherpa`.
 The Rust worker defaults to ONNX Runtime's `all` graph optimization level; use
 `--graph-optimization` only for ablations or debugging.
 
+Inspect ONNX graphs and ORT optimization effects:
+
+```sh
+.venv/bin/python scripts/ort_graph_diagnostics.py \
+  models/nemotron-3.5-asr-streaming-0.6b-parakeet-int8-projected-c56/encoder.onnx \
+  --json-out build/ort-diagnostics/encoder-summary.json
+```
+
+For smaller graphs, or when you are comfortable spending the memory to let ORT
+load and serialize an optimized model, add `--emit-optimized --opt-level all`.
+The resulting summary makes ORT fusions visible, such as
+`DynamicQuantizeLinear + MatMulInteger` becoming `DynamicQuantizeMatMul`.
+
 If you run `target/release/wordpipe-parakeet-worker` directly, set
 `ORT_DYLIB_PATH` to the ONNX Runtime library from the local Python wheel. The
 `ort` crate's default runtime can hang while loading this encoder on the current
