@@ -78,7 +78,9 @@ def load_model(input_path: str, device: torch.device):
     import nemo.collections.asr as nemo_asr
 
     if Path(input_path).exists():
+        print(f"[export] restoring NeMo model from {input_path}", flush=True)
         return nemo_asr.models.ASRModel.restore_from(input_path, map_location=device)
+    print(f"[export] loading NeMo model {input_path}", flush=True)
     model = nemo_asr.models.ASRModel.from_pretrained(model_name=input_path)
     try:
         model = model.to(device)
@@ -123,6 +125,32 @@ def save_tokenizer(model, input_path: str, output_dir: Path) -> None:
     )
 
 
+def jsonable(value: Any) -> Any:
+    try:
+        from omegaconf import OmegaConf
+
+        if OmegaConf.is_config(value):
+            value = OmegaConf.to_container(value, resolve=True)
+    except Exception:
+        pass
+    if isinstance(value, dict):
+        return {str(k): jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [jsonable(v) for v in value]
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def cfg_get(cfg: Any, key: str, default: Any) -> Any:
+    try:
+        if hasattr(cfg, "get"):
+            return cfg.get(key, default)
+        return getattr(cfg, key, default)
+    except Exception:
+        return default
+
+
 def prompt_dictionary(model) -> dict[str, int]:
     try:
         from omegaconf import OmegaConf
@@ -131,6 +159,17 @@ def prompt_dictionary(model) -> dict[str, int]:
         return {str(k): int(v) for k, v in OmegaConf.to_container(value, resolve=True).items()}
     except Exception:
         return {}
+
+
+def tokenizer_vocab_size(model) -> int | None:
+    tokenizer = getattr(model, "tokenizer", None)
+    value = getattr(tokenizer, "vocab_size", None)
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except Exception:
+        return None
 
 
 class EncoderWrapper(torch.nn.Module):
@@ -181,6 +220,58 @@ class EncoderWrapper(torch.nn.Module):
         return encoded, enc_len, ch_next, tm_next, len_next
 
 
+def verify_prompt_wrapper(
+    model,
+    wrapper: EncoderWrapper,
+    inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+    prompt_dict: dict[str, int],
+    verify_lang: str,
+) -> tuple[torch.Tensor | None, torch.Tensor | None, str | None, int | None, float | None]:
+    if not wrapper.prompted:
+        return None, None, None, None, None
+
+    lang = verify_lang if verify_lang in prompt_dict else "auto"
+    if lang not in prompt_dict:
+        lang = next(iter(prompt_dict), None)
+    if lang is None:
+        raise RuntimeError("Prompted model did not expose a prompt_dictionary.")
+
+    if hasattr(model, "set_inference_prompt"):
+        model.set_inference_prompt(lang)
+    prompt_index = torch.tensor(
+        [int(getattr(model, "_inference_prompt_index", prompt_dict[lang]))],
+        dtype=torch.long,
+    )
+    processed_signal, processed_signal_length, cache_last_channel, cache_last_time, cache_last_channel_len = inputs
+    with torch.no_grad():
+        raw, encoded_len, _, _, _ = model.encoder.cache_aware_stream_step(
+            processed_signal=processed_signal,
+            processed_signal_length=processed_signal_length,
+            cache_last_channel=cache_last_channel,
+            cache_last_time=cache_last_time,
+            cache_last_channel_len=cache_last_channel_len,
+            keep_all_outputs=False,
+            drop_extra_pre_encoded=wrapper.drop_extra,
+        )
+        reference = model._apply_prompt_to_encoded(raw)
+        wrapped, _, _, _, _ = wrapper(
+            processed_signal,
+            processed_signal_length,
+            cache_last_channel,
+            cache_last_time,
+            cache_last_channel_len,
+            prompt_index,
+        )
+    diff = float((wrapped - reference).abs().max().item())
+    print(f"[export] prompt wrapper parity {lang} idx={int(prompt_index[0])}: max diff={diff:.2e}", flush=True)
+    if diff > 1e-4:
+        raise RuntimeError(
+            "Prompt wrapper does not match NeMo _apply_prompt_to_encoded; "
+            "aborting before writing ONNX weights."
+        )
+    return reference, encoded_len, lang, int(prompt_index[0]), diff
+
+
 def consolidate_onnx(input_path: Path, output_path: Path, external_data_name: str) -> None:
     model = onnx.load(input_path, load_external_data=True)
     onnx.save_model(
@@ -194,6 +285,7 @@ def consolidate_onnx(input_path: Path, output_path: Path, external_data_name: st
 
 
 def quantize_to_single_file(input_path: Path, output_path: Path) -> None:
+    print(f"[export] quantizing {input_path.name} -> {output_path.name}", flush=True)
     quantize_dynamic(
         model_input=input_path,
         model_output=output_path,
@@ -232,6 +324,7 @@ def make_streaming_example(model, sample_rate: int):
 
 
 def export_decoder_joint(model, output_dir: Path) -> Path:
+    print("[export] exporting decoder/joint FP32 ONNX", flush=True)
     temp_prefix = output_dir / "temp_model"
     with torch.no_grad():
         model.export(output=str(temp_prefix) + ".onnx", check_trace=False)
@@ -249,7 +342,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", help=".nemo path or NeMo/Hugging Face model id")
     parser.add_argument("output_dir", type=Path)
-    parser.add_argument("--left-context", type=int, default=70)
+    parser.add_argument(
+        "--left-context",
+        type=int,
+        default=56,
+        help="Attention left context. Nemotron 3.5 multilingual expects 56.",
+    )
     parser.add_argument("--right-context", type=int, default=6)
     parser.add_argument("--sample-rate", type=int, default=16000)
     parser.add_argument(
@@ -263,6 +361,16 @@ def main() -> None:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Run full dynamic QUInt8 quantization before projected-cache rewrite.",
+    )
+    parser.add_argument(
+        "--export-only",
+        action="store_true",
+        help="Stop after writing FP32 encoder/decoder artifacts for a separate transform step.",
+    )
+    parser.add_argument(
+        "--verify-lang",
+        default="en-US",
+        help="Language prompt to use for pre-export wrapper parity verification.",
     )
     args = parser.parse_args()
 
@@ -282,12 +390,15 @@ def main() -> None:
     device = torch.device("cpu")
     model = load_model(args.input, device)
     model.eval()
+    print(f"[export] model class: {type(model).__name__}", flush=True)
     save_tokenizer(model, args.input, args.output_dir)
 
     if hasattr(model.encoder, "set_default_att_context_size"):
         model.encoder.set_default_att_context_size([args.left_context, args.right_context])
 
     streaming_cfg = model.encoder.streaming_cfg
+    print(f"[export] att_context_size=[{args.left_context}, {args.right_context}]", flush=True)
+    print(f"[export] streaming_cfg={streaming_cfg}", flush=True)
     model.encoder.setup_streaming_params(
         chunk_size=args.right_context + 1,
         shift_size=args.right_context + 1,
@@ -311,6 +422,20 @@ def main() -> None:
         cache_last_time,
         cache_last_channel_len,
     )
+    reference_encoded = None
+    reference_encoded_len = None
+    verified_lang = None
+    verified_prompt_index = None
+    parity_diff = None
+    if prompted:
+        reference_encoded, reference_encoded_len, verified_lang, verified_prompt_index, parity_diff = verify_prompt_wrapper(
+            model,
+            wrapper,
+            encoder_inputs,
+            prompt_dict,
+            args.verify_lang,
+        )
+        prompt_index = torch.tensor([verified_prompt_index], dtype=torch.long)
     input_names = list(INPUT_NAMES)
     dynamic_axes = {
         "processed_signal": {0: "batch", 2: "time"},
@@ -324,10 +449,11 @@ def main() -> None:
         dynamic_axes["prompt_index"] = {0: "batch"}
 
     fp32_encoder = args.output_dir / "encoder.fp32.onnx"
+    print("[export] exporting encoder FP32 ONNX", flush=True)
     torch.onnx.export(
         wrapper,
         encoder_inputs,
-        fp32_encoder,
+        str(fp32_encoder),
         input_names=input_names,
         output_names=OUTPUT_NAMES,
         opset_version=17,
@@ -335,6 +461,7 @@ def main() -> None:
     )
 
     consolidated_encoder = args.output_dir / "encoder.fp32.consolidated.onnx"
+    print("[export] consolidating encoder external data", flush=True)
     consolidate_onnx(fp32_encoder, consolidated_encoder, "encoder.fp32.consolidated.data")
     cleanup_patterns(
         args.output_dir,
@@ -342,6 +469,64 @@ def main() -> None:
     )
 
     decoder_fp32 = export_decoder_joint(model, args.output_dir)
+
+    config = {
+        "model_name": args.input,
+        "sample_rate": args.sample_rate,
+        "n_mels": 128,
+        "subsampling_factor": int(cfg_get(model.cfg.encoder, "subsampling_factor", 8)),
+        "att_context_size": [args.left_context, args.right_context],
+        "left_context": args.left_context,
+        "right_context": args.right_context,
+        "chunk_size_output_frames": args.right_context + 1,
+        "drop_extra_pre_encoded": drop_extra,
+        "num_encoder_layers": int(cache_last_channel.shape[0]),
+        "hidden_dim": int(cache_last_channel.shape[3]),
+        "conv_context": int(cache_last_time.shape[3]),
+        "vocab_size": tokenizer_vocab_size(model),
+        "blank_id": tokenizer_vocab_size(model),
+        "num_prompts": int(getattr(model, "num_prompts", 0)) if prompted else 0,
+        "projected_cache": args.projected_cache,
+        "dynamic_quint8_quantization": args.quantize,
+        "prompt_dictionary": prompt_dict,
+        "preprocessor": jsonable(getattr(model.cfg, "preprocessor", {})),
+        "cache_shapes": {
+            "cache_last_channel": list(cache_last_channel.shape),
+            "cache_last_time": list(cache_last_time.shape),
+            "cache_last_channel_len": list(cache_last_channel_len.shape),
+        },
+        "test_input": {
+            "mel_shape": list(processed_signal.shape),
+            "mel_length": int(processed_signal_length[0]),
+            "prompt_index": verified_prompt_index,
+        },
+        "test_output": {
+            "encoded_shape": list(reference_encoded.shape) if reference_encoded is not None else None,
+            "encoded_len": int(reference_encoded_len[0]) if reference_encoded_len is not None else None,
+            "verify_lang": verified_lang,
+            "wrapper_max_diff": parity_diff,
+        },
+    }
+    (args.output_dir / "export_config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+    if args.export_only:
+        cleanup_patterns(
+            args.output_dir,
+            [
+                "encoder.fp32.onnx",
+                "encoder.fp32.onnx.data",
+                "encoder-temp_model.onnx",
+                "temp_model*",
+                "Constant_*",
+                "onnx__*",
+                "layers.*",
+                "pre_encode.*",
+                "prompt_kernel.*",
+            ],
+        )
+        gc.collect()
+        print(f"[export] wrote FP32 export artifacts to {args.output_dir}", flush=True)
+        return
 
     encoder_for_projected = consolidated_encoder
     if args.quantize:
@@ -355,6 +540,7 @@ def main() -> None:
 
     final_encoder = args.output_dir / "encoder.onnx"
     if args.projected_cache:
+        print("[export] rewriting encoder with projected cache", flush=True)
         rewrite_projected_cache(encoder_for_projected, final_encoder, "dynamic-int8")
     else:
         shutil.copy2(encoder_for_projected, final_encoder)
@@ -370,26 +556,6 @@ def main() -> None:
         ],
     )
 
-    config = {
-        "model_name": args.input,
-        "sample_rate": args.sample_rate,
-        "n_mels": 128,
-        "left_context": args.left_context,
-        "right_context": args.right_context,
-        "chunk_size_output_frames": args.right_context + 1,
-        "drop_extra_pre_encoded": drop_extra,
-        "num_encoder_layers": int(cache_last_channel.shape[0]),
-        "hidden_dim": int(cache_last_channel.shape[3]),
-        "conv_context": int(cache_last_time.shape[3]),
-        "projected_cache": args.projected_cache,
-        "dynamic_quint8_quantization": args.quantize,
-        "prompt_dictionary": prompt_dict,
-        "cache_shapes": {
-            "cache_last_channel": list(cache_last_channel.shape),
-            "cache_last_time": list(cache_last_time.shape),
-            "cache_last_channel_len": list(cache_last_channel_len.shape),
-        },
-    }
     (args.output_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
 
     gc.collect()
