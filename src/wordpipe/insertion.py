@@ -158,25 +158,33 @@ class RemoteDesktopPortalSession:
         loop = GLib.MainLoop()
         response: dict[str, object] = {}
         error: list[BaseException] = []
+        expected_handle: list[str] = []
 
-        def on_response(code, results) -> None:  # type: ignore[no-untyped-def]
+        def on_response(code, results, request_path=None) -> None:  # type: ignore[no-untyped-def]
+            if expected_handle and str(request_path) != expected_handle[0]:
+                return
             if int(code) != 0:
                 error.append(RuntimeError(f"portal request failed with response code {int(code)}"))
             else:
                 response.update(dict(results))
             loop.quit()
 
-        handle = method(*self._variant_args(args))
-        self._bus.add_signal_receiver(
+        match = self._bus.add_signal_receiver(
             on_response,
             signal_name="Response",
             dbus_interface="org.freedesktop.portal.Request",
-            path=str(handle),
+            path_keyword="request_path",
         )
-        loop.run()
-        if error:
-            raise error[0]
-        return response
+        try:
+            handle = method(*self._variant_args(args))
+            expected_handle.append(str(handle))
+            loop.run()
+            if error:
+                raise error[0]
+            return response
+        finally:
+            if match is not None:
+                match.remove()
 
     def _variant_args(self, args: tuple[object, ...]) -> tuple[object, ...]:
         converted: list[object] = []
