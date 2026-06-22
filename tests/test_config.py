@@ -13,6 +13,7 @@ class ConfigTests(unittest.TestCase):
 
         self.assertIsNone(config.model_dir)
         self.assertEqual(config.mode, "hold")
+        self.assertEqual(config.num_threads, 2)
 
     def test_loads_config_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

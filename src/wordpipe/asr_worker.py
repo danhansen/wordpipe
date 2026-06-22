@@ -25,8 +25,12 @@ class AsrWorkerConfig:
     sample_rate: int = 16000
     feature_dim: int = 80
     decoding_method: str = "greedy_search"
-    partial_interval_seconds: float = 0.15
+    partial_interval_seconds: float = 0.10
+    audio_chunk_seconds: float = 0.03
     queue_seconds: float = 2.0
+    endpoint_rule1_min_trailing_silence: float = 0.55
+    endpoint_rule2_min_trailing_silence: float = 0.35
+    endpoint_rule3_min_utterance_length: float = 20.0
 
 
 @dataclass(frozen=True)
@@ -98,6 +102,10 @@ class SherpaStreamingSession:
         self._dropped_chunks = 0
         self._last_partial = ""
         self._last_partial_emit = 0.0
+        self._accepted_samples = 0
+        self._decode_seconds = 0.0
+        self._decode_calls = 0
+        self._session_started = time.monotonic()
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, name="wordpipe-asr", daemon=True)
@@ -123,7 +131,7 @@ class SherpaStreamingSession:
                 except queue.Full:
                     self._dropped_chunks += 1
 
-            blocksize = max(1, int(self._config.sample_rate * 0.05))
+            blocksize = max(1, int(self._config.sample_rate * self._config.audio_chunk_seconds))
             with sd.InputStream(
                 channels=1,
                 samplerate=self._config.sample_rate,
@@ -140,6 +148,7 @@ class SherpaStreamingSession:
                         continue
 
                     stream.accept_waveform(self._config.sample_rate, samples)
+                    self._accepted_samples += len(samples)
                     self._decode_ready(recognizer, stream)
                     self._emit_partial_if_changed(recognizer, stream)
                     if recognizer.is_endpoint(stream):
@@ -152,7 +161,10 @@ class SherpaStreamingSession:
 
     def _decode_ready(self, recognizer: object, stream: object) -> None:
         while recognizer.is_ready(stream):  # type: ignore[attr-defined]
+            started = time.monotonic()
             recognizer.decode_stream(stream)  # type: ignore[attr-defined]
+            self._decode_seconds += time.monotonic() - started
+            self._decode_calls += 1
 
     def _emit_partial_if_changed(self, recognizer: object, stream: object) -> None:
         text = _result_text(recognizer.get_result(stream))  # type: ignore[attr-defined]
@@ -163,7 +175,7 @@ class SherpaStreamingSession:
             return
         self._last_partial = text
         self._last_partial_emit = now
-        self._emit(event("partial", text=text))
+        self._emit(event("partial", text=text, data=self._metrics()))
 
     def _commit_current(self, recognizer: object, stream: object) -> None:
         text = _result_text(recognizer.get_result(stream)).strip()  # type: ignore[attr-defined]
@@ -173,11 +185,29 @@ class SherpaStreamingSession:
             event(
                 "commit",
                 text=text,
-                data={"dropped_audio_chunks": self._dropped_chunks},
+                data=self._metrics(),
             )
         )
         self._last_partial = ""
         self._last_partial_emit = 0.0
+        self._accepted_samples = 0
+        self._decode_seconds = 0.0
+        self._decode_calls = 0
+        self._session_started = time.monotonic()
+
+    def _metrics(self) -> dict[str, float | int]:
+        audio_seconds = self._accepted_samples / self._config.sample_rate
+        elapsed_seconds = time.monotonic() - self._session_started
+        return {
+            "audio_seconds": round(audio_seconds, 3),
+            "elapsed_seconds": round(elapsed_seconds, 3),
+            "decode_seconds": round(self._decode_seconds, 3),
+            "decode_calls": self._decode_calls,
+            "dropped_audio_chunks": self._dropped_chunks,
+            "real_time_factor": round(self._decode_seconds / audio_seconds, 3)
+            if audio_seconds > 0
+            else 0.0,
+        }
 
 
 def _result_text(result: object) -> str:
@@ -203,9 +233,9 @@ def _create_recognizer(config: AsrWorkerConfig) -> object:
         "decoding_method": config.decoding_method,
         "provider": config.provider,
         "enable_endpoint_detection": True,
-        "rule1_min_trailing_silence": 1.2,
-        "rule2_min_trailing_silence": 0.8,
-        "rule3_min_utterance_length": 20.0,
+        "rule1_min_trailing_silence": config.endpoint_rule1_min_trailing_silence,
+        "rule2_min_trailing_silence": config.endpoint_rule2_min_trailing_silence,
+        "rule3_min_utterance_length": config.endpoint_rule3_min_utterance_length,
     }
 
     recognizer_cls = sherpa_onnx.OnlineRecognizer
@@ -270,23 +300,42 @@ def render_model_info(model_dir: Path) -> str:
     return json.dumps(discover_model_layout(model_dir).to_dict(), indent=2, sort_keys=True)
 
 
-def transcribe_wav_file(config: AsrWorkerConfig, wav_path: Path) -> str:
+def transcribe_wav_file(config: AsrWorkerConfig, wav_path: Path) -> tuple[str, dict[str, float | int]]:
     samples, sample_rate = read_wav_mono_float32(wav_path)
     if sample_rate != config.sample_rate:
         raise ValueError(f"expected {config.sample_rate} Hz audio, got {sample_rate} Hz")
 
+    started = time.monotonic()
     recognizer = _create_recognizer(config)
     stream = recognizer.create_stream()
+    decode_seconds = 0.0
+    decode_calls = 0
     chunk_size = max(1, int(config.sample_rate * 0.1))
     for offset in range(0, len(samples), chunk_size):
         stream.accept_waveform(config.sample_rate, samples[offset : offset + chunk_size])
         while recognizer.is_ready(stream):
+            decode_started = time.monotonic()
             recognizer.decode_stream(stream)
+            decode_seconds += time.monotonic() - decode_started
+            decode_calls += 1
 
     stream.input_finished()
     while recognizer.is_ready(stream):
+        decode_started = time.monotonic()
         recognizer.decode_stream(stream)
-    return _result_text(recognizer.get_result(stream))
+        decode_seconds += time.monotonic() - decode_started
+        decode_calls += 1
+    audio_seconds = len(samples) / config.sample_rate
+    metrics = {
+        "audio_seconds": round(audio_seconds, 3),
+        "elapsed_seconds": round(time.monotonic() - started, 3),
+        "decode_seconds": round(decode_seconds, 3),
+        "decode_calls": decode_calls,
+        "real_time_factor": round(decode_seconds / audio_seconds, 3)
+        if audio_seconds > 0
+        else 0.0,
+    }
+    return _result_text(recognizer.get_result(stream)), metrics
 
 
 def read_wav_mono_float32(path: Path):

@@ -24,8 +24,10 @@ The current implementation provides:
 - `wordpipe asr-worker` newline-JSON streaming worker protocol.
 - `wordpipe type-text` keyboard insertion through the RemoteDesktop portal.
 - `wordpipe daemon` MVP loop that connects the ASR worker to text insertion.
+- `wordpipe hotkey-daemon` manual or GlobalShortcuts-controlled dictation.
+- Optional libadwaita/GTK live transcript overlay.
 
-The GNOME Shell extension, top-bar indicator, and live overlay are not built yet.
+The GNOME Shell extension and top-bar indicator are not built yet.
 
 ## Local Development
 
@@ -40,6 +42,13 @@ Run tests:
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests
+```
+
+After creating `.venv`, the `scripts/wordpipe-dev` wrapper runs the local source
+tree without repeating `PYTHONPATH=src .venv/bin/python -m wordpipe`:
+
+```sh
+scripts/wordpipe-dev probe
 ```
 
 Run the capability probe:
@@ -61,6 +70,16 @@ PYTHONPATH=src python3 -m wordpipe transcribe-file \
   --model-dir models/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11 \
   --wav models/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11/test_wavs/en.wav
 ```
+
+Run live partial-only testing with RTF metrics:
+
+```sh
+scripts/wordpipe-dev listen-test \
+  --model-dir models/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11
+```
+
+This opens the microphone and prints `partial` and `commit` events without
+inserting text into any app. Use Ctrl+C to stop.
 
 Dry-run text insertion:
 
@@ -144,6 +163,33 @@ csukuangfj2/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11
 The model directory must contain `tokens.txt` and either a single `.onnx` model
 for the Nemotron CTC path or `encoder*.onnx`, `decoder*.onnx`, and
 `joiner*.onnx` for a transducer layout.
+
+## Live Validation
+
+Validated in GNOME 50.2 on Wayland:
+
+- RemoteDesktop portal text insertion into a focused app.
+- Manual hotkey end-to-end dictation with the Adwaita/GTK overlay.
+- Live microphone capture reaching the ASR `listening` state.
+- Offline decoding with the downloaded Nemotron int8 model.
+
+## Performance Notes
+
+The default CPU tuning is currently:
+
+```text
+num_threads = 2
+audio_chunk_seconds = 0.03
+partial_interval_seconds = 0.10
+endpoint_rule1_min_trailing_silence = 0.55
+endpoint_rule2_min_trailing_silence = 0.35
+```
+
+On the current test machine, the 560 ms int8 model decodes slower than realtime
+on CPU. The best measured CPU thread count was 2 threads; higher counts were
+slower. GPU acceleration remains exposed through `--provider`, but this machine
+does not have a CUDA-capable GPU and the installed wheel did not expose a GPU
+provider.
 
 The GTK overlay prefers libadwaita (`Adw 1`) and falls back to plain GTK 4 if
 libadwaita is not available. Non-UI daemon paths do not require GTK.

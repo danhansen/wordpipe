@@ -14,11 +14,17 @@ model_dir = "/path/to/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8"
 provider = "cpu"
 num_threads = 2
 sample_rate = 16000
+partial_interval_seconds = 0.10
+audio_chunk_seconds = 0.03
+endpoint_rule1_min_trailing_silence = 0.55
+endpoint_rule2_min_trailing_silence = 0.35
+endpoint_rule3_min_utterance_length = 20.0
 overlay = "gtk"
 mode = "hold"
 shortcut = "CTRL+ALT+space"
 spoken_punctuation = true
 dry_run_insertion = false
+log_metrics = false
 """
 
 
@@ -28,11 +34,17 @@ class WordpipeConfig:
     provider: str = "cpu"
     num_threads: int = 2
     sample_rate: int = 16000
+    partial_interval_seconds: float = 0.10
+    audio_chunk_seconds: float = 0.03
+    endpoint_rule1_min_trailing_silence: float = 0.55
+    endpoint_rule2_min_trailing_silence: float = 0.35
+    endpoint_rule3_min_utterance_length: float = 20.0
     overlay: str = "stderr"
     mode: HotkeyMode = "hold"
     shortcut: str = "CTRL+ALT+space"
     spoken_punctuation: bool = True
     dry_run_insertion: bool = False
+    log_metrics: bool = False
 
 
 def default_config_path() -> Path:
@@ -55,11 +67,23 @@ def load_config(path: Path | None = None) -> WordpipeConfig:
         provider=_string(data, "provider", "cpu"),
         num_threads=_integer(data, "num_threads", 2),
         sample_rate=_integer(data, "sample_rate", 16000),
+        partial_interval_seconds=_number(data, "partial_interval_seconds", 0.10),
+        audio_chunk_seconds=_number(data, "audio_chunk_seconds", 0.03),
+        endpoint_rule1_min_trailing_silence=_number(
+            data, "endpoint_rule1_min_trailing_silence", 0.55
+        ),
+        endpoint_rule2_min_trailing_silence=_number(
+            data, "endpoint_rule2_min_trailing_silence", 0.35
+        ),
+        endpoint_rule3_min_utterance_length=_number(
+            data, "endpoint_rule3_min_utterance_length", 20.0
+        ),
         overlay=_string(data, "overlay", "stderr"),
         mode=_mode(data.get("mode", "hold")),
         shortcut=_string(data, "shortcut", "CTRL+ALT+space"),
         spoken_punctuation=_boolean(data, "spoken_punctuation", True),
         dry_run_insertion=_boolean(data, "dry_run_insertion", False),
+        log_metrics=_boolean(data, "log_metrics", False),
     )
 
 
@@ -83,6 +107,13 @@ def _integer(data: dict[str, Any], key: str, default: int) -> int:
     if not isinstance(value, int):
         raise ValueError(f"{key} must be an integer")
     return value
+
+
+def _number(data: dict[str, Any], key: str, default: float) -> float:
+    value = data.get(key, default)
+    if not isinstance(value, int | float):
+        raise ValueError(f"{key} must be a number")
+    return float(value)
 
 
 def _boolean(data: dict[str, Any], key: str, default: bool) -> bool:

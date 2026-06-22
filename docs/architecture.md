@@ -76,6 +76,14 @@ dictation stops
 No external VAD is used. The streaming ASR model receives the audio stream
 directly.
 
+Current low-latency defaults:
+
+- 30 ms microphone chunks
+- 100 ms partial transcript interval
+- 0.55 s endpoint trailing silence for speech phrases
+- 0.35 s endpoint trailing silence for empty/no-speech streams
+- 2 CPU threads, based on local benchmark results
+
 ## Text Insertion
 
 Primary target:
@@ -135,6 +143,16 @@ Expected files:
 
 The `download-model` command downloads these files into `models/` by default.
 
+## Performance
+
+`listen-test` is the primary live tuning mode. It opens the microphone, prints
+partial results, and reports realtime factor (RTF) without inserting text.
+
+GPU acceleration is possible only if the installed sherpa-onnx/ONNX Runtime
+build supports a GPU provider and the machine has the matching driver/runtime.
+The current test machine exposes only Intel HD Graphics 4000, so CPU tuning is
+the practical path here.
+
 ## Packaging
 
 The repository includes early templates for a desktop entry and user systemd
@@ -149,14 +167,15 @@ installed on `PATH`; they are not a complete distro package.
    - GlobalShortcuts availability
    - RemoteDesktop keyboard availability
    - EIS/libei availability
-   - status: initial probe implemented
+   - status: implemented and live-validated on GNOME 50.2 Wayland
 
 2. Streaming ASR spike
    - load Nemotron int8 model
    - stream microphone audio
    - print partial and endpoint-committed text
    - log real-time factor, queue depth, and commit latency
-   - status: ASR worker protocol implemented; needs sherpa/model runtime test
+   - status: implemented; model load, offline WAV decode, and live microphone
+     stream have been validated
 
 3. ASR process protocol
    - newline-delimited JSON over stdio or Unix socket
@@ -168,8 +187,8 @@ installed on `PATH`; they are not a complete distro package.
    - portal permission flow
    - insert simple ASCII phrases into focused GNOME apps
    - test Text Editor, Terminal, Firefox, LibreOffice
-   - status: RemoteDesktop `NotifyKeyboardKeysym` backend implemented; needs
-     live portal test outside sandbox
+   - status: RemoteDesktop `NotifyKeyboardKeysym` backend implemented and
+     live-validated
 
 5. GNOME hotkey and status
    - global shortcut or shell extension trigger
@@ -184,7 +203,8 @@ installed on `PATH`; they are not a complete distro package.
    - endpoint commits insert text
    - stop commits non-empty partial
    - status: CLI daemon, hotkey daemon, and optional Adwaita/GTK overlay
-     implemented; top-bar indicator not implemented
+     implemented and live-validated in manual-hotkey mode; top-bar indicator
+     not implemented
 
 ## Validation Matrix
 

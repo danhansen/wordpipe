@@ -29,7 +29,13 @@ class DaemonConfig:
     provider: str = "cpu"
     num_threads: int = 2
     sample_rate: int = 16000
+    partial_interval_seconds: float = 0.10
+    audio_chunk_seconds: float = 0.03
+    endpoint_rule1_min_trailing_silence: float = 0.55
+    endpoint_rule2_min_trailing_silence: float = 0.35
+    endpoint_rule3_min_utterance_length: float = 20.0
     spoken_punctuation: bool = True
+    log_metrics: bool = False
 
 
 def format_committed_text(text: str) -> str:
@@ -69,6 +75,16 @@ class AsrProcess:
                 str(self._config.num_threads),
                 "--sample-rate",
                 str(self._config.sample_rate),
+                "--partial-interval-seconds",
+                str(self._config.partial_interval_seconds),
+                "--audio-chunk-seconds",
+                str(self._config.audio_chunk_seconds),
+                "--endpoint-rule1-min-trailing-silence",
+                str(self._config.endpoint_rule1_min_trailing_silence),
+                "--endpoint-rule2-min-trailing-silence",
+                str(self._config.endpoint_rule2_min_trailing_silence),
+                "--endpoint-rule3-min-utterance-length",
+                str(self._config.endpoint_rule3_min_utterance_length),
             ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -216,6 +232,8 @@ class DictationController:
             text = format_committed_text(raw_text)
             if text:
                 self._transcript.commit(text)
+                if self._config.log_metrics:
+                    self._transcript.status(_format_metrics(item.get("data")))
                 self._keyboard.insert_text(text)
                 if isinstance(self._keyboard, DryRunKeyboardBackend):
                     for rendered in self._keyboard.events:
@@ -228,6 +246,16 @@ class DictationController:
         elif kind == "stopped":
             with self._lock:
                 self._listening = False
+
+
+def _format_metrics(data: object) -> str:
+    if not isinstance(data, dict):
+        return "metrics: unavailable"
+    rtf = data.get("real_time_factor", "?")
+    audio = data.get("audio_seconds", "?")
+    elapsed = data.get("elapsed_seconds", "?")
+    dropped = data.get("dropped_audio_chunks", "?")
+    return f"metrics: rtf={rtf} audio={audio}s elapsed={elapsed}s dropped={dropped}"
 
 
 def run_daemon(config: DaemonConfig, transcript: TranscriptSink | None = None) -> int:

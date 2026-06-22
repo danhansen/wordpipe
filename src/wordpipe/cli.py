@@ -31,6 +31,11 @@ def _cmd_asr_worker(args: argparse.Namespace) -> int:
         provider=args.provider,
         num_threads=args.num_threads,
         sample_rate=args.sample_rate,
+        partial_interval_seconds=args.partial_interval_seconds,
+        audio_chunk_seconds=args.audio_chunk_seconds,
+        endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence,
+        endpoint_rule2_min_trailing_silence=args.endpoint_rule2_min_trailing_silence,
+        endpoint_rule3_min_utterance_length=args.endpoint_rule3_min_utterance_length,
     )
     return run_stdio_worker(config)
 
@@ -50,9 +55,34 @@ def _cmd_transcribe_file(args: argparse.Namespace) -> int:
         provider=args.provider,
         num_threads=args.num_threads,
         sample_rate=args.sample_rate,
+        endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence,
+        endpoint_rule2_min_trailing_silence=args.endpoint_rule2_min_trailing_silence,
+        endpoint_rule3_min_utterance_length=args.endpoint_rule3_min_utterance_length,
     )
-    print(transcribe_wav_file(config, Path(args.wav)))
+    text, metrics = transcribe_wav_file(config, Path(args.wav))
+    print(text)
+    if args.metrics:
+        print(json.dumps(metrics, indent=2, sort_keys=True), file=sys.stderr)
     return 0
+
+
+def _cmd_listen_test(args: argparse.Namespace) -> int:
+    from .listen_test import ListenTestConfig, run_listen_test
+
+    config = ListenTestConfig(
+        model_dir=Path(args.model_dir),
+        provider=args.provider,
+        num_threads=args.num_threads,
+        sample_rate=args.sample_rate,
+        partial_interval_seconds=args.partial_interval_seconds,
+        audio_chunk_seconds=args.audio_chunk_seconds,
+        endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence,
+        endpoint_rule2_min_trailing_silence=args.endpoint_rule2_min_trailing_silence,
+        endpoint_rule3_min_utterance_length=args.endpoint_rule3_min_utterance_length,
+        duration_seconds=args.duration,
+        json_output=args.json,
+    )
+    return run_listen_test(config)
 
 
 def _cmd_download_model(args: argparse.Namespace) -> int:
@@ -108,7 +138,23 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
         provider=args.provider or file_config.provider,
         num_threads=args.num_threads if args.num_threads is not None else file_config.num_threads,
         sample_rate=args.sample_rate if args.sample_rate is not None else file_config.sample_rate,
+        partial_interval_seconds=args.partial_interval_seconds
+        if args.partial_interval_seconds is not None
+        else file_config.partial_interval_seconds,
+        audio_chunk_seconds=args.audio_chunk_seconds
+        if args.audio_chunk_seconds is not None
+        else file_config.audio_chunk_seconds,
+        endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence
+        if args.endpoint_rule1_min_trailing_silence is not None
+        else file_config.endpoint_rule1_min_trailing_silence,
+        endpoint_rule2_min_trailing_silence=args.endpoint_rule2_min_trailing_silence
+        if args.endpoint_rule2_min_trailing_silence is not None
+        else file_config.endpoint_rule2_min_trailing_silence,
+        endpoint_rule3_min_utterance_length=args.endpoint_rule3_min_utterance_length
+        if args.endpoint_rule3_min_utterance_length is not None
+        else file_config.endpoint_rule3_min_utterance_length,
         spoken_punctuation=file_config.spoken_punctuation and not args.no_spoken_punctuation,
+        log_metrics=args.log_metrics or file_config.log_metrics,
     )
     return run_daemon(config, make_transcript_sink(args.overlay or file_config.overlay))
 
@@ -124,7 +170,23 @@ def _cmd_hotkey_daemon(args: argparse.Namespace) -> int:
         provider=args.provider or file_config.provider,
         num_threads=args.num_threads if args.num_threads is not None else file_config.num_threads,
         sample_rate=args.sample_rate if args.sample_rate is not None else file_config.sample_rate,
+        partial_interval_seconds=args.partial_interval_seconds
+        if args.partial_interval_seconds is not None
+        else file_config.partial_interval_seconds,
+        audio_chunk_seconds=args.audio_chunk_seconds
+        if args.audio_chunk_seconds is not None
+        else file_config.audio_chunk_seconds,
+        endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence
+        if args.endpoint_rule1_min_trailing_silence is not None
+        else file_config.endpoint_rule1_min_trailing_silence,
+        endpoint_rule2_min_trailing_silence=args.endpoint_rule2_min_trailing_silence
+        if args.endpoint_rule2_min_trailing_silence is not None
+        else file_config.endpoint_rule2_min_trailing_silence,
+        endpoint_rule3_min_utterance_length=args.endpoint_rule3_min_utterance_length
+        if args.endpoint_rule3_min_utterance_length is not None
+        else file_config.endpoint_rule3_min_utterance_length,
         spoken_punctuation=file_config.spoken_punctuation and not args.no_spoken_punctuation,
+        log_metrics=args.log_metrics or file_config.log_metrics,
     )
     return run_hotkey_daemon(
         config,
@@ -138,6 +200,39 @@ def _cmd_hotkey_daemon(args: argparse.Namespace) -> int:
 def _cmd_config_example(_args: argparse.Namespace) -> int:
     print(DEFAULT_CONFIG, end="")
     return 0
+
+
+def _add_asr_tuning_args(parser: argparse.ArgumentParser, *, worker_defaults: bool) -> None:
+    parser.add_argument(
+        "--partial-interval-seconds",
+        type=float,
+        default=0.10 if worker_defaults else None,
+        help="Minimum time between partial transcript updates.",
+    )
+    parser.add_argument(
+        "--audio-chunk-seconds",
+        type=float,
+        default=0.03 if worker_defaults else None,
+        help="Microphone audio chunk size sent to the streaming recognizer.",
+    )
+    parser.add_argument(
+        "--endpoint-rule1-min-trailing-silence",
+        type=float,
+        default=0.55 if worker_defaults else None,
+        help="Trailing silence before committing a phrase with speech.",
+    )
+    parser.add_argument(
+        "--endpoint-rule2-min-trailing-silence",
+        type=float,
+        default=0.35 if worker_defaults else None,
+        help="Trailing silence endpoint rule for empty/no-speech streams.",
+    )
+    parser.add_argument(
+        "--endpoint-rule3-min-utterance-length",
+        type=float,
+        default=20.0 if worker_defaults else None,
+        help="Maximum utterance length before endpointing.",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -166,6 +261,7 @@ def build_parser() -> argparse.ArgumentParser:
     asr.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
     asr.add_argument("--num-threads", type=int, default=2)
     asr.add_argument("--sample-rate", type=int, default=16000)
+    _add_asr_tuning_args(asr, worker_defaults=True)
     asr.set_defaults(func=_cmd_asr_worker)
 
     model_info = subparsers.add_parser(
@@ -188,7 +284,43 @@ def build_parser() -> argparse.ArgumentParser:
     transcribe_file.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
     transcribe_file.add_argument("--num-threads", type=int, default=2)
     transcribe_file.add_argument("--sample-rate", type=int, default=16000)
+    transcribe_file.add_argument("--metrics", action="store_true", help="Print timing metrics.")
+    transcribe_file.add_argument(
+        "--endpoint-rule1-min-trailing-silence",
+        type=float,
+        default=0.55,
+        help="Trailing silence before committing a phrase with speech.",
+    )
+    transcribe_file.add_argument(
+        "--endpoint-rule2-min-trailing-silence",
+        type=float,
+        default=0.35,
+        help="Trailing silence endpoint rule for empty/no-speech streams.",
+    )
+    transcribe_file.add_argument(
+        "--endpoint-rule3-min-utterance-length",
+        type=float,
+        default=20.0,
+        help="Maximum utterance length before endpointing.",
+    )
     transcribe_file.set_defaults(func=_cmd_transcribe_file)
+
+    listen_test = subparsers.add_parser(
+        "listen-test",
+        help="Open the microphone and print live partials/commits with RTF metrics.",
+    )
+    listen_test.add_argument("--model-dir", required=True)
+    listen_test.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
+    listen_test.add_argument("--num-threads", type=int, default=2)
+    listen_test.add_argument("--sample-rate", type=int, default=16000)
+    listen_test.add_argument(
+        "--duration",
+        type=float,
+        help="Stop after this many seconds. Default is to run until interrupted.",
+    )
+    listen_test.add_argument("--json", action="store_true", help="Print raw JSON events.")
+    _add_asr_tuning_args(listen_test, worker_defaults=True)
+    listen_test.set_defaults(func=_cmd_listen_test)
 
     download_model = subparsers.add_parser(
         "download-model",
@@ -247,11 +379,13 @@ def build_parser() -> argparse.ArgumentParser:
     daemon.add_argument("--provider", help="ONNX Runtime provider.")
     daemon.add_argument("--num-threads", type=int)
     daemon.add_argument("--sample-rate", type=int)
+    _add_asr_tuning_args(daemon, worker_defaults=False)
     daemon.add_argument(
         "--no-spoken-punctuation",
         action="store_true",
         help="Insert raw ASR text instead of converting spoken punctuation commands.",
     )
+    daemon.add_argument("--log-metrics", action="store_true", help="Log ASR timing metrics.")
     daemon.add_argument(
         "--overlay",
         choices=("stderr", "gtk"),
@@ -290,11 +424,13 @@ def build_parser() -> argparse.ArgumentParser:
     hotkey_daemon.add_argument("--provider", help="ONNX Runtime provider.")
     hotkey_daemon.add_argument("--num-threads", type=int)
     hotkey_daemon.add_argument("--sample-rate", type=int)
+    _add_asr_tuning_args(hotkey_daemon, worker_defaults=False)
     hotkey_daemon.add_argument(
         "--no-spoken-punctuation",
         action="store_true",
         help="Insert raw ASR text instead of converting spoken punctuation commands.",
     )
+    hotkey_daemon.add_argument("--log-metrics", action="store_true", help="Log ASR timing metrics.")
     hotkey_daemon.add_argument(
         "--overlay",
         choices=("stderr", "gtk"),
