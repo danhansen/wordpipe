@@ -74,7 +74,10 @@ def _format_event(item: dict[str, object]) -> str:
     if kind in {"partial", "commit"}:
         return f"{kind:7} {metrics} {text}".rstrip()
     if kind == "stats":
-        return f"stats   {metrics}"
+        line = f"stats   {metrics}"
+        if text:
+            line = f"{line}\npartial {metrics} {text}"
+        return line
     if kind == "error":
         return f"error   {item.get('message', '')}"
     return kind

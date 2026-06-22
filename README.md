@@ -80,8 +80,9 @@ scripts/wordpipe-dev listen-test \
 
 This opens the microphone and prints `partial` and `commit` events without
 inserting text into any app. It also prints periodic `stats` lines with RTF,
-audio level, and dropped-chunk counts so you can tell whether the mic is live
-even before the recognizer produces text. Use Ctrl+C to stop.
+audio level, and dropped-chunk counts. When the recognizer has a current
+hypothesis, each stats tick also repeats it as a `partial` line, so you can see
+stable partial text even when it has not changed. Use Ctrl+C to stop.
 
 Dry-run text insertion:
 

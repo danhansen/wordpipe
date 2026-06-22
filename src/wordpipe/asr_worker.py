@@ -157,7 +157,7 @@ class SherpaStreamingSession:
                     self._record_audio_level(samples)
                     self._decode_ready(recognizer, stream)
                     self._emit_partial_if_changed(recognizer, stream)
-                    self._emit_stats_if_due()
+                    self._emit_stats_if_due(recognizer, stream)
                     if recognizer.is_endpoint(stream):
                         self._commit_current(recognizer, stream)
                         recognizer.reset(stream)
@@ -184,12 +184,13 @@ class SherpaStreamingSession:
         self._last_partial_emit = now
         self._emit(event("partial", text=text, data=self._metrics()))
 
-    def _emit_stats_if_due(self) -> None:
+    def _emit_stats_if_due(self, recognizer: object, stream: object) -> None:
         now = time.monotonic()
         if now - self._last_stats_emit < self._config.stats_interval_seconds:
             return
         self._last_stats_emit = now
-        self._emit(event("stats", data=self._metrics()))
+        text = _result_text(recognizer.get_result(stream))  # type: ignore[attr-defined]
+        self._emit(event("stats", text=text, data=self._metrics()))
 
     def _record_audio_level(self, samples: object) -> None:
         try:

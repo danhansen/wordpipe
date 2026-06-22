@@ -29,6 +29,7 @@ class ListenTestTests(unittest.TestCase):
         line = _format_event(
             {
                 "event": "stats",
+                "text": "current words",
                 "data": {
                     "real_time_factor": 0.2,
                     "audio_seconds": 1.0,
@@ -42,8 +43,10 @@ class ListenTestTests(unittest.TestCase):
         )
 
         self.assertIn("stats", line)
+        self.assertIn("partial", line)
         self.assertIn("rtf=0.2", line)
         self.assertIn("rms=0.01", line)
+        self.assertIn("current words", line)
 
 
 if __name__ == "__main__":
