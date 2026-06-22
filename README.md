@@ -117,6 +117,9 @@ Install ASR dependencies in the environment that runs Wordpipe:
 python3 -m pip install '.[asr]'
 ```
 
+The local development environment has been smoke-tested with
+`sherpa-onnx==1.13.3` on Python 3.14.
+
 The model directory must contain `tokens.txt` and either a single `.onnx` model
 for the Nemotron CTC path or `encoder*.onnx`, `decoder*.onnx`, and
 `joiner*.onnx` for a transducer layout.
