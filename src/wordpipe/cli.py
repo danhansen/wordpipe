@@ -63,6 +63,24 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
     return run_daemon(config)
 
 
+def _cmd_hotkey_daemon(args: argparse.Namespace) -> int:
+    from .daemon import DaemonConfig, run_hotkey_daemon
+
+    config = DaemonConfig(
+        model_dir=Path(args.model_dir),
+        dry_run_insertion=args.dry_run_insertion,
+        provider=args.provider,
+        num_threads=args.num_threads,
+        sample_rate=args.sample_rate,
+    )
+    return run_hotkey_daemon(
+        config,
+        mode=args.mode,
+        shortcut=args.shortcut,
+        manual_hotkey=args.manual_hotkey,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="wordpipe",
@@ -121,6 +139,41 @@ def build_parser() -> argparse.ArgumentParser:
     daemon.add_argument("--num-threads", type=int, default=2)
     daemon.add_argument("--sample-rate", type=int, default=16000)
     daemon.set_defaults(func=_cmd_daemon)
+
+    hotkey_daemon = subparsers.add_parser(
+        "hotkey-daemon",
+        help="Run dictation controlled by a GNOME GlobalShortcuts portal hotkey.",
+    )
+    hotkey_daemon.add_argument(
+        "--model-dir",
+        required=True,
+        help="Path to sherpa-onnx Nemotron int8 streaming model directory.",
+    )
+    hotkey_daemon.add_argument(
+        "--mode",
+        choices=("hold", "toggle"),
+        default="hold",
+        help="Shortcut behavior. Hold starts on activation and stops on deactivation.",
+    )
+    hotkey_daemon.add_argument(
+        "--shortcut",
+        default="CTRL+ALT+space",
+        help="Preferred GlobalShortcuts trigger string.",
+    )
+    hotkey_daemon.add_argument(
+        "--manual-hotkey",
+        action="store_true",
+        help="Read manual commands from stdin instead of opening GlobalShortcuts.",
+    )
+    hotkey_daemon.add_argument(
+        "--dry-run-insertion",
+        action="store_true",
+        help="Print keyboard events instead of opening a portal keyboard session.",
+    )
+    hotkey_daemon.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
+    hotkey_daemon.add_argument("--num-threads", type=int, default=2)
+    hotkey_daemon.add_argument("--sample-rate", type=int, default=16000)
+    hotkey_daemon.set_defaults(func=_cmd_hotkey_daemon)
 
     return parser
 

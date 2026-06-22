@@ -64,6 +64,26 @@ PYTHONPATH=src python3 -m wordpipe daemon \
 Use `--dry-run-insertion` to exercise ASR without opening a portal keyboard
 session.
 
+Run the hotkey-controlled daemon:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe hotkey-daemon \
+  --model-dir /path/to/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8 \
+  --mode hold \
+  --shortcut 'CTRL+ALT+space'
+```
+
+For development without the GlobalShortcuts portal:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe hotkey-daemon \
+  --model-dir /path/to/model \
+  --manual-hotkey \
+  --dry-run-insertion
+```
+
+Manual commands are `down`, `up`, `toggle`, and `quit`.
+
 ## Runtime Dependencies
 
 Install ASR dependencies in the environment that runs Wordpipe:

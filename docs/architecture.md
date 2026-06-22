@@ -142,14 +142,16 @@ Partial text is never typed into the target app in v1.
    - global shortcut or shell extension trigger
    - daemon session state
    - visible listening/error state
-   - status: not implemented
+   - status: GlobalShortcuts daemon path implemented; visual status not
+     implemented
 
 6. First integrated dictation
    - hotkey controls dictation
    - overlay shows partials
    - endpoint commits insert text
    - stop commits non-empty partial
-   - status: CLI daemon implemented; GNOME hotkey/overlay not implemented
+   - status: CLI daemon and hotkey daemon implemented; GNOME overlay not
+     implemented
 
 ## Validation Matrix
 
