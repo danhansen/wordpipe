@@ -190,6 +190,7 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
     let mut pending = Vec::<f32>::with_capacity(args.chunk_samples * 2);
     let mut transcript = String::new();
     let mut accepted_samples = 0usize;
+    let mut processed_samples = 0usize;
     let mut decode_seconds = 0.0f64;
     let mut decode_calls = 0usize;
     let mut last_rms = 0.0f32;
@@ -211,13 +212,14 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
 
                 while pending.len() >= args.chunk_samples {
                     let chunk: Vec<f32> = pending.drain(..args.chunk_samples).collect();
+                    processed_samples += chunk.len();
                     let decoded = decode_chunk(&mut model, &chunk, &mut decode_seconds, &mut decode_calls)?;
                     if !decoded.is_empty() {
                         transcript.push_str(&decoded);
                         emitter.emit(json!({
                             "event": "partial",
                             "text": transcript,
-                            "data": metrics(started, accepted_samples, args.sample_rate, decode_seconds, decode_calls, dropped_chunks.load(Ordering::Relaxed), last_rms, peak_rms),
+                            "data": metrics(started, accepted_samples, processed_samples, args.sample_rate, decode_seconds, decode_calls, dropped_chunks.load(Ordering::Relaxed), last_rms, peak_rms),
                         }));
                     }
                 }
@@ -230,33 +232,35 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
             emitter.emit(json!({
                 "event": "stats",
                 "text": transcript,
-                "data": metrics(started, accepted_samples, args.sample_rate, decode_seconds, decode_calls, dropped_chunks.load(Ordering::Relaxed), last_rms, peak_rms),
+                "data": metrics(started, accepted_samples, processed_samples, args.sample_rate, decode_seconds, decode_calls, dropped_chunks.load(Ordering::Relaxed), last_rms, peak_rms),
             }));
         }
     }
 
     if !pending.is_empty() {
         pending.resize(args.chunk_samples, 0.0);
+        processed_samples += pending.len();
         let decoded = decode_chunk(&mut model, &pending, &mut decode_seconds, &mut decode_calls)?;
         if !decoded.is_empty() {
             transcript.push_str(&decoded);
             emitter.emit(json!({
                 "event": "partial",
                 "text": transcript,
-                "data": metrics(started, accepted_samples, args.sample_rate, decode_seconds, decode_calls, dropped_chunks.load(Ordering::Relaxed), last_rms, peak_rms),
+                "data": metrics(started, accepted_samples, processed_samples, args.sample_rate, decode_seconds, decode_calls, dropped_chunks.load(Ordering::Relaxed), last_rms, peak_rms),
             }));
         }
     }
 
     for _ in 0..args.flush_chunks {
         let silence = vec![0.0; args.chunk_samples];
+        processed_samples += silence.len();
         let decoded = decode_chunk(&mut model, &silence, &mut decode_seconds, &mut decode_calls)?;
         if !decoded.is_empty() {
             transcript.push_str(&decoded);
             emitter.emit(json!({
                 "event": "partial",
                 "text": transcript,
-                "data": metrics(started, accepted_samples, args.sample_rate, decode_seconds, decode_calls, dropped_chunks.load(Ordering::Relaxed), last_rms, peak_rms),
+                "data": metrics(started, accepted_samples, processed_samples, args.sample_rate, decode_seconds, decode_calls, dropped_chunks.load(Ordering::Relaxed), last_rms, peak_rms),
             }));
         }
     }
@@ -266,7 +270,7 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
         emitter.emit(json!({
             "event": "commit",
             "text": committed,
-            "data": metrics(started, accepted_samples, args.sample_rate, decode_seconds, decode_calls, dropped_chunks.load(Ordering::Relaxed), last_rms, peak_rms),
+            "data": metrics(started, accepted_samples, processed_samples, args.sample_rate, decode_seconds, decode_calls, dropped_chunks.load(Ordering::Relaxed), last_rms, peak_rms),
         }));
     }
     drop(stream);
@@ -289,6 +293,7 @@ fn run_wav_file(args: Arc<Args>, emitter: Arc<JsonEmitter>) -> Result<()> {
     let mut decode_calls = 0usize;
     let mut peak_rms = 0.0f32;
     let mut accepted_samples = 0usize;
+    let mut processed_samples = 0usize;
 
     for chunk in samples.chunks(args.chunk_samples) {
         let chunk_index = decode_calls;
@@ -297,11 +302,17 @@ fn run_wav_file(args: Arc<Args>, emitter: Arc<JsonEmitter>) -> Result<()> {
             chunk_vec.resize(args.chunk_samples, 0.0);
         }
         accepted_samples += chunk.len();
+        processed_samples += chunk_vec.len();
         let (last_rms, peak) = audio_level(chunk);
         peak_rms = peak_rms.max(peak);
         emitter.emit(json!({
             "event": "decoding_chunk",
-            "data": {"chunk_index": chunk_index, "samples": chunk.len()},
+            "data": {
+                "chunk_index": chunk_index,
+                "samples": chunk.len(),
+                "processed_samples": chunk_vec.len(),
+                "synthetic_samples": chunk_vec.len().saturating_sub(chunk.len()),
+            },
         }));
         let decoded = decode_chunk(
             &mut model,
@@ -314,13 +325,13 @@ fn run_wav_file(args: Arc<Args>, emitter: Arc<JsonEmitter>) -> Result<()> {
             emitter.emit(json!({
                 "event": "partial",
                 "text": transcript,
-                "data": metrics(started, accepted_samples, args.sample_rate, decode_seconds, decode_calls, 0, last_rms, peak_rms),
+                "data": metrics(started, accepted_samples, processed_samples, args.sample_rate, decode_seconds, decode_calls, 0, last_rms, peak_rms),
             }));
         }
         emitter.emit(json!({
             "event": "stats",
             "text": transcript,
-            "data": metrics(started, accepted_samples, args.sample_rate, decode_seconds, decode_calls, 0, last_rms, peak_rms),
+            "data": metrics(started, accepted_samples, processed_samples, args.sample_rate, decode_seconds, decode_calls, 0, last_rms, peak_rms),
         }));
     }
 
@@ -329,16 +340,22 @@ fn run_wav_file(args: Arc<Args>, emitter: Arc<JsonEmitter>) -> Result<()> {
         let chunk_index = decode_calls;
         emitter.emit(json!({
             "event": "decoding_flush_chunk",
-            "data": {"chunk_index": chunk_index, "samples": args.chunk_samples},
+            "data": {
+                "chunk_index": chunk_index,
+                "samples": args.chunk_samples,
+                "processed_samples": args.chunk_samples,
+                "synthetic_samples": args.chunk_samples,
+            },
         }));
         let silence = vec![0.0; args.chunk_samples];
+        processed_samples += silence.len();
         let decoded = decode_chunk(&mut model, &silence, &mut decode_seconds, &mut decode_calls)?;
         if !decoded.is_empty() {
             transcript.push_str(&decoded);
             emitter.emit(json!({
                 "event": "partial",
                 "text": transcript,
-                "data": metrics(started, accepted_samples, args.sample_rate, decode_seconds, decode_calls, 0, last_rms, peak_rms),
+                "data": metrics(started, accepted_samples, processed_samples, args.sample_rate, decode_seconds, decode_calls, 0, last_rms, peak_rms),
             }));
         }
     }
@@ -348,7 +365,7 @@ fn run_wav_file(args: Arc<Args>, emitter: Arc<JsonEmitter>) -> Result<()> {
         emitter.emit(json!({
             "event": "commit",
             "text": committed,
-            "data": metrics(started, accepted_samples, args.sample_rate, decode_seconds, decode_calls, 0, last_rms, peak_rms),
+            "data": metrics(started, accepted_samples, processed_samples, args.sample_rate, decode_seconds, decode_calls, 0, last_rms, peak_rms),
         }));
     }
     Ok(())
@@ -538,6 +555,7 @@ fn audio_level(samples: &[f32]) -> (f32, f32) {
 fn metrics(
     started: Instant,
     accepted_samples: usize,
+    processed_samples: usize,
     sample_rate: u32,
     decode_seconds: f64,
     decode_calls: usize,
@@ -546,15 +564,19 @@ fn metrics(
     peak_rms: f32,
 ) -> Value {
     let audio_seconds = accepted_samples as f64 / sample_rate as f64;
+    let processed_audio_seconds = processed_samples as f64 / sample_rate as f64;
     json!({
         "audio_seconds": round3(audio_seconds),
+        "processed_audio_seconds": round3(processed_audio_seconds),
+        "synthetic_audio_seconds": round3((processed_audio_seconds - audio_seconds).max(0.0)),
         "elapsed_seconds": round3(started.elapsed().as_secs_f64()),
         "decode_seconds": round3(decode_seconds),
         "decode_calls": decode_calls,
         "dropped_audio_chunks": dropped_audio_chunks,
         "last_rms": round5(last_rms as f64),
         "peak_rms": round5(peak_rms as f64),
-        "real_time_factor": if audio_seconds > 0.0 { round3(decode_seconds / audio_seconds) } else { 0.0 },
+        "real_time_factor": if processed_audio_seconds > 0.0 { round3(decode_seconds / processed_audio_seconds) } else { 0.0 },
+        "real_audio_real_time_factor": if audio_seconds > 0.0 { round3(decode_seconds / audio_seconds) } else { 0.0 },
     })
 }
 

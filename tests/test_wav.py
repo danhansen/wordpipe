@@ -27,9 +27,11 @@ class WavTests(unittest.TestCase):
         self.assertAlmostEqual(float(samples[1]), 32767 / 32768)
 
     def test_offline_metrics_include_rtf(self) -> None:
-        metrics = _offline_metrics(0.0, 2.0, 1.0, 3)
+        metrics = _offline_metrics(0.0, 2.0, 2.5, 1.0, 3)
 
-        self.assertEqual(metrics["real_time_factor"], 0.5)
+        self.assertEqual(metrics["real_time_factor"], 0.4)
+        self.assertEqual(metrics["real_audio_real_time_factor"], 0.5)
+        self.assertEqual(metrics["synthetic_audio_seconds"], 0.5)
         self.assertEqual(metrics["decode_calls"], 3)
         self.assertEqual(metrics["last_rms"], 0.0)
 

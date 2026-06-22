@@ -263,14 +263,19 @@ num_threads = 2
 queue_seconds = 10.0
 ```
 
-The Rust worker feeds Nemotron in 560 ms chunks, matching the model's streaming
-stride. It reports RTF, audio level, and dropped audio chunks through the same
-JSON events as the legacy worker.
+The workers feed Nemotron in 560 ms chunks, matching the model's streaming
+stride. File tests feed three synthetic silence chunks by default so streaming
+models can emit trailing tokens before the final commit.
 
-On the current test machine, both tested CPU runtimes decode slower than
-realtime. The Parakeet int8 English model streams correctly from the known
-test WAV and emits partials/commit events, but the release worker measures
-about 2.5 RTF per 560 ms chunk and about 3.1 RTF including final flush.
+Metrics report both `audio_seconds` for real input and `processed_audio_seconds`
+for real input plus padding/flush audio. `real_time_factor` is calculated from
+processed audio so synthetic flush work is accounted for fairly;
+`real_audio_real_time_factor` keeps the stricter real-input denominator visible.
+
+On the current test machine, the c56 Parakeet int8 export with ORT graph
+optimization `all` decodes the known sherpa English test WAV at about 0.94 RTF
+over processed audio with the final flush included. The legacy sherpa int8 path
+is about 0.99 RTF on the same test and still misses the trailing "gold" token.
 
 The GTK overlay prefers libadwaita (`Adw 1`) and falls back to plain GTK 4 if
 libadwaita is not available. Non-UI daemon paths do not require GTK.

@@ -111,6 +111,7 @@ class SherpaStreamingSession:
         self._last_rms = 0.0
         self._peak_rms = 0.0
         self._accepted_samples = 0
+        self._processed_samples = 0
         self._decode_seconds = 0.0
         self._decode_calls = 0
         self._session_started = time.monotonic()
@@ -163,6 +164,7 @@ class SherpaStreamingSession:
 
                     stream.accept_waveform(self._config.sample_rate, samples)
                     self._accepted_samples += len(samples)
+                    self._processed_samples += len(samples)
                     self._record_audio_level(samples)
                     self._decode_ready(recognizer, stream)
                     self._emit_partial_if_changed(recognizer, stream)
@@ -224,6 +226,7 @@ class SherpaStreamingSession:
         self._last_partial = ""
         self._last_partial_emit = 0.0
         self._accepted_samples = 0
+        self._processed_samples = 0
         self._decode_seconds = 0.0
         self._decode_calls = 0
         self._last_rms = 0.0
@@ -232,16 +235,24 @@ class SherpaStreamingSession:
 
     def _metrics(self) -> dict[str, float | int]:
         audio_seconds = self._accepted_samples / self._config.sample_rate
+        processed_audio_seconds = self._processed_samples / self._config.sample_rate
         elapsed_seconds = time.monotonic() - self._session_started
         return {
             "audio_seconds": round(audio_seconds, 3),
+            "processed_audio_seconds": round(processed_audio_seconds, 3),
+            "synthetic_audio_seconds": round(
+                max(0.0, processed_audio_seconds - audio_seconds), 3
+            ),
             "elapsed_seconds": round(elapsed_seconds, 3),
             "decode_seconds": round(self._decode_seconds, 3),
             "decode_calls": self._decode_calls,
             "dropped_audio_chunks": self._dropped_chunks,
             "last_rms": round(self._last_rms, 5),
             "peak_rms": round(self._peak_rms, 5),
-            "real_time_factor": round(self._decode_seconds / audio_seconds, 3)
+            "real_time_factor": round(self._decode_seconds / processed_audio_seconds, 3)
+            if processed_audio_seconds > 0
+            else 0.0,
+            "real_audio_real_time_factor": round(self._decode_seconds / audio_seconds, 3)
             if audio_seconds > 0
             else 0.0,
         }
@@ -337,7 +348,12 @@ def render_model_info(model_dir: Path) -> str:
     return json.dumps(discover_model_layout(model_dir).to_dict(), indent=2, sort_keys=True)
 
 
-def transcribe_wav_file(config: AsrWorkerConfig, wav_path: Path) -> tuple[str, dict[str, float | int]]:
+def transcribe_wav_file(
+    config: AsrWorkerConfig,
+    wav_path: Path,
+    *,
+    flush_chunks: int = 0,
+) -> tuple[str, dict[str, float | int]]:
     samples, sample_rate = read_wav_mono_float32(wav_path)
     if sample_rate != config.sample_rate:
         raise ValueError(f"expected {config.sample_rate} Hz audio, got {sample_rate} Hz")
@@ -347,9 +363,22 @@ def transcribe_wav_file(config: AsrWorkerConfig, wav_path: Path) -> tuple[str, d
     stream = recognizer.create_stream()
     decode_seconds = 0.0
     decode_calls = 0
+    processed_samples = 0
     chunk_size = max(1, int(config.sample_rate * 0.1))
     for offset in range(0, len(samples), chunk_size):
-        stream.accept_waveform(config.sample_rate, samples[offset : offset + chunk_size])
+        chunk = samples[offset : offset + chunk_size]
+        stream.accept_waveform(config.sample_rate, chunk)
+        processed_samples += len(chunk)
+        while recognizer.is_ready(stream):
+            decode_started = time.monotonic()
+            recognizer.decode_stream(stream)
+            decode_seconds += time.monotonic() - decode_started
+            decode_calls += 1
+
+    for _ in range(max(0, flush_chunks)):
+        silence = _silence_chunk(chunk_size)
+        stream.accept_waveform(config.sample_rate, silence)
+        processed_samples += len(silence)
         while recognizer.is_ready(stream):
             decode_started = time.monotonic()
             recognizer.decode_stream(stream)
@@ -363,15 +392,13 @@ def transcribe_wav_file(config: AsrWorkerConfig, wav_path: Path) -> tuple[str, d
         decode_seconds += time.monotonic() - decode_started
         decode_calls += 1
     audio_seconds = len(samples) / config.sample_rate
-    metrics = {
-        "audio_seconds": round(audio_seconds, 3),
-        "elapsed_seconds": round(time.monotonic() - started, 3),
-        "decode_seconds": round(decode_seconds, 3),
-        "decode_calls": decode_calls,
-        "real_time_factor": round(decode_seconds / audio_seconds, 3)
-        if audio_seconds > 0
-        else 0.0,
-    }
+    metrics = _offline_metrics(
+        started,
+        audio_seconds,
+        processed_samples / config.sample_rate,
+        decode_seconds,
+        decode_calls,
+    )
     return _result_text(recognizer.get_result(stream)), metrics
 
 
@@ -380,6 +407,7 @@ def stream_wav_file_events(
     wav_path: Path,
     *,
     chunk_seconds: float = 0.1,
+    flush_chunks: int = 0,
     reset_on_endpoint: bool = False,
 ) -> list[dict[str, object]]:
     samples, sample_rate = read_wav_mono_float32(wav_path)
@@ -391,6 +419,7 @@ def stream_wav_file_events(
     started = time.monotonic()
     decode_seconds = 0.0
     decode_calls = 0
+    processed_samples = 0
     last_partial = ""
     events: list[dict[str, object]] = []
     chunk_size = max(1, int(config.sample_rate * chunk_seconds))
@@ -398,6 +427,7 @@ def stream_wav_file_events(
     for offset in range(0, len(samples), chunk_size):
         chunk = samples[offset : offset + chunk_size]
         stream.accept_waveform(config.sample_rate, chunk)
+        processed_samples += len(chunk)
         while recognizer.is_ready(stream):
             decode_started = time.monotonic()
             recognizer.decode_stream(stream)
@@ -409,6 +439,7 @@ def stream_wav_file_events(
         metrics = _offline_metrics(
             started,
             audio_seconds,
+            processed_samples / config.sample_rate,
             decode_seconds,
             decode_calls,
             samples=chunk,
@@ -425,6 +456,42 @@ def stream_wav_file_events(
             recognizer.reset(stream)
             last_partial = ""
 
+    for i in range(max(0, flush_chunks)):
+        silence = _silence_chunk(chunk_size)
+        events.append(
+            {
+                "event": "decoding_flush_chunk",
+                "data": {
+                    "chunk_index": decode_calls,
+                    "samples": len(silence),
+                    "processed_samples": len(silence),
+                    "synthetic_samples": len(silence),
+                },
+            }
+        )
+        stream.accept_waveform(config.sample_rate, silence)
+        processed_samples += len(silence)
+        while recognizer.is_ready(stream):
+            decode_started = time.monotonic()
+            recognizer.decode_stream(stream)
+            decode_seconds += time.monotonic() - decode_started
+            decode_calls += 1
+
+        text = _result_text(recognizer.get_result(stream))
+        metrics = _offline_metrics(
+            started,
+            len(samples) / config.sample_rate,
+            processed_samples / config.sample_rate,
+            decode_seconds,
+            decode_calls,
+            samples=silence,
+        )
+        if text and text != last_partial:
+            last_partial = text
+            events.append({"event": "partial", "text": text, "data": metrics})
+        if i == flush_chunks - 1:
+            events.append({"event": "stats", "text": text, "data": metrics})
+
     stream.input_finished()
     while recognizer.is_ready(stream):
         decode_started = time.monotonic()
@@ -436,6 +503,7 @@ def stream_wav_file_events(
     metrics = _offline_metrics(
         started,
         len(samples) / config.sample_rate,
+        processed_samples / config.sample_rate,
         decode_seconds,
         decode_calls,
         samples=samples,
@@ -448,6 +516,7 @@ def stream_wav_file_events(
 def _offline_metrics(
     started: float,
     audio_seconds: float,
+    processed_audio_seconds: float,
     decode_seconds: float,
     decode_calls: int,
     samples: object | None = None,
@@ -465,16 +534,29 @@ def _offline_metrics(
             peak = 0.0
     return {
         "audio_seconds": round(audio_seconds, 3),
+        "processed_audio_seconds": round(processed_audio_seconds, 3),
+        "synthetic_audio_seconds": round(
+            max(0.0, processed_audio_seconds - audio_seconds), 3
+        ),
         "elapsed_seconds": round(time.monotonic() - started, 3),
         "decode_seconds": round(decode_seconds, 3),
         "decode_calls": decode_calls,
         "dropped_audio_chunks": 0,
         "last_rms": round(rms, 5),
         "peak_rms": round(peak, 5),
-        "real_time_factor": round(decode_seconds / audio_seconds, 3)
+        "real_time_factor": round(decode_seconds / processed_audio_seconds, 3)
+        if processed_audio_seconds > 0
+        else 0.0,
+        "real_audio_real_time_factor": round(decode_seconds / audio_seconds, 3)
         if audio_seconds > 0
         else 0.0,
     }
+
+
+def _silence_chunk(size: int):
+    import numpy as np
+
+    return np.zeros(max(1, size), dtype=np.float32)
 
 
 def read_wav_mono_float32(path: Path):

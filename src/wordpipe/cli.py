@@ -65,7 +65,11 @@ def _cmd_transcribe_file(args: argparse.Namespace) -> int:
         endpoint_rule2_min_trailing_silence=args.endpoint_rule2_min_trailing_silence,
         endpoint_rule3_min_utterance_length=args.endpoint_rule3_min_utterance_length,
     )
-    text, metrics = transcribe_wav_file(config, Path(args.wav))
+    text, metrics = transcribe_wav_file(
+        config,
+        Path(args.wav),
+        flush_chunks=args.flush_chunks,
+    )
     print(text)
     if args.metrics:
         print(json.dumps(metrics, indent=2, sort_keys=True), file=sys.stderr)
@@ -124,6 +128,8 @@ def _cmd_stream_file_test(args: argparse.Namespace) -> int:
             str(args.stats_interval_seconds),
             "--chunk-samples",
             str(max(1, int(args.sample_rate * args.chunk_seconds))),
+            "--flush-chunks",
+            str(args.flush_chunks),
             "--wav",
             str(Path(args.wav)),
         ]
@@ -167,6 +173,7 @@ def _cmd_stream_file_test(args: argparse.Namespace) -> int:
         config,
         Path(args.wav),
         chunk_seconds=args.chunk_seconds,
+        flush_chunks=args.flush_chunks,
         reset_on_endpoint=args.reset_on_endpoint,
     ):
         if args.json:
@@ -456,6 +463,12 @@ def build_parser() -> argparse.ArgumentParser:
     transcribe_file.add_argument("--sample-rate", type=int, default=16000)
     transcribe_file.add_argument("--metrics", action="store_true", help="Print timing metrics.")
     transcribe_file.add_argument(
+        "--flush-chunks",
+        type=int,
+        default=0,
+        help="Synthetic silence chunks to feed after the WAV before final result.",
+    )
+    transcribe_file.add_argument(
         "--endpoint-rule1-min-trailing-silence",
         type=float,
         default=0.55,
@@ -515,6 +528,12 @@ def build_parser() -> argparse.ArgumentParser:
     stream_file_test.add_argument("--sample-rate", type=int, default=16000)
     _add_runtime_args(stream_file_test, default="parakeet")
     stream_file_test.add_argument("--chunk-seconds", type=float, default=0.56)
+    stream_file_test.add_argument(
+        "--flush-chunks",
+        type=int,
+        default=3,
+        help="Synthetic silence chunks to feed after the WAV before final commit.",
+    )
     stream_file_test.add_argument(
         "--reset-on-endpoint",
         action="store_true",
