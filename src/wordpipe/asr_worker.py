@@ -7,6 +7,7 @@ import queue
 import sys
 import threading
 import time
+import wave
 from pathlib import Path
 from typing import Callable, TextIO
 
@@ -267,6 +268,43 @@ def discover_model_layout(model_dir: Path) -> ModelLayout:
 
 def render_model_info(model_dir: Path) -> str:
     return json.dumps(discover_model_layout(model_dir).to_dict(), indent=2, sort_keys=True)
+
+
+def transcribe_wav_file(config: AsrWorkerConfig, wav_path: Path) -> str:
+    samples, sample_rate = read_wav_mono_float32(wav_path)
+    if sample_rate != config.sample_rate:
+        raise ValueError(f"expected {config.sample_rate} Hz audio, got {sample_rate} Hz")
+
+    recognizer = _create_recognizer(config)
+    stream = recognizer.create_stream()
+    chunk_size = max(1, int(config.sample_rate * 0.1))
+    for offset in range(0, len(samples), chunk_size):
+        stream.accept_waveform(config.sample_rate, samples[offset : offset + chunk_size])
+        while recognizer.is_ready(stream):
+            recognizer.decode_stream(stream)
+
+    stream.input_finished()
+    while recognizer.is_ready(stream):
+        recognizer.decode_stream(stream)
+    return _result_text(recognizer.get_result(stream))
+
+
+def read_wav_mono_float32(path: Path):
+    import numpy as np
+
+    with wave.open(str(path), "rb") as wav:
+        channels = wav.getnchannels()
+        sample_width = wav.getsampwidth()
+        sample_rate = wav.getframerate()
+        frames = wav.readframes(wav.getnframes())
+
+    if channels != 1:
+        raise ValueError(f"expected mono WAV, got {channels} channels")
+    if sample_width != 2:
+        raise ValueError(f"expected 16-bit PCM WAV, got sample width {sample_width}")
+
+    samples = np.frombuffer(frames, dtype="<i2").astype("float32") / 32768.0
+    return samples, sample_rate
 
 
 def _find_one(directory: Path, pattern: str) -> Path | None:

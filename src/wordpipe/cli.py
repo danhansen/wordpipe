@@ -42,6 +42,19 @@ def _cmd_model_info(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_transcribe_file(args: argparse.Namespace) -> int:
+    from .asr_worker import AsrWorkerConfig, transcribe_wav_file
+
+    config = AsrWorkerConfig(
+        model_dir=Path(args.model_dir),
+        provider=args.provider,
+        num_threads=args.num_threads,
+        sample_rate=args.sample_rate,
+    )
+    print(transcribe_wav_file(config, Path(args.wav)))
+    return 0
+
+
 def _cmd_download_model(args: argparse.Namespace) -> int:
     from .models import download_model, make_download_plan
 
@@ -165,6 +178,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to sherpa-onnx streaming model directory.",
     )
     model_info.set_defaults(func=_cmd_model_info)
+
+    transcribe_file = subparsers.add_parser(
+        "transcribe-file",
+        help="Run streaming ASR over a 16 kHz mono PCM WAV file.",
+    )
+    transcribe_file.add_argument("--model-dir", required=True)
+    transcribe_file.add_argument("--wav", required=True)
+    transcribe_file.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
+    transcribe_file.add_argument("--num-threads", type=int, default=2)
+    transcribe_file.add_argument("--sample-rate", type=int, default=16000)
+    transcribe_file.set_defaults(func=_cmd_transcribe_file)
 
     download_model = subparsers.add_parser(
         "download-model",

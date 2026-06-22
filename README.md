@@ -54,6 +54,14 @@ Inspect a downloaded sherpa-onnx model directory:
 PYTHONPATH=src python3 -m wordpipe model-info --model-dir /path/to/model
 ```
 
+Run offline decoding against a WAV file:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe transcribe-file \
+  --model-dir models/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11 \
+  --wav models/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11/test_wavs/en.wav
+```
+
 Dry-run text insertion:
 
 ```sh
