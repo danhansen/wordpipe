@@ -40,6 +40,8 @@ import torch
 
 from rewrite_nemotron_projected_kv_cache import rewrite_model as rewrite_projected_cache
 
+ORT_OPTIMIZATION_LEVELS = {"disable", "basic", "extended", "all"}
+
 
 INPUT_NAMES = [
     "processed_signal",
@@ -295,6 +297,25 @@ def quantize_to_single_file(input_path: Path, output_path: Path) -> None:
     onnx.checker.check_model(str(output_path))
 
 
+def ort_optimize_to_file(input_path: Path, output_path: Path, level: str, threads: int) -> None:
+    import onnxruntime as ort
+
+    levels = {
+        "disable": ort.GraphOptimizationLevel.ORT_DISABLE_ALL,
+        "basic": ort.GraphOptimizationLevel.ORT_ENABLE_BASIC,
+        "extended": ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED,
+        "all": ort.GraphOptimizationLevel.ORT_ENABLE_ALL,
+    }
+    print(f"[export] ORT optimizing {input_path.name} -> {output_path.name} level={level}", flush=True)
+    options = ort.SessionOptions()
+    options.optimized_model_filepath = str(output_path)
+    options.graph_optimization_level = levels[level]
+    options.intra_op_num_threads = threads
+    options.inter_op_num_threads = 1
+    ort.InferenceSession(str(input_path), sess_options=options, providers=["CPUExecutionProvider"])
+    onnx.checker.check_model(str(output_path))
+
+
 def cleanup_patterns(directory: Path, patterns: list[str]) -> None:
     for pattern in patterns:
         for path in glob.glob(str(directory / pattern)):
@@ -366,6 +387,17 @@ def main() -> None:
         "--export-only",
         action="store_true",
         help="Stop after writing FP32 encoder/decoder artifacts for a separate transform step.",
+    )
+    parser.add_argument(
+        "--ort-optimize-final",
+        choices=sorted(ORT_OPTIMIZATION_LEVELS),
+        help="Serialize the final encoder through ONNX Runtime at the selected optimization level.",
+    )
+    parser.add_argument(
+        "--ort-optimize-threads",
+        type=int,
+        default=1,
+        help="Intra-op threads to use while serializing the ORT-optimized final encoder.",
     )
     parser.add_argument(
         "--verify-lang",
@@ -488,6 +520,7 @@ def main() -> None:
         "num_prompts": int(getattr(model, "num_prompts", 0)) if prompted else 0,
         "projected_cache": args.projected_cache,
         "dynamic_quint8_quantization": args.quantize,
+        "ort_optimized_final_encoder": args.ort_optimize_final,
         "prompt_dictionary": prompt_dict,
         "preprocessor": jsonable(getattr(model.cfg, "preprocessor", {})),
         "cache_shapes": {
@@ -544,6 +577,16 @@ def main() -> None:
         rewrite_projected_cache(encoder_for_projected, final_encoder, "dynamic-int8")
     else:
         shutil.copy2(encoder_for_projected, final_encoder)
+
+    if args.ort_optimize_final:
+        optimized_encoder = args.output_dir / "encoder.ort_optimized.onnx"
+        ort_optimize_to_file(
+            final_encoder,
+            optimized_encoder,
+            args.ort_optimize_final,
+            args.ort_optimize_threads,
+        )
+        optimized_encoder.replace(final_encoder)
 
     cleanup_patterns(
         args.output_dir,

@@ -56,9 +56,10 @@ Observations:
 
 Next candidates:
 
-- Evaluate `linear_pos_fp32` on the existing LibriSpeech manifest before keeping
-  it.
-- Generate an `ort_extended` deployable model directory from the source model as
-  part of the transform pipeline.
+- Build future model directories with `--ort-optimize-final extended` in either
+  `scripts/transform_nemotron_parakeet_export.py` or
+  `scripts/export_nemotron_parakeet_optimized.py`; this is the clean candidate
+  from this run set.
+- Evaluate `linear_pos_fp32` on a larger LibriSpeech manifest before keeping it.
 - Test fixed-shape/static-shape folding only after confirming it survives as a
   runtime win beyond ORT's session-time optimization.
