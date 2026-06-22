@@ -38,6 +38,12 @@ struct Args {
     wav: Option<PathBuf>,
     #[arg(long, value_enum, default_value_t = CliGraphOptimization::All)]
     graph_optimization: CliGraphOptimization,
+    #[arg(long, value_enum, default_value_t = CliBoolOverride::Auto)]
+    ort_memory_pattern: CliBoolOverride,
+    #[arg(long)]
+    ort_parallel_execution: bool,
+    #[arg(long, value_enum, default_value_t = CliBoolOverride::Auto)]
+    ort_cpu_arena: CliBoolOverride,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -57,6 +63,23 @@ impl From<CliGraphOptimization> for GraphOptimization {
             CliGraphOptimization::Level2 => GraphOptimization::Level2,
             CliGraphOptimization::Level3 => GraphOptimization::Level3,
             CliGraphOptimization::All => GraphOptimization::All,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CliBoolOverride {
+    Auto,
+    Enable,
+    Disable,
+}
+
+impl CliBoolOverride {
+    fn option(self) -> Option<bool> {
+        match self {
+            Self::Auto => None,
+            Self::Enable => Some(true),
+            Self::Disable => Some(false),
         }
     }
 }
@@ -385,7 +408,10 @@ fn load_model(args: &Args) -> Result<Nemotron> {
     let config = ExecutionConfig::new()
         .with_intra_threads(args.num_threads)
         .with_inter_threads(1)
-        .with_graph_optimization(args.graph_optimization.into());
+        .with_graph_optimization(args.graph_optimization.into())
+        .with_memory_pattern(args.ort_memory_pattern.option())
+        .with_parallel_execution(args.ort_parallel_execution)
+        .with_cpu_arena(args.ort_cpu_arena.option());
     Nemotron::from_pretrained(args.model_dir.to_string_lossy().as_ref(), Some(config)).with_context(
         || {
             format!(

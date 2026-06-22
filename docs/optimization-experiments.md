@@ -526,3 +526,50 @@ Notes:
   chunk buffer.
 - The bounded queue/drop behavior is unchanged: if the recognition thread falls
   behind, incoming callback buffers are still dropped and counted.
+
+## 2026-06-22: ORT Session-Option Ablation
+
+After thread count was settled at two intra-op threads, the worker exposed
+several ORT session knobs for controlled benchmarking:
+
+- `--ort-memory-pattern auto|enable|disable`
+- `--ort-parallel-execution`
+- `--ort-cpu-arena auto|enable|disable`
+
+`auto` preserves the previous behavior and lets ORT choose its default. The
+non-auto settings explicitly call the corresponding ORT session/CPU EP APIs.
+
+Benchmark commands followed this pattern:
+
+```sh
+.venv/bin/python scripts/benchmark_parakeet_variant.py \
+  ffn_fp32=build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort \
+  --runs 3 \
+  --num-threads 2 \
+  <ORT option under test> \
+  --min-mem-available-gb 6 \
+  --child-memory-limit-gb 10 \
+  --set-power-profile balanced \
+  --output build/parakeet-variant-bench/ffn-ort-options-<variant>.json
+```
+
+Results:
+
+| Variant | Median real-audio RTF | Median RTF | Median decode seconds | Median wall seconds |
+| --- | ---: | ---: | ---: | ---: |
+| default / auto | 0.606 | 0.597 | 74.890 | 78.905 |
+| `--ort-memory-pattern disable` | 0.630 | 0.621 | 77.944 | 81.948 |
+| `--ort-memory-pattern enable` | 0.650 | 0.641 | 80.417 | 84.624 |
+| `--ort-parallel-execution` | 0.644 | 0.635 | 79.627 | 83.893 |
+| `--ort-cpu-arena disable` | 0.643 | 0.634 | 79.524 | 83.757 |
+| `--ort-cpu-arena enable` | 0.610 | 0.602 | 75.477 | 79.548 |
+
+Session-option observations:
+
+- The existing ORT defaults are best on this machine.
+- Explicit CPU arena enable is close to default but still slightly slower;
+  forcing CPU EP registration is not useful here.
+- Disabling the CPU arena is a throughput loss, even though it might reduce
+  allocator memory retention in other conditions.
+- Parallel graph execution and explicit memory-pattern overrides are both
+  slower for this fixed-shape streaming graph.

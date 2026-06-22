@@ -261,6 +261,12 @@ def run_once(args: argparse.Namespace, label: str, model_dir: Path, run_index: i
         "--graph-optimization",
         args.graph_optimization,
     ]
+    if args.ort_memory_pattern != "auto":
+        command.extend(["--ort-memory-pattern", args.ort_memory_pattern])
+    if args.ort_parallel_execution:
+        command.append("--ort-parallel-execution")
+    if args.ort_cpu_arena != "auto":
+        command.extend(["--ort-cpu-arena", args.ort_cpu_arena])
     started = time.perf_counter()
     power_before = read_power_metadata()
     memory_before = read_memory_metadata()
@@ -341,6 +347,9 @@ def make_output(
             "previous_gnome_power_profile": args.previous_gnome_power_profile,
             "power_profile_hold_cookie": args.power_profile_hold_cookie,
             "power_profile_hold_error": args.power_profile_hold_error,
+            "ort_memory_pattern": args.ort_memory_pattern,
+            "ort_parallel_execution": args.ort_parallel_execution,
+            "ort_cpu_arena": args.ort_cpu_arena,
         },
         "power_at_start": power_at_start,
         "power_at_end": read_power_metadata(),
@@ -389,6 +398,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-threads", type=int, default=2)
     parser.add_argument("--flush-chunks", type=int, default=3)
     parser.add_argument("--graph-optimization", default="all")
+    parser.add_argument("--ort-memory-pattern", choices=("auto", "enable", "disable"), default="auto")
+    parser.add_argument("--ort-parallel-execution", action="store_true")
+    parser.add_argument("--ort-cpu-arena", choices=("auto", "enable", "disable"), default="auto")
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     parser.add_argument("--ort-dylib", type=Path, default=DEFAULT_ORT_DYLIB)
     parser.add_argument("--output", type=Path, default=Path("build/parakeet-variant-bench/summary.json"))
