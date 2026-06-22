@@ -15,3 +15,63 @@ speech recognition with sherpa-onnx.
   the focused app.
 
 See [docs/architecture.md](docs/architecture.md) for the current design plan.
+
+## Current MVP
+
+The current implementation provides:
+
+- `wordpipe probe` capability checks for GNOME, portals, and Python modules.
+- `wordpipe asr-worker` newline-JSON streaming worker protocol.
+- `wordpipe type-text` keyboard insertion through the RemoteDesktop portal.
+- `wordpipe daemon` MVP loop that connects the ASR worker to text insertion.
+
+The GNOME Shell extension, top-bar indicator, and live overlay are not built yet.
+
+## Local Development
+
+This workspace contains a mounted placeholder `.git` directory, so the real Git
+metadata lives in `.wordpipe.git`. Use:
+
+```sh
+git --git-dir=.wordpipe.git --work-tree=. status
+```
+
+Run tests:
+
+```sh
+PYTHONPATH=src python3 -m unittest discover -s tests
+```
+
+Run the capability probe:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe probe
+```
+
+Dry-run text insertion:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe type-text --dry-run "hello world"
+```
+
+Run the MVP daemon:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe daemon \
+  --model-dir /path/to/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8
+```
+
+Use `--dry-run-insertion` to exercise ASR without opening a portal keyboard
+session.
+
+## Runtime Dependencies
+
+Install ASR dependencies in the environment that runs Wordpipe:
+
+```sh
+python3 -m pip install '.[asr]'
+```
+
+The model directory must contain `tokens.txt` and either a single `.onnx` model
+for the Nemotron CTC path or `encoder*.onnx`, `decoder*.onnx`, and
+`joiner*.onnx` for a transducer layout.

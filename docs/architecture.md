@@ -116,33 +116,40 @@ Partial text is never typed into the target app in v1.
    - GlobalShortcuts availability
    - RemoteDesktop keyboard availability
    - EIS/libei availability
+   - status: initial probe implemented
 
 2. Streaming ASR spike
    - load Nemotron int8 model
    - stream microphone audio
    - print partial and endpoint-committed text
    - log real-time factor, queue depth, and commit latency
+   - status: ASR worker protocol implemented; needs sherpa/model runtime test
 
 3. ASR process protocol
    - newline-delimited JSON over stdio or Unix socket
    - events: `partial`, `commit`, `error`, `ready`
    - commands: `start`, `stop`, `shutdown`
+   - status: implemented over stdio
 
 4. Keyboard insertion spike
    - portal permission flow
    - insert simple ASCII phrases into focused GNOME apps
    - test Text Editor, Terminal, Firefox, LibreOffice
+   - status: RemoteDesktop `NotifyKeyboardKeysym` backend implemented; needs
+     live portal test outside sandbox
 
 5. GNOME hotkey and status
    - global shortcut or shell extension trigger
    - daemon session state
    - visible listening/error state
+   - status: not implemented
 
 6. First integrated dictation
    - hotkey controls dictation
    - overlay shows partials
    - endpoint commits insert text
    - stop commits non-empty partial
+   - status: CLI daemon implemented; GNOME hotkey/overlay not implemented
 
 ## Validation Matrix
 
