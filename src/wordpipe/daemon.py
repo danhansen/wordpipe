@@ -31,6 +31,7 @@ class DaemonConfig:
     sample_rate: int = 16000
     partial_interval_seconds: float = 0.10
     audio_chunk_seconds: float = 0.03
+    stats_interval_seconds: float = 1.0
     endpoint_rule1_min_trailing_silence: float = 0.55
     endpoint_rule2_min_trailing_silence: float = 0.35
     endpoint_rule3_min_utterance_length: float = 20.0
@@ -79,6 +80,8 @@ class AsrProcess:
                 str(self._config.partial_interval_seconds),
                 "--audio-chunk-seconds",
                 str(self._config.audio_chunk_seconds),
+                "--stats-interval-seconds",
+                str(self._config.stats_interval_seconds),
                 "--endpoint-rule1-min-trailing-silence",
                 str(self._config.endpoint_rule1_min_trailing_silence),
                 "--endpoint-rule2-min-trailing-silence",

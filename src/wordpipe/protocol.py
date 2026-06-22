@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 
 CommandName = Literal["start", "stop", "shutdown"]
-EventName = Literal["ready", "listening", "stopped", "partial", "commit", "error"]
+EventName = Literal["ready", "listening", "stopped", "partial", "commit", "stats", "error"]
 
 
 @dataclass(frozen=True)

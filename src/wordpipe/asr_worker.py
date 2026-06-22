@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import inspect
 import json
+import math
 import queue
 import sys
 import threading
@@ -28,6 +29,7 @@ class AsrWorkerConfig:
     partial_interval_seconds: float = 0.10
     audio_chunk_seconds: float = 0.03
     queue_seconds: float = 2.0
+    stats_interval_seconds: float = 1.0
     endpoint_rule1_min_trailing_silence: float = 0.55
     endpoint_rule2_min_trailing_silence: float = 0.35
     endpoint_rule3_min_utterance_length: float = 20.0
@@ -102,6 +104,9 @@ class SherpaStreamingSession:
         self._dropped_chunks = 0
         self._last_partial = ""
         self._last_partial_emit = 0.0
+        self._last_stats_emit = 0.0
+        self._last_rms = 0.0
+        self._peak_rms = 0.0
         self._accepted_samples = 0
         self._decode_seconds = 0.0
         self._decode_calls = 0
@@ -149,8 +154,10 @@ class SherpaStreamingSession:
 
                     stream.accept_waveform(self._config.sample_rate, samples)
                     self._accepted_samples += len(samples)
+                    self._record_audio_level(samples)
                     self._decode_ready(recognizer, stream)
                     self._emit_partial_if_changed(recognizer, stream)
+                    self._emit_stats_if_due()
                     if recognizer.is_endpoint(stream):
                         self._commit_current(recognizer, stream)
                         recognizer.reset(stream)
@@ -177,6 +184,22 @@ class SherpaStreamingSession:
         self._last_partial_emit = now
         self._emit(event("partial", text=text, data=self._metrics()))
 
+    def _emit_stats_if_due(self) -> None:
+        now = time.monotonic()
+        if now - self._last_stats_emit < self._config.stats_interval_seconds:
+            return
+        self._last_stats_emit = now
+        self._emit(event("stats", data=self._metrics()))
+
+    def _record_audio_level(self, samples: object) -> None:
+        try:
+            square_sum = float((samples * samples).mean())  # type: ignore[operator, union-attr]
+        except Exception:
+            return
+        rms = math.sqrt(max(0.0, square_sum))
+        self._last_rms = rms
+        self._peak_rms = max(self._peak_rms, rms)
+
     def _commit_current(self, recognizer: object, stream: object) -> None:
         text = _result_text(recognizer.get_result(stream)).strip()  # type: ignore[attr-defined]
         if not text:
@@ -193,6 +216,8 @@ class SherpaStreamingSession:
         self._accepted_samples = 0
         self._decode_seconds = 0.0
         self._decode_calls = 0
+        self._last_rms = 0.0
+        self._peak_rms = 0.0
         self._session_started = time.monotonic()
 
     def _metrics(self) -> dict[str, float | int]:
@@ -204,6 +229,8 @@ class SherpaStreamingSession:
             "decode_seconds": round(self._decode_seconds, 3),
             "decode_calls": self._decode_calls,
             "dropped_audio_chunks": self._dropped_chunks,
+            "last_rms": round(self._last_rms, 5),
+            "peak_rms": round(self._peak_rms, 5),
             "real_time_factor": round(self._decode_seconds / audio_seconds, 3)
             if audio_seconds > 0
             else 0.0,

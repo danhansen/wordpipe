@@ -33,6 +33,7 @@ def _cmd_asr_worker(args: argparse.Namespace) -> int:
         sample_rate=args.sample_rate,
         partial_interval_seconds=args.partial_interval_seconds,
         audio_chunk_seconds=args.audio_chunk_seconds,
+        stats_interval_seconds=args.stats_interval_seconds,
         endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence,
         endpoint_rule2_min_trailing_silence=args.endpoint_rule2_min_trailing_silence,
         endpoint_rule3_min_utterance_length=args.endpoint_rule3_min_utterance_length,
@@ -76,6 +77,7 @@ def _cmd_listen_test(args: argparse.Namespace) -> int:
         sample_rate=args.sample_rate,
         partial_interval_seconds=args.partial_interval_seconds,
         audio_chunk_seconds=args.audio_chunk_seconds,
+        stats_interval_seconds=args.stats_interval_seconds,
         endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence,
         endpoint_rule2_min_trailing_silence=args.endpoint_rule2_min_trailing_silence,
         endpoint_rule3_min_utterance_length=args.endpoint_rule3_min_utterance_length,
@@ -144,6 +146,9 @@ def _cmd_daemon(args: argparse.Namespace) -> int:
         audio_chunk_seconds=args.audio_chunk_seconds
         if args.audio_chunk_seconds is not None
         else file_config.audio_chunk_seconds,
+        stats_interval_seconds=args.stats_interval_seconds
+        if args.stats_interval_seconds is not None
+        else file_config.stats_interval_seconds,
         endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence
         if args.endpoint_rule1_min_trailing_silence is not None
         else file_config.endpoint_rule1_min_trailing_silence,
@@ -176,6 +181,9 @@ def _cmd_hotkey_daemon(args: argparse.Namespace) -> int:
         audio_chunk_seconds=args.audio_chunk_seconds
         if args.audio_chunk_seconds is not None
         else file_config.audio_chunk_seconds,
+        stats_interval_seconds=args.stats_interval_seconds
+        if args.stats_interval_seconds is not None
+        else file_config.stats_interval_seconds,
         endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence
         if args.endpoint_rule1_min_trailing_silence is not None
         else file_config.endpoint_rule1_min_trailing_silence,
@@ -214,6 +222,12 @@ def _add_asr_tuning_args(parser: argparse.ArgumentParser, *, worker_defaults: bo
         type=float,
         default=0.03 if worker_defaults else None,
         help="Microphone audio chunk size sent to the streaming recognizer.",
+    )
+    parser.add_argument(
+        "--stats-interval-seconds",
+        type=float,
+        default=1.0 if worker_defaults else None,
+        help="Interval for diagnostic stats events.",
     )
     parser.add_argument(
         "--endpoint-rule1-min-trailing-silence",

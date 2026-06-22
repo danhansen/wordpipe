@@ -25,6 +25,26 @@ class ListenTestTests(unittest.TestCase):
         self.assertIn("rtf=0.2", line)
         self.assertIn("hello", line)
 
+    def test_formats_stats_event_with_rms(self) -> None:
+        line = _format_event(
+            {
+                "event": "stats",
+                "data": {
+                    "real_time_factor": 0.2,
+                    "audio_seconds": 1.0,
+                    "decode_seconds": 0.2,
+                    "elapsed_seconds": 1.1,
+                    "last_rms": 0.01,
+                    "peak_rms": 0.02,
+                    "dropped_audio_chunks": 0,
+                },
+            }
+        )
+
+        self.assertIn("stats", line)
+        self.assertIn("rtf=0.2", line)
+        self.assertIn("rms=0.01", line)
+
 
 if __name__ == "__main__":
     unittest.main()

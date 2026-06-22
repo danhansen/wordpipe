@@ -16,6 +16,7 @@ class ListenTestConfig:
     sample_rate: int = 16000
     partial_interval_seconds: float = 0.05
     audio_chunk_seconds: float = 0.03
+    stats_interval_seconds: float = 1.0
     endpoint_rule1_min_trailing_silence: float = 0.55
     endpoint_rule2_min_trailing_silence: float = 0.35
     endpoint_rule3_min_utterance_length: float = 20.0
@@ -31,24 +32,32 @@ def run_listen_test(config: ListenTestConfig) -> int:
         sample_rate=config.sample_rate,
         partial_interval_seconds=config.partial_interval_seconds,
         audio_chunk_seconds=config.audio_chunk_seconds,
+        stats_interval_seconds=config.stats_interval_seconds,
         endpoint_rule1_min_trailing_silence=config.endpoint_rule1_min_trailing_silence,
         endpoint_rule2_min_trailing_silence=config.endpoint_rule2_min_trailing_silence,
         endpoint_rule3_min_utterance_length=config.endpoint_rule3_min_utterance_length,
     )
     asr = AsrProcess(daemon_config)
     timer: threading.Timer | None = None
+
+    def start_timer_once() -> None:
+        nonlocal timer
+        if config.duration_seconds is None or timer is not None:
+            return
+        timer = threading.Timer(config.duration_seconds, asr.send, args=("stop",))
+        timer.daemon = True
+        timer.start()
+
     asr.start()
     try:
         asr.send("start")
-        if config.duration_seconds is not None:
-            timer = threading.Timer(config.duration_seconds, asr.send, args=("stop",))
-            timer.daemon = True
-            timer.start()
         for item in asr.events():
             if config.json_output:
                 print(json.dumps(item, sort_keys=True), flush=True)
             else:
                 print(_format_event(item), flush=True)
+            if item.get("event") == "listening":
+                start_timer_once()
             if item.get("event") == "stopped":
                 return 0
     finally:
@@ -64,6 +73,8 @@ def _format_event(item: dict[str, object]) -> str:
     metrics = _format_metrics(item.get("data"))
     if kind in {"partial", "commit"}:
         return f"{kind:7} {metrics} {text}".rstrip()
+    if kind == "stats":
+        return f"stats   {metrics}"
     if kind == "error":
         return f"error   {item.get('message', '')}"
     return kind
@@ -77,4 +88,9 @@ def _format_metrics(data: object) -> str:
     elapsed = data.get("elapsed_seconds", "?")
     decode = data.get("decode_seconds", "?")
     dropped = data.get("dropped_audio_chunks", "?")
-    return f"rtf={rtf} audio={audio}s decode={decode}s elapsed={elapsed}s dropped={dropped}"
+    rms = data.get("last_rms", "?")
+    peak = data.get("peak_rms", "?")
+    return (
+        f"rtf={rtf} audio={audio}s decode={decode}s elapsed={elapsed}s "
+        f"rms={rms} peak={peak} dropped={dropped}"
+    )

@@ -16,6 +16,7 @@ num_threads = 2
 sample_rate = 16000
 partial_interval_seconds = 0.10
 audio_chunk_seconds = 0.03
+stats_interval_seconds = 1.0
 endpoint_rule1_min_trailing_silence = 0.55
 endpoint_rule2_min_trailing_silence = 0.35
 endpoint_rule3_min_utterance_length = 20.0
@@ -36,6 +37,7 @@ class WordpipeConfig:
     sample_rate: int = 16000
     partial_interval_seconds: float = 0.10
     audio_chunk_seconds: float = 0.03
+    stats_interval_seconds: float = 1.0
     endpoint_rule1_min_trailing_silence: float = 0.55
     endpoint_rule2_min_trailing_silence: float = 0.35
     endpoint_rule3_min_utterance_length: float = 20.0
@@ -69,6 +71,7 @@ def load_config(path: Path | None = None) -> WordpipeConfig:
         sample_rate=_integer(data, "sample_rate", 16000),
         partial_interval_seconds=_number(data, "partial_interval_seconds", 0.10),
         audio_chunk_seconds=_number(data, "audio_chunk_seconds", 0.03),
+        stats_interval_seconds=_number(data, "stats_interval_seconds", 1.0),
         endpoint_rule1_min_trailing_silence=_number(
             data, "endpoint_rule1_min_trailing_silence", 0.55
         ),
