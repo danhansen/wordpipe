@@ -116,7 +116,14 @@ def model_summary(path: Path) -> dict[str, Any]:
     }
 
 
-def emit_optimized_model(input_path: Path, output_path: Path, level: str, threads: int) -> None:
+def emit_optimized_model(
+    input_path: Path,
+    output_path: Path,
+    level: str,
+    threads: int,
+    log_severity: int | None,
+    log_verbosity: int | None,
+) -> None:
     import onnxruntime as ort
 
     options = ort.SessionOptions()
@@ -124,6 +131,10 @@ def emit_optimized_model(input_path: Path, output_path: Path, level: str, thread
     options.graph_optimization_level = getattr(ort.GraphOptimizationLevel, ORT_LEVELS[level])
     options.intra_op_num_threads = threads
     options.inter_op_num_threads = 1
+    if log_severity is not None:
+        options.log_severity_level = log_severity
+    if log_verbosity is not None:
+        options.log_verbosity_level = log_verbosity
     output_path.parent.mkdir(parents=True, exist_ok=True)
     ort.InferenceSession(str(input_path), sess_options=options, providers=["CPUExecutionProvider"])
 
@@ -192,6 +203,38 @@ def print_summary(title: str, summary: dict[str, Any]) -> None:
         print(f"top_nodes_ms: {summary['top_nodes_ms']}")
 
 
+def print_model_delta(title: str, before: dict[str, Any], after: dict[str, Any]) -> None:
+    print(f"\n== {title} Delta ==")
+    print(
+        f"nodes: {before['nodes']} -> {after['nodes']} "
+        f"({after['nodes'] - before['nodes']:+d})"
+    )
+    print(
+        f"unresolved_dims: {before['unresolved_shape_dims']} -> {after['unresolved_shape_dims']} "
+        f"({after['unresolved_shape_dims'] - before['unresolved_shape_dims']:+d})"
+    )
+    before_ops = before["ops"]
+    after_ops = after["ops"]
+    changed = []
+    for op in sorted(set(before_ops) | set(after_ops)):
+        delta = after_ops.get(op, 0) - before_ops.get(op, 0)
+        if delta:
+            changed.append((op, before_ops.get(op, 0), after_ops.get(op, 0), delta))
+    changed.sort(key=lambda item: (abs(item[3]), item[0]), reverse=True)
+    print("changed_ops:")
+    for op, old, new, delta in changed[:30]:
+        print(f"  {op}: {old} -> {new} ({delta:+d})")
+
+    before_q = before["quantization_ops"]
+    after_q = after["quantization_ops"]
+    print("quantization_ops:")
+    for op in sorted(set(before_q) | set(after_q)):
+        old = before_q.get(op, 0)
+        new = after_q.get(op, 0)
+        if old != new:
+            print(f"  {op}: {old} -> {new} ({new - old:+d})")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("model", type=Path, nargs="*", help="ONNX model(s) to summarize.")
@@ -208,6 +251,16 @@ def parse_args() -> argparse.Namespace:
         help="ORT optimization level to emit. May be repeated. Default: all.",
     )
     parser.add_argument("--threads", type=int, default=1, help="ORT intra-op threads for optimization dumps.")
+    parser.add_argument(
+        "--ort-log-severity",
+        type=int,
+        help="Set ORT log severity for optimized model emission. 0=verbose, 1=info, 2=warning.",
+    )
+    parser.add_argument(
+        "--ort-log-verbosity",
+        type=int,
+        help="Set ORT verbose log level when --ort-log-severity=0.",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("build/ort-diagnostics"))
     parser.add_argument("--profile-json", type=Path, action="append", help="ORT profile JSON to summarize.")
     parser.add_argument("--limit", type=int, default=20, help="Top-N rows in printed profile summaries.")
@@ -230,9 +283,17 @@ def main() -> None:
         for level in opt_levels:
             out = args.output_dir / model_path.stem / f"{model_path.stem}.ort_{level}.onnx"
             print(f"\n[ort] writing optimized model level={level}: {out}", flush=True)
-            emit_optimized_model(model_path, out, level, args.threads)
+            emit_optimized_model(
+                model_path,
+                out,
+                level,
+                args.threads,
+                args.ort_log_severity,
+                args.ort_log_verbosity,
+            )
             optimized = model_summary(out)
             print_summary(f"{model_path.name} ORT {level}", optimized)
+            print_model_delta(f"{model_path.name} ORT {level}", source, optimized)
             results.append({"kind": "model", "level": level, **optimized})
 
     for profile_path in args.profile_json or []:
