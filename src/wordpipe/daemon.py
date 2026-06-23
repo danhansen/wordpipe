@@ -311,6 +311,15 @@ class DictationController:
         kind = item.get("event")
         if kind == "ready":
             self._transcript.status("ASR worker ready")
+        elif kind == "loading_model":
+            self._transcript.status("loading ASR model")
+        elif kind == "model_loaded":
+            data = item.get("data")
+            load_seconds = data.get("load_seconds") if isinstance(data, dict) else None
+            if load_seconds is None:
+                self._transcript.status("ASR model loaded")
+            else:
+                self._transcript.status(f"ASR model loaded in {load_seconds}s")
         elif kind == "listening":
             self._transcript.status("listening")
         elif kind == "partial":

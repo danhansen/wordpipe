@@ -113,7 +113,7 @@ impl JsonEmitter {
 
 struct RunningSession {
     stop_tx: Sender<()>,
-    join: thread::JoinHandle<()>,
+    join: thread::JoinHandle<Nemotron>,
 }
 
 fn main() -> Result<()> {
@@ -124,6 +124,13 @@ fn main() -> Result<()> {
         return run_wav_file(args, emitter);
     }
 
+    emitter.emit(json!({"event": "loading_model", "data": {"model_dir": args.model_dir}}));
+    let load_started = Instant::now();
+    let mut model = Some(load_model(&args)?);
+    emitter.emit(json!({
+        "event": "model_loaded",
+        "data": {"load_seconds": round3(load_started.elapsed().as_secs_f64())}
+    }));
     emitter.emit(json!({"event": "ready"}));
 
     let stdin = io::stdin();
@@ -147,21 +154,36 @@ fn main() -> Result<()> {
                 if session.is_some() {
                     continue;
                 }
+                let Some(mut session_model) = model.take() else {
+                    emitter
+                        .emit(json!({"event": "error", "message": "ASR model is not available"}));
+                    continue;
+                };
+                session_model.reset();
                 let (stop_tx, stop_rx) = bounded::<()>(1);
                 let worker_args = Arc::clone(&args);
                 let worker_emitter = Arc::clone(&emitter);
                 let join = thread::spawn(move || {
-                    if let Err(err) = run_session(worker_args, worker_emitter.clone(), stop_rx) {
+                    if let Err(err) = run_session(
+                        worker_args,
+                        worker_emitter.clone(),
+                        stop_rx,
+                        &mut session_model,
+                    ) {
                         worker_emitter.emit(json!({"event": "error", "message": err.to_string()}));
                     }
                     worker_emitter.emit(json!({"event": "stopped"}));
+                    session_model
                 });
                 session = Some(RunningSession { stop_tx, join });
             }
             "stop" => {
                 if let Some(running) = session.take() {
                     let _ = running.stop_tx.send(());
-                    let _ = running.join.join();
+                    match running.join.join() {
+                        Ok(session_model) => model = Some(session_model),
+                        Err(_) => return Err(anyhow!("ASR session thread panicked")),
+                    }
                 } else {
                     emitter.emit(json!({"event": "stopped"}));
                 }
@@ -183,8 +205,12 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>) -> Result<()> {
-    let mut model = load_model(&args)?;
+fn run_session(
+    args: Arc<Args>,
+    emitter: Arc<JsonEmitter>,
+    stop_rx: Receiver<()>,
+    model: &mut Nemotron,
+) -> Result<()> {
     let host = cpal::default_host();
     let device = select_input_device(&host, args.input_device.as_deref())?;
     let device_name = device.name().unwrap_or_else(|_| "unknown".to_string());
@@ -245,7 +271,7 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
                     pending.drain(..args.chunk_samples);
                     processed_samples += chunk_buf.len();
                     let decoded = decode_chunk(
-                        &mut model,
+                        model,
                         &chunk_buf,
                         &mut decode_seconds,
                         &mut decode_calls,
@@ -281,7 +307,7 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
         chunk_buf[..pending.len()].copy_from_slice(&pending);
         processed_samples += chunk_buf.len();
         let decoded = decode_chunk(
-            &mut model,
+            model,
             &chunk_buf,
             &mut decode_seconds,
             &mut decode_calls,
@@ -302,7 +328,7 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
     for _ in 0..args.flush_chunks {
         processed_samples += silence.len();
         let decoded = decode_chunk(
-            &mut model,
+            model,
             &silence,
             &mut decode_seconds,
             &mut decode_calls,
@@ -340,8 +366,12 @@ fn run_wav_file(args: Arc<Args>, emitter: Arc<JsonEmitter>) -> Result<()> {
     emitter.emit(json!({"event": "loading_wav", "data": {"path": wav_path}}));
     let samples = read_wav_mono_float32(wav_path, args.sample_rate)?;
     emitter.emit(json!({"event": "loading_model", "data": {"model_dir": args.model_dir}}));
+    let load_started = Instant::now();
     let mut model = load_model(&args)?;
-    emitter.emit(json!({"event": "model_loaded"}));
+    emitter.emit(json!({
+        "event": "model_loaded",
+        "data": {"load_seconds": round3(load_started.elapsed().as_secs_f64())}
+    }));
     let started = Instant::now();
     let mut transcript = String::new();
     let mut decode_seconds = 0.0f64;

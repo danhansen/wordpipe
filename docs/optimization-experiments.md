@@ -1259,6 +1259,54 @@ Decision:
   matches the runtime's streaming cache contract.
 - Keep `ffn_fp32` as the smaller mixed-int8/FP32 fallback, not the default.
 
+### Model Load Timing And Hotkey Latency
+
+For dictation UX, the relevant latency is keyboard shortcut press to first heard
+word. Cold model construction must not be on that path. The Parakeet worker now
+emits `model_loaded` with `load_seconds`, and the benchmark harness records that
+field separately from decode RTF.
+
+Short-WAV fresh-process load benchmark:
+
+```sh
+scripts/benchmark_parakeet_variant.py \
+  --wav build/librispeech-backend-eval-smoke/wavs/1089-134686-0019.wav \
+  --runs 3 \
+  --num-threads 2 \
+  --flush-chunks 0 \
+  --graph-optimization all \
+  --timeout-seconds 120 \
+  --min-mem-available-gb 4 \
+  --child-memory-limit-gb 12 \
+  --output build/parakeet-variant-bench/load-time-fp32-projected-001.json \
+  fp32_projected=build/model-variants/nemotron-fp32-projected-fixed-shape \
+  ffn_fp32=build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort
+```
+
+Results:
+
+| Variant | Load seconds | Median load seconds |
+| --- | --- | ---: |
+| `fp32_projected` | 3.662, 5.053, 4.747 | 4.747 |
+| `ffn_fp32` | 5.630, 4.634, 4.145 | 4.634 |
+
+Interpretation:
+
+- Sub-second cold process/model load is not realistic for either top model on
+  this machine. The smaller mixed model did not materially improve load time.
+- The Parakeet worker now preloads the model before emitting `ready`; hotkey
+  `start` resets the already-loaded Nemotron instance instead of constructing a
+  new ORT session. That moves the 4-5 second load cost to daemon startup.
+- After `ready`, shortcut-to-first-word is bounded by audio stream startup plus
+  the model's streaming cadence. With 560 ms chunks and roughly 0.28 seconds of
+  decode per chunk in the broad `fp32_projected` run, the theoretical first
+  token latency is near the one-second target if the speaker starts promptly and
+  the mic stream opens quickly.
+- A live `start` -> `listening` measurement was attempted, but the current
+  default input device rejected the worker's requested 16 kHz config in this
+  environment. Re-run this after selecting a working input device or teaching
+  the worker to negotiate/resample from the device's native rate.
+
 ## 2026-06-22: Sayboard Harvest Wrapper Results
 
 The remaining Sayboard-derived experiments are now captured by:

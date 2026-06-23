@@ -35,6 +35,13 @@ def final_event(events: list[dict[str, Any]]) -> dict[str, Any]:
     return text_events[-1] if text_events else (events[-1] if events else {})
 
 
+def first_event(events: list[dict[str, Any]], name: str) -> dict[str, Any] | None:
+    for event in events:
+        if event.get("event") == name:
+            return event
+    return None
+
+
 def read_text(path: Path) -> str | None:
     try:
         return path.read_text(encoding="utf-8").strip()
@@ -283,13 +290,17 @@ def run_once(args: argparse.Namespace, label: str, model_dir: Path, run_index: i
     wall_seconds = time.perf_counter() - started
     power_after = read_power_metadata()
     memory_after = read_memory_metadata()
-    event = final_event(parse_events(proc.stdout))
+    events = parse_events(proc.stdout)
+    event = final_event(events)
+    load_event = first_event(events, "model_loaded") or {}
+    load_metrics = dict(load_event.get("data") or {})
     metrics = dict(event.get("data") or {})
     return {
         "label": label,
         "model_dir": str(model_dir),
         "run_index": run_index,
         "wall_seconds": wall_seconds,
+        "load_seconds": load_metrics.get("load_seconds"),
         "text": str(event.get("text") or ""),
         "metrics": metrics,
         "power_before": power_before,
@@ -310,9 +321,11 @@ def median_metric(rows: list[dict[str, Any]], metric: str) -> float | None:
 
 
 def summarize(label: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    load_values = [float(row["load_seconds"]) for row in rows if row.get("load_seconds") is not None]
     return {
         "label": label,
         "runs": len(rows),
+        "median_load_seconds": statistics.median(load_values) if load_values else None,
         "median_real_time_factor": median_metric(rows, "real_time_factor"),
         "median_real_audio_real_time_factor": median_metric(rows, "real_audio_real_time_factor"),
         "median_decode_seconds": median_metric(rows, "decode_seconds"),
@@ -477,6 +490,7 @@ def main() -> None:
                 metrics = row["metrics"]
                 print(
                     f"[bench] {label} run {run_index}: "
+                    f"load={row.get('load_seconds')} "
                     f"rtf={metrics.get('real_time_factor')} "
                     f"real_audio_rtf={metrics.get('real_audio_real_time_factor')} "
                     f"decode={metrics.get('decode_seconds')} wall={row['wall_seconds']:.3f}",

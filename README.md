@@ -99,6 +99,9 @@ the accumulated transcript when dictation stops. The legacy sherpa runtime can
 still be selected with `--asr-runtime sherpa`.
 The Rust worker defaults to ONNX Runtime's `all` graph optimization level; use
 `--graph-optimization` only for ablations or debugging.
+In interactive daemon mode, the Parakeet worker preloads the model before
+emitting `ready`; subsequent hotkey starts reset the resident model instead of
+reloading ONNX sessions.
 
 Optimization work is tracked in
 [docs/optimization-experiments.md](docs/optimization-experiments.md). The
