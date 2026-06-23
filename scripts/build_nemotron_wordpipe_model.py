@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the current best Wordpipe Nemotron model from a NeMo checkpoint.
+"""Build a Wordpipe Nemotron model from a NeMo checkpoint.
 
 This is intentionally a thin orchestration layer. The individual phase scripts
 remain independently runnable and debuggable; this wrapper records the blessed
@@ -12,20 +12,21 @@ Pipeline:
    can exit before ONNX Runtime quantization starts, which avoids holding both
    memory-heavy stacks at once.
 
-2. Quantize and rewrite projected K/V cache.
-   Starting from FP32 lets ONNX Runtime apply one coherent dynamic QUInt8 pass.
+2. Transform and rewrite projected K/V cache.
    The projected-cache rewrite stores already-projected attention K/V tensors so
-   the runtime avoids recomputing old context every streaming chunk.
+   the runtime avoids recomputing old context every streaming chunk. The default
+   high-performance profile keeps the encoder and decoder in FP32. The legacy
+   compact profile first runs one coherent dynamic QUInt8 pass.
 
 3. Specialize fixed streaming shapes.
    Wordpipe currently runs the Nemotron c56 streaming shape: 65 mel frames in,
    7 encoder frames out, 56 projected-cache frames. Fixing these shapes removes
    symbolic shape plumbing and lets ORT fold more graph work.
 
-4. Dequantize feed-forward MatMul/Gemm blocks back to FP32.
+4. Optionally dequantize feed-forward MatMul/Gemm blocks back to FP32.
    Benchmarks on the Ivy Bridge test machine show ORT's FP32 GEMM path is faster
    than dynamic activation quantization plus int8 matmul overhead for these FFN
-   blocks. This is the current best speed artifact despite the larger model.
+   blocks. This preserves the older compact mixed-int8/FP32 candidate.
 """
 
 from __future__ import annotations
@@ -41,6 +42,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_WORK_DIR = ROOT / "build" / "nemotron-wordpipe-pipeline"
 PHASES = ("export", "transform", "fixed-shape", "ffn-fp32")
+PROFILES = ("fp32-projected", "ffn-fp32")
 
 
 def parse_args() -> argparse.Namespace:
@@ -57,6 +59,16 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_WORK_DIR,
         help=f"Intermediate phase directory. Default: {DEFAULT_WORK_DIR}",
     )
+    parser.add_argument(
+        "--profile",
+        choices=PROFILES,
+        default="fp32-projected",
+        help=(
+            "Model build profile. fp32-projected is the current high-performance "
+            "default; ffn-fp32 keeps the older compact quantized/projected-cache "
+            "encoder with FP32 feed-forward blocks."
+        ),
+    )
     parser.add_argument("--python", type=Path, default=Path(sys.executable))
     parser.add_argument("--force", action="store_true", help="Delete existing phase/output dirs before writing.")
     parser.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
@@ -69,7 +81,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--stop-after",
         choices=PHASES,
-        default="ffn-fp32",
+        default=None,
         help="Stop after this phase.",
     )
     parser.add_argument("--left-context", type=int, default=56)
@@ -100,7 +112,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--keep-fp32",
         action="store_true",
-        help="Keep FP32 export artifacts after the transform phase.",
+        help="Keep source FP32 export artifacts after the transform phase.",
     )
     parser.add_argument(
         "--projected-cache-current-projection",
@@ -128,19 +140,28 @@ def parse_args() -> argparse.Namespace:
 
 
 def phase_enabled(args: argparse.Namespace, phase: str) -> bool:
+    phases = active_phases(args)
     start = PHASES.index(args.start_at)
-    stop = PHASES.index(args.stop_after)
+    stop = PHASES.index(args.stop_after or phases[-1])
     index = PHASES.index(phase)
     if start > stop:
         raise SystemExit(f"--start-at {args.start_at!r} comes after --stop-after {args.stop_after!r}")
-    return start <= index <= stop
+    return phase in phases and start <= index <= stop
+
+
+def active_phases(args: argparse.Namespace) -> tuple[str, ...]:
+    if args.profile == "fp32-projected":
+        return ("export", "transform", "fixed-shape")
+    if args.profile == "ffn-fp32":
+        return PHASES
+    raise ValueError(args.profile)
 
 
 def phase_output(args: argparse.Namespace, phase: str) -> Path:
     if phase in {"export", "transform"}:
         return args.work_dir / "01-fp32-export"
     if phase == "fixed-shape":
-        return args.work_dir / "02-fixed-shape"
+        return args.output_dir if args.profile == "fp32-projected" else args.work_dir / "02-fixed-shape"
     if phase == "ffn-fp32":
         return args.output_dir
     raise ValueError(phase)
@@ -169,6 +190,18 @@ def run(command: list[str], *, dry_run: bool) -> None:
 
 def main() -> None:
     args = parse_args()
+    phases = active_phases(args)
+    if args.stop_after is None:
+        args.stop_after = phases[-1]
+    if args.stop_after not in phases:
+        raise SystemExit(f"--stop-after {args.stop_after!r} is not part of profile {args.profile!r}")
+    if args.start_at not in phases:
+        raise SystemExit(f"--start-at {args.start_at!r} is not part of profile {args.profile!r}")
+    if args.profile == "fp32-projected" and args.fp32_decoder:
+        raise SystemExit("--fp32-decoder only applies to --profile ffn-fp32")
+    if args.profile == "fp32-projected" and args.quantize_per_channel:
+        raise SystemExit("--quantize-per-channel only applies to --profile ffn-fp32")
+
     python = str(args.python)
     export_dir = phase_output(args, "export")
     fixed_dir = phase_output(args, "fixed-shape")
@@ -200,12 +233,12 @@ def main() -> None:
                 python,
                 "scripts/transform_nemotron_parakeet_export.py",
                 str(export_dir),
-                "--quantize",
+                "--quantize" if args.profile == "ffn-fp32" else "--no-quantize",
                 "--projected-cache",
                 "--projected-cache-current-projection",
                 args.projected_cache_current_projection,
-                *(["--quantize-per-channel"] if args.quantize_per_channel else []),
-                *(["--fp32-decoder"] if args.fp32_decoder else []),
+                *(["--quantize-per-channel"] if args.profile == "ffn-fp32" and args.quantize_per_channel else []),
+                *(["--fp32-decoder"] if args.profile == "ffn-fp32" and args.fp32_decoder else []),
                 *(["--keep-fp32"] if args.keep_fp32 else []),
             ],
             dry_run=args.dry_run,
@@ -262,7 +295,7 @@ def main() -> None:
             dry_run=args.dry_run,
         )
 
-    if args.stop_after == "ffn-fp32":
+    if args.stop_after == phases[-1]:
         print(f"[pipeline] complete final={args.output_dir}", flush=True)
     else:
         print(f"[pipeline] stopped after {args.stop_after} output={phase_output(args, args.stop_after)}", flush=True)

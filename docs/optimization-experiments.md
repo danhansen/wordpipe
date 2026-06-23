@@ -976,6 +976,10 @@ Observations:
   the hardened projected-cache/export tooling and the reusable
   `scripts/score_benchmark_wer.py` WER check.
 
+Later note: the broader 985-word RTF/WER sweep below supersedes this narrow
+313-word gate and promotes the full FP32 projected-cache profile as the current
+high-performance default.
+
 ### Raw-Cache Control
 
 To isolate whether the WER regression came from projected-cache rewriting or
@@ -1245,6 +1249,15 @@ Interpretation:
 - This is one long run per variant. The transcripts are deterministic for a
   fixed graph and input, but if absolute timing confidence becomes important,
   rerun this same broader benchmark with `--runs 3` and compare medians.
+
+Decision:
+
+- Promote `fp32_projected` as the current high-performance build profile. It is
+  the cleanest of the performance-competitive options because it avoids dynamic
+  quantization, selective FFN dequantization, and hybrid decoder packaging. The
+  remaining nontrivial graph change is projected-cache rewriting, which directly
+  matches the runtime's streaming cache contract.
+- Keep `ffn_fp32` as the smaller mixed-int8/FP32 fallback, not the default.
 
 ## 2026-06-22: Sayboard Harvest Wrapper Results
 

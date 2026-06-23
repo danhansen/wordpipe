@@ -289,34 +289,46 @@ because it loads the projected-cache Nemotron encoder reliably here.
 
 ### Building A Wordpipe Nemotron Model
 
-The current best export path is codified as a thin wrapper around the individual
-phase scripts:
+The current high-performance export path is codified as a thin wrapper around
+the individual phase scripts:
 
 ```sh
 .venv/bin/python scripts/build_nemotron_wordpipe_model.py \
   /path/to/model.nemo \
-  models/nemotron-wordpipe-ffn-fp32 \
+  models/nemotron-wordpipe-fp32-projected \
   --work-dir build/nemotron-wordpipe-pipeline
 ```
 
 Use `--force` to overwrite an existing work/output directory. Use `--dry-run`
-to print the phase commands without running them.
+to print the phase commands without running them. The default profile is
+`--profile fp32-projected`, which keeps the encoder and decoder in FP32 and
+uses the projected-cache rewrite. This is larger on disk, but it is the fastest
+validated local option so far.
 
 The wrapper deliberately keeps the phases separate:
 
 - `export_nemotron_parakeet_optimized.py --export-only` exports FP32 ONNX from
   NeMo and then exits before quantization so Torch/NeMo memory is released.
-- `transform_nemotron_parakeet_export.py` applies dynamic QUInt8 quantization
-  and rewrites the encoder to use projected K/V cache.
+- `transform_nemotron_parakeet_export.py --no-quantize --projected-cache`
+  rewrites the FP32 encoder to use projected K/V cache.
 - `build_nemotron_fixed_shape_model.py` specializes the streaming graph to the
   current c56 runtime shape and serializes ORT's optimized encoder graph.
-- `dequantize_nemotron_matmul_blocks.py --include /feed_forward` rewrites FFN
-  MatMul/Gemm blocks back to FP32, the fastest validated variant on the current
-  Ivy Bridge test machine.
-- `--fp32-decoder` keeps `decoder_joint.onnx` as the FP32 NeMo export while the
-  encoder follows the quantized/projected-cache pipeline. It is experimental:
-  the local LibriSpeech sample showed a small throughput win with one additional
-  strict spelling WER error.
+
+The older compact mixed-int8/FP32 candidate remains available:
+
+```sh
+.venv/bin/python scripts/build_nemotron_wordpipe_model.py \
+  /path/to/model.nemo \
+  models/nemotron-wordpipe-ffn-fp32 \
+  --work-dir build/nemotron-wordpipe-pipeline-ffn-fp32 \
+  --profile ffn-fp32
+```
+
+In that profile, `transform_nemotron_parakeet_export.py` applies dynamic QUInt8
+quantization and projected cache, then
+`dequantize_nemotron_matmul_blocks.py --include /feed_forward` rewrites FFN
+MatMul/Gemm blocks back to FP32. `--fp32-decoder` is also available only in this
+profile as a modest-speed experimental option.
 
 Important defaults:
 
