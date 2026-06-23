@@ -809,3 +809,85 @@ Observations:
 - Next `MatMulNBits` attempts, if any, should start earlier in the pipeline:
   export/fold/fix shapes while preserving ordinary static-RHS `MatMul` nodes,
   then apply weight-only quantization before ORT fuses the graph.
+
+### Pre-Fusion FFN MatMulNBits
+
+The post-ORT `MatMulNBits` pass above only produced 48 saved `MatMulNBits`
+nodes because much of the graph had already been fused. To test whether
+pre-fusion placement changes the result, a non-ORT-serialized FFN-FP32 source
+was built first:
+
+```sh
+.venv/bin/python scripts/dequantize_nemotron_matmul_blocks.py \
+  --source-dir build/model-variants/nemotron-c56-fixed-shape \
+  --output-dir build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-preort \
+  --include /feed_forward
+```
+
+Result: `rewritten_blocks=96`, `prunedInitializers=192`, `ortFinal=None`,
+encoder size `1779.0 MiB`. A dry-run from this source selected 96 static-RHS
+FFN `MatMul` nodes for weight-only quantization.
+
+The low-level k-quant path completed quantization but produced an invalid graph
+for this pre-fusion source: ONNX checker reported a missing producer for
+`/encoder/pre_encode/conv/conv.0/Conv_output_0_bias_reshape_output`. This
+appears to be a limitation or bug in the neural-compressor-derived ORT helper
+on this graph, so the wrapper was extended to use ORT's newer
+`MatMulNBitsQuantizer` default path as `--algorithm default`.
+
+Build:
+
+```sh
+.venv/bin/python scripts/quantize_nemotron_matmul_nbits.py \
+  --source-dir build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-preort \
+  --output-dir build/model-variants/nemotron-c56-fixed-shape-ffn-nbits-int8-default-k32-preort \
+  --bits 8 \
+  --block-size 32 \
+  --algorithm default
+```
+
+Build output:
+
+| Artifact | Value |
+| --- | ---: |
+| Selected `MatMul` nodes | 96 |
+| Saved `MatMulNBits` nodes | 96 |
+| Remaining `DynamicQuantizeMatMul` nodes | 48 |
+| Remaining ordinary `MatMul` nodes | 72 |
+| Encoder proto | 1.9 MiB |
+| Encoder external data | 685.2 MiB |
+
+Benchmark:
+
+```sh
+.venv/bin/python scripts/benchmark_parakeet_variant.py \
+  ffn_fp32=build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort \
+  ffn_nbits_int8_default_preort=build/model-variants/nemotron-c56-fixed-shape-ffn-nbits-int8-default-k32-preort \
+  --runs 3 \
+  --num-threads 2 \
+  --min-mem-available-gb 6 \
+  --child-memory-limit-gb 10 \
+  --set-power-profile balanced \
+  --output build/parakeet-variant-bench/ffn-nbits-int8-default-preort-001.json
+```
+
+The benchmark produced three baseline `ffn_fp32` runs but the first candidate
+run timed out after the 300 second per-run limit. The partial result file is
+`build/parakeet-variant-bench/ffn-nbits-int8-default-preort-001.json`.
+
+| Variant | Median real-audio RTF | Median RTF | Median decode seconds | Result |
+| --- | ---: | ---: | ---: | --- |
+| `ffn_fp32` | 0.616 | 0.607 | 76.183 | baseline median |
+| `ffn_nbits_int8_default_preort` | n/a | n/a | >300 | timed out on run 1 |
+
+Observations:
+
+- Applying `MatMulNBits` before ORT fusion does create the intended 96 FFN
+  weight-only nodes and reduces the model size substantially.
+- Throughput is still decisively worse on this CPU. The candidate failed to
+  finish a single long-WAV run within 300 seconds, versus a 76.183 second
+  baseline median decode.
+- This rejects the FFN-only `MatMulNBits` path for the current Ivy Bridge CPU
+  and ORT 1.27 CPU EP. The paper's full encoder-wide export may still behave
+  differently on newer CPUs or with a different ORT build, but the practical
+  Wordpipe path remains `ffn_fp32`.
