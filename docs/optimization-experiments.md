@@ -1307,6 +1307,72 @@ Interpretation:
   environment. Re-run this after selecting a working input device or teaching
   the worker to negotiate/resample from the device's native rate.
 
+### Compact Model Broad Comparison
+
+The compact fixed-shape candidate keeps the sherpa-derived quantized/projected
+encoder and only applies fixed streaming shapes plus serialized ORT
+optimization. It is the best small model recipe:
+
+```sh
+.venv/bin/python scripts/build_nemotron_fixed_shape_model.py \
+  --source-dir models/nemotron-3.5-asr-streaming-0.6b-parakeet-int8-projected-c56 \
+  --output-dir build/model-variants/nemotron-c56-fixed-shape-ort-extended \
+  --ort-optimize-final extended \
+  --ort-optimize-threads 1
+```
+
+Broad interleaved benchmark:
+
+```sh
+scripts/benchmark_parakeet_variant.py \
+  --interleave \
+  --wav build/librispeech-highperf-validation/librispeech-long.wav \
+  --runs 3 \
+  --num-threads 2 \
+  --flush-chunks 3 \
+  --graph-optimization all \
+  --timeout-seconds 900 \
+  --min-mem-available-gb 6 \
+  --child-memory-limit-gb 12 \
+  --set-power-profile balanced \
+  --output build/parakeet-variant-bench/compact-vs-top-broad-interleaved-001.json \
+  fp32_projected=build/model-variants/nemotron-fp32-projected-fixed-shape \
+  ffn_fp32=build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort \
+  compact_fixed_shape=build/model-variants/nemotron-c56-fixed-shape-ort-extended
+```
+
+Power state: AC online throughout, battery charging/not charging, GNOME profile
+`balanced`.
+
+Score:
+
+```sh
+.venv/bin/python scripts/score_benchmark_wer.py \
+  build/parakeet-variant-bench/compact-vs-top-broad-interleaved-001.json \
+  --manifest build/librispeech-highperf-validation/manifest.jsonl
+```
+
+Results:
+
+| Variant | Size | Median load seconds | Median real-audio RTF | Median decode seconds | Rough WER |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `fp32_projected` | 2.4 GiB | 2.717 | 0.501 | 187.533 | 25 / 985 = 2.54% |
+| `ffn_fp32` | 1.8 GiB | 3.728 | 0.603 | 225.780 | 27 / 985 = 2.74% |
+| `compact_fixed_shape` | 575 MiB | 1.101 | 0.701 | 262.237 | 29 / 985 = 2.94% |
+
+Interpretation:
+
+- `compact_fixed_shape` is the clear small-model choice. It is about one
+  quarter the size of `fp32_projected` and loads about 1.6 seconds faster.
+- The compact model pays for that footprint: about 40% higher real-audio RTF
+  than `fp32_projected` and four additional strict WER edits on this 985-word
+  sample.
+- `ffn_fp32` is not a compelling middle ground here. It is much larger than the
+  compact model, loads slower than both alternatives, and is slower/less
+  accurate than `fp32_projected`.
+- Keep `fp32_projected` as the default quality/speed profile, and keep
+  `compact_fixed_shape` as the documented small-footprint fallback.
+
 ## 2026-06-22: Sayboard Harvest Wrapper Results
 
 The remaining Sayboard-derived experiments are now captured by:
