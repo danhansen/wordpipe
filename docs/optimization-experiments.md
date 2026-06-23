@@ -972,3 +972,69 @@ Observations:
 - Do not promote this as the default runtime candidate. The useful harvest is
   the hardened projected-cache/export tooling and the reusable
   `scripts/score_benchmark_wer.py` WER check.
+
+### Raw-Cache Control
+
+To isolate whether the WER regression came from projected-cache rewriting or
+from the FP32 NeMo export path itself, the same consolidated FP32 encoder was
+also transformed without projected cache and then built with the same
+fixed-shape/ORT-extended path.
+
+Build:
+
+```sh
+.venv/bin/python scripts/transform_nemotron_parakeet_export.py \
+  build/model-variants/nemotron-fp32-rawcache \
+  --no-quantize \
+  --no-projected-cache \
+  --keep-fp32
+
+.venv/bin/python scripts/build_nemotron_fixed_shape_model.py \
+  --source-dir build/model-variants/nemotron-fp32-rawcache \
+  --output-dir build/model-variants/nemotron-fp32-rawcache-fixed-shape \
+  --ort-optimize-final extended \
+  --ort-optimize-threads 1
+```
+
+Benchmark:
+
+```sh
+.venv/bin/python scripts/benchmark_parakeet_variant.py \
+  fp32_rawcache=build/model-variants/nemotron-fp32-rawcache-fixed-shape \
+  fp32_projected=build/model-variants/nemotron-fp32-projected-fixed-shape \
+  --runs 3 \
+  --num-threads 2 \
+  --min-mem-available-gb 6 \
+  --child-memory-limit-gb 10 \
+  --set-power-profile balanced \
+  --output build/parakeet-variant-bench/fp32-rawcache-isolation-001.json
+```
+
+WER scoring:
+
+```sh
+.venv/bin/python scripts/score_benchmark_wer.py \
+  build/parakeet-variant-bench/fp32-rawcache-isolation-001.json
+```
+
+Results:
+
+| Variant | Median real-audio RTF | Median RTF | Median decode seconds | Median wall seconds | Rough WER |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `fp32_rawcache` | 0.687 | 0.677 | 84.911 | 88.036 | 11 / 313 = 3.51% |
+| `fp32_projected` | 0.516 | 0.509 | 63.825 | 67.981 | 11 / 313 = 3.51% |
+
+The system again reported battery discharging (`25%` -> `18%`) with GNOME
+profile `balanced`, so use this as an in-run A/B only.
+
+Conclusion:
+
+- The WER regression is not caused by the projected-cache rewrite. Raw-cache
+  FP32 and projected-cache FP32 produce the same transcript and the same rough
+  WER.
+- Projected cache is doing what we expected on this export: it removes the cost
+  of repeatedly projecting the full raw K/V cache, improving median real-audio
+  RTF by about 24.9% versus raw-cache FP32.
+- The remaining accuracy question is why this FP32 NeMo export path differs
+  from the sherpa-derived `ffn_fp32` candidate (`11/313` vs `9/313` on this
+  rough sample).
