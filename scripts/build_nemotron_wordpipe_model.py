@@ -116,6 +116,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Experimental: use per-channel weights for dynamic QUInt8 quantization.",
     )
+    parser.add_argument(
+        "--fp32-decoder",
+        action="store_true",
+        help=(
+            "Keep decoder_joint.onnx as FP32 while quantizing the encoder. "
+            "Experimental speed/accuracy tradeoff; validate WER before use."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -197,6 +205,7 @@ def main() -> None:
                 "--projected-cache-current-projection",
                 args.projected_cache_current_projection,
                 *(["--quantize-per-channel"] if args.quantize_per_channel else []),
+                *(["--fp32-decoder"] if args.fp32_decoder else []),
                 *(["--keep-fp32"] if args.keep_fp32 else []),
             ],
             dry_run=args.dry_run,

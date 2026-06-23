@@ -1042,6 +1042,51 @@ Conclusion:
   from the sherpa-derived `ffn_fp32` candidate (`11/313` vs `9/313` on this
   rough sample).
 
+### FP32 Decoder Hybrid Isolation
+
+The `11/313` FP32 projected result contains two additional countable errors
+relative to current best:
+
+- `seemed` -> `seem`
+- `marvelous` -> `marvellous`
+
+Two hardlink-only hybrid packages isolated where those errors come from:
+
+| Hybrid | Encoder | Decoder/joint | Rough WER | Interpretation |
+| --- | --- | --- | ---: | --- |
+| `fp32_projected_quant_decoder` | FP32 projected encoder | current quantized decoder | 10 / 313 = 3.19% | Quantized decoder fixes `marvellous`; `seem` remains encoder/export-side. |
+| `current_encoder_fp32_decoder` | current-best encoder | FP32 decoder | 10 / 313 = 3.19% | Current encoder preserves `seemed`; FP32 decoder introduces only `marvellous`. |
+
+The inverse hybrid also found a practical speed candidate. Same-file 3x A/B:
+
+```sh
+.venv/bin/python scripts/benchmark_parakeet_variant.py \
+  --wav build/allocation-ablation/librispeech-long.wav \
+  --runs 3 \
+  --num-threads 2 \
+  --flush-chunks 3 \
+  --graph-optimization all \
+  --min-mem-available-gb 6 \
+  --child-memory-limit-gb 10 \
+  --output build/parakeet-variant-bench/current-encoder-fp32-decoder-ab-001.json \
+  baseline=build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort \
+  current_encoder_fp32_decoder=build/model-variants/nemotron-current-encoder-fp32-decoder-hybrid
+```
+
+Results:
+
+| Variant | Median real-audio RTF | Median RTF | Median decode seconds | Rough WER |
+| --- | ---: | ---: | ---: | ---: |
+| `baseline` | 0.606 | 0.598 | 74.961 | 9 / 313 = 2.88% |
+| `current_encoder_fp32_decoder` | 0.573 | 0.565 | 70.820 | 10 / 313 = 3.19% |
+
+This is about a 5.4% median real-audio RTF improvement in the same run set,
+with the strict WER delta isolated to one spelling variant. The export tooling
+now exposes this as `--fp32-decoder` on
+`scripts/transform_nemotron_parakeet_export.py`,
+`scripts/export_nemotron_parakeet_optimized.py`, and the top-level
+`scripts/build_nemotron_wordpipe_model.py` wrapper.
+
 ## 2026-06-22: Sayboard Harvest Wrapper Results
 
 The remaining Sayboard-derived experiments are now captured by:

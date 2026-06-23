@@ -303,6 +303,10 @@ The wrapper deliberately keeps the phases separate:
 - `dequantize_nemotron_matmul_blocks.py --include /feed_forward` rewrites FFN
   MatMul/Gemm blocks back to FP32, the fastest validated variant on the current
   Ivy Bridge test machine.
+- `--fp32-decoder` keeps `decoder_joint.onnx` as the FP32 NeMo export while the
+  encoder follows the quantized/projected-cache pipeline. It is experimental:
+  the local LibriSpeech sample showed a small throughput win with one additional
+  strict spelling WER error.
 
 Important defaults:
 

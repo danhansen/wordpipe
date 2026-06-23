@@ -63,6 +63,15 @@ def parse_args() -> argparse.Namespace:
         help="Use per-channel weight quantization during dynamic QUInt8 quantization.",
     )
     parser.add_argument(
+        "--fp32-decoder",
+        action="store_true",
+        help=(
+            "Keep decoder_joint.onnx as the FP32 NeMo export even when the "
+            "encoder is dynamically quantized. Benchmark before promoting; "
+            "this can trade strict spelling WER for throughput."
+        ),
+    )
+    parser.add_argument(
         "--keep-fp32",
         action="store_true",
         help="Keep FP32 encoder/decoder artifacts after transform.",
@@ -153,7 +162,10 @@ def main() -> None:
         encoder_quant = model_dir / "encoder.quant.onnx"
         decoder_quant = model_dir / "decoder_joint.onnx"
         quantize_to_single_file(encoder_fp32, encoder_quant, per_channel=args.quantize_per_channel)
-        quantize_to_single_file(decoder_fp32, decoder_quant, per_channel=args.quantize_per_channel)
+        if args.fp32_decoder:
+            decoder_quant.write_bytes(decoder_fp32.read_bytes())
+        else:
+            quantize_to_single_file(decoder_fp32, decoder_quant, per_channel=args.quantize_per_channel)
         encoder_for_projected = encoder_quant
     else:
         (model_dir / "decoder_joint.onnx").write_bytes(decoder_fp32.read_bytes())
@@ -186,6 +198,7 @@ def main() -> None:
     config["projected_cache_current_projection"] = current_projection if args.projected_cache else None
     config["dynamic_quint8_quantization"] = args.quantize
     config["dynamic_quint8_per_channel"] = args.quantize_per_channel if args.quantize else False
+    config["decoder_joint_fp32"] = bool(args.fp32_decoder or not args.quantize)
     config["ort_optimized_final_encoder"] = args.ort_optimize_final
     (model_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
 
