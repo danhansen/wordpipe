@@ -628,3 +628,106 @@ Profile observations:
 - The remaining `DynamicQuantizeMatMul` cost is led by non-FFN nodes such as
   `/encoder/pre_encode/out/MatMul_quant`; attention-projection dequantization
   already tested poorly on rough WER.
+
+### FFN Plus Pre-Encoder Output Dequantization
+
+The ORT profile above showed `/encoder/pre_encode/out/MatMul_quant` as the
+largest remaining non-FFN `DynamicQuantizeMatMul` site. The first attempt to
+rewrite it from `build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort`
+rewrote zero blocks because the source had already been serialized through ORT,
+where the original `MatMulInteger` pattern was fused into
+`DynamicQuantizeMatMul`. The valid procedure is to apply all selected
+dequantization before the final ORT optimization pass.
+
+`scripts/dequantize_nemotron_matmul_blocks.py` was adjusted so biased matmuls
+whose input rank is unknown or not statically 2-D fall back to `MatMul` plus the
+original `Add`, instead of emitting an invalid `Gemm`.
+
+Build command:
+
+```sh
+.venv/bin/python scripts/dequantize_nemotron_matmul_blocks.py \
+  --source-dir build/model-variants/nemotron-c56-fixed-shape \
+  --output-dir build/model-variants/nemotron-c56-fixed-shape-ffn-preout-fp32-ort-v2 \
+  --include /feed_forward \
+  --include /pre_encode/out/ \
+  --ort-optimize-final extended \
+  --ort-optimize-threads 1
+```
+
+Result: `rewritten_blocks=97`, `prunedInitializers=194`, encoder size
+`1739.6 MiB`.
+
+Benchmark command:
+
+```sh
+.venv/bin/python scripts/benchmark_parakeet_variant.py \
+  ffn_fp32=build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort \
+  ffn_preout_fp32=build/model-variants/nemotron-c56-fixed-shape-ffn-preout-fp32-ort-v2 \
+  --runs 3 \
+  --num-threads 2 \
+  --min-mem-available-gb 6 \
+  --child-memory-limit-gb 10 \
+  --set-power-profile balanced \
+  --output build/parakeet-variant-bench/ffn-preout-001.json
+```
+
+Results:
+
+| Variant | Median real-audio RTF | Median RTF | Median decode seconds | Median wall seconds | Rough WER |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `ffn_fp32` | 0.685 | 0.675 | 84.710 | 89.447 | 9 / 313 = 2.88% |
+| `ffn_preout_fp32` | 0.654 | 0.645 | 80.849 | 85.735 | 10 / 313 = 3.19% |
+
+Observations:
+
+- Adding the pre-encoder output projection to the FFN FP32 rewrite improved
+  median real-audio RTF by about 4.5% relative to the same-session `ffn_fp32`
+  baseline.
+- The transcript changed from "had seemed" to "had seem", raising rough WER by
+  one edit on the concatenated sample. Treat this as speed-positive but
+  accuracy-suspicious until a broader validation run decides whether it is
+  acceptable.
+- This keeps `ffn_fp32` as the conservative current-best candidate, while
+  `ffn_preout_fp32` is a follow-up WER-validation candidate.
+
+## 2026-06-22: Nemotron Streaming Paper Leads
+
+The paper at https://arxiv.org/html/2604.14493v1 is directly relevant because
+it describes ONNX Runtime optimization for Nemotron Speech Streaming on
+resource-constrained CPU devices.
+
+Applicable learnings:
+
+- Their selected streaming configuration is the same `(7, 10, 7)` chunk/history
+  setting used by Wordpipe's c56 export: 560 ms chunks with 5.6 s history. This
+  supports keeping the projected-cache rewrite aligned with that left context
+  rather than shrinking cache length only for speed.
+- Their quantization boundary matches our empirical direction: the encoder is
+  the optimization target, while decoder/joiner stay FP32 because they are
+  smaller and repeatedly invoked in the RNNT loop.
+- Their strongest ONNX lead is weight-only block quantization using ORT
+  `MatMulNBits`, with activations kept FP32. That is different from our current
+  dynamic activation quantization path (`DynamicQuantizeLinear` plus
+  `MatMulInteger`, often fused to `DynamicQuantizeMatMul`).
+- Their `ConvInteger`/`MatMulInteger` result is a useful caution. It improves
+  throughput but worsens WER, matching Wordpipe's all-conv FP32 ablation in the
+  other direction: conv/integer arithmetic changes can be speed-positive while
+  still being accuracy-risky.
+
+Reported paper results for Nemotron Speech Streaming:
+
+| Variant | Size | WER | RTFx |
+| --- | ---: | ---: | ---: |
+| FP32 ONNX | 2.47 GB | 8.03 | 6.73 |
+| Int8 k-quant | 1.28 GB | 8.01 | 7.25 |
+| Int4 k-quant | 0.67 GB | 8.20 | 7.20 |
+| Int4 plus `ConvInteger`/`MatMulInteger` | 0.64 GB | 10.14 | 8.74 |
+
+Next paper-derived experiments:
+
+- Prototype an ORT `MatMulNBits` weight-only block-quantized encoder from the
+  fixed-shape source, starting with int8 k-quant before int4.
+- Compare against `ffn_fp32` and compact `fixed_shape_ort` with the same
+  long-WAV 3-run median harness and the larger LibriSpeech sampled validation.
+- Preserve decoder/joiner FP32 in that experiment.

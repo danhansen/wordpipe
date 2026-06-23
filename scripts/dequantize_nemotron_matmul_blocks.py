@@ -150,7 +150,8 @@ def build_rewrite_specs(model: onnx.ModelProto, include: list[str], exclude: lis
         if output_mul_index is None:
             continue
 
-        final_output_name = nodes[output_mul_index].output[0]
+        matmul_float_output = nodes[output_mul_index].output[0]
+        final_output_name = matmul_float_output
         bias_add_index = None
         bias_name = None
         for candidate_index in consumers.get(final_output_name, []):
@@ -182,6 +183,7 @@ def build_rewrite_specs(model: onnx.ModelProto, include: list[str], exclude: lis
         gemm_input = lhs_input
         gemm_output = final_output_name
         use_gemm = bias_name is not None
+        needs_output_reshape = False
         if lhs_input_shape is not None and final_output_shape is not None and len(lhs_input_shape) > 2:
             leading = int(np.prod(lhs_input_shape[:-1], dtype=np.int64))
             inner = lhs_input_shape[-1]
@@ -199,6 +201,10 @@ def build_rewrite_specs(model: onnx.ModelProto, include: list[str], exclude: lis
                 helper.make_node("Reshape", [lhs_input, reshape_in_shape], [reshape_in_output], name=f"{base}_reshape_in")
             )
             gemm_input = reshape_in_output
+            needs_output_reshape = True
+        elif use_gemm and (lhs_input_shape is None or len(lhs_input_shape) != 2):
+            use_gemm = False
+            gemm_output = matmul_float_output
 
         if use_gemm:
             inputs = [gemm_input, weight_name, bias_name]
@@ -224,7 +230,7 @@ def build_rewrite_specs(model: onnx.ModelProto, include: list[str], exclude: lis
                 )
             )
 
-        if gemm_output != final_output_name:
+        if needs_output_reshape:
             reshape_out_shape = f"{base}_reshape_out_shape"
             replacement_nodes.append(
                 helper.make_node("Reshape", [gemm_output, reshape_out_shape], [final_output_name], name=f"{base}_reshape_out")
@@ -237,7 +243,7 @@ def build_rewrite_specs(model: onnx.ModelProto, include: list[str], exclude: lis
         _ = dql_index
         _ = scale_mul_index
         remove = {matmul_index, cast_index, output_mul_index}
-        if bias_add_index is not None:
+        if bias_add_index is not None and use_gemm:
             remove.add(bias_add_index)
         specs.append(RewriteSpec(min(remove), remove, replacement_nodes))
     return specs
