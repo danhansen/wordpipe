@@ -80,11 +80,11 @@ These are the remaining ONNX/ORT-relevant Sayboard ideas that are plausible for
 Wordpipe and still lack a same-WAV 3-run median plus WER result:
 
 1. Export parity investigation.
-   The FP32 NeMo raw-cache and projected-cache controls both scored `11 / 313`
-   WER while the sherpa-derived `ffn_fp32` candidate scores `9 / 313`. Before
-   promoting any FP32-export-derived optimization, compare graph inputs,
-   preprocessing assumptions, prompt/lang handling, and decoder/joint export
-   parity against the sherpa-derived model.
+   `scripts/compare_nemotron_model_packages.py` now records package-level
+   differences. Current evidence points away from tokenizer/prompt/preprocessor
+   differences and toward encoder graph/export structure: the FP32-export
+   quantized variants do not produce the same `FusedMatMul`/FFN-dequantized
+   graph as the current sherpa-derived best model.
 
 ## Rejected Or Deferred
 

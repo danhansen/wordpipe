@@ -1128,3 +1128,54 @@ Conclusion:
 - It also carries the same rough accuracy concern as the other FP32-export
   variants.
 - Do not promote per-channel quantization into the default model pipeline.
+
+## 2026-06-22: Export-Parity Graph Audit
+
+To make the FP32-export parity investigation repeatable, package comparison is
+now scripted:
+
+```sh
+.venv/bin/python scripts/compare_nemotron_model_packages.py \
+  build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort \
+  build/model-variants/sayboard-harvest/fp32-current-projection-ffn-fp32-ort \
+  --json-out build/export-parity/current-best-vs-fp32-current-projection.json
+```
+
+Additional reports:
+
+- `build/export-parity/current-best-vs-fp32-projected.json`
+- `build/export-parity/current-best-vs-per-channel.json`
+
+Findings:
+
+- `tokenizer.model` is byte-identical across current best, FP32 projected,
+  FP32-current-projection, and per-channel variants:
+  `ce3895e40806f02a26c3a225161b96ef682d6c0054bae32a245dec4258d7d291`.
+- Prompt dictionary, preprocessor config, vocab size, blank id, test input
+  shape, and test output shape match between current best and the quantized
+  FP32-export variants.
+- The decoder/joint graph is equivalent at the useful level for the quantized
+  FP32-export variants: `DynamicQuantizeLSTM=2`, `MatMulInteger=3`, and
+  `DynamicQuantizeLinear=3`, matching current best.
+- The encoder graph is not equivalent. Current best has `FusedMatMul=48`,
+  `DynamicQuantizeMatMul=99`, `DynamicQuantizeLinear=173`,
+  `ConvInteger=77`, and `MatMul=120`. The FP32-current-projection variant has
+  `FusedMatMul=0`, `DynamicQuantizeMatMul=147`, `DynamicQuantizeLinear=77`,
+  `ConvInteger=77`, and `MatMul=120`.
+- The current best FFN dequantization pass rewrote `96` blocks and pruned `192`
+  initializers. The FP32-export quantized variants rewrote `0` blocks in the
+  same phase, so they did not reach the same mixed int8/FP32 encoder graph.
+
+Interpretation:
+
+- The observed FP32-export WER/perf differences are not explained by tokenizer,
+  prompt selection, preprocessor metadata, or decoder/joint ABI differences.
+- The likely remaining parity issue is encoder graph structure after ORT
+  quantization/fusion: the sherpa-derived/current-best path exposes scalar-scale
+  FFN quantization tails that Wordpipe can dequantize back to FP32 and retains
+  `FusedMatMul` nodes after ORT optimization, while the clean FP32 export path
+  produces a different fused graph.
+- Further parity work should focus on reproducing the current-best encoder
+  graph form from the NeMo export path, or on extending the dequantizer to
+  handle the FP32-export quantized patterns if they can be matched without
+  hurting WER.
