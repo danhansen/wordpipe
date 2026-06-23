@@ -102,6 +102,15 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Keep FP32 export artifacts after the transform phase.",
     )
+    parser.add_argument(
+        "--projected-cache-current-projection",
+        choices=("auto", "dynamic-int8", "fp32"),
+        default="auto",
+        help=(
+            "Projection used for current K/V chunks in the projected-cache "
+            "rewrite. auto preserves the default transform behavior."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -180,6 +189,8 @@ def main() -> None:
                 str(export_dir),
                 "--quantize",
                 "--projected-cache",
+                "--projected-cache-current-projection",
+                args.projected_cache_current_projection,
                 *(["--keep-fp32"] if args.keep_fp32 else []),
             ],
             dry_run=args.dry_run,

@@ -42,6 +42,16 @@ def parse_args() -> argparse.Namespace:
         help="Apply projected K/V cache rewrite to the quantized encoder.",
     )
     parser.add_argument(
+        "--projected-cache-current-projection",
+        choices=("auto", "dynamic-int8", "fp32"),
+        default="auto",
+        help=(
+            "Projection used for the current chunk inside the projected-cache "
+            "rewrite. auto preserves the existing behavior: dynamic-int8 for "
+            "quantized graphs, fp32 for unquantized graphs."
+        ),
+    )
+    parser.add_argument(
         "--quantize",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -64,6 +74,12 @@ def parse_args() -> argparse.Namespace:
         help="Intra-op threads to use while serializing the ORT-optimized final encoder.",
     )
     return parser.parse_args()
+
+
+def projected_cache_current_projection(args: argparse.Namespace) -> str:
+    if args.projected_cache_current_projection != "auto":
+        return args.projected_cache_current_projection
+    return "dynamic-int8" if args.quantize else "fp32"
 
 
 def cleanup_export_shards(model_dir: Path) -> None:
@@ -134,12 +150,13 @@ def main() -> None:
         (model_dir / "decoder_joint.onnx").write_bytes(decoder_fp32.read_bytes())
 
     final_encoder = model_dir / "encoder.onnx"
+    current_projection = projected_cache_current_projection(args)
     if args.projected_cache:
         print("[transform] rewriting encoder with projected cache", flush=True)
         rewrite_projected_cache(
             encoder_for_projected,
             final_encoder,
-            "dynamic-int8" if args.quantize else "fp32",
+            current_projection,
             external_data=not args.quantize,
         )
     else:
@@ -157,6 +174,7 @@ def main() -> None:
 
     config = load_config(model_dir)
     config["projected_cache"] = args.projected_cache
+    config["projected_cache_current_projection"] = current_projection if args.projected_cache else None
     config["dynamic_quint8_quantization"] = args.quantize
     config["ort_optimized_final_encoder"] = args.ort_optimize_final
     (model_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")

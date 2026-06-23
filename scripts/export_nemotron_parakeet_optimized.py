@@ -359,6 +359,12 @@ def export_decoder_joint(model, output_dir: Path) -> Path:
     raise RuntimeError("NeMo export did not produce a decoder_joint ONNX file.")
 
 
+def projected_cache_current_projection(args: argparse.Namespace) -> str:
+    if args.projected_cache_current_projection != "auto":
+        return args.projected_cache_current_projection
+    return "dynamic-int8" if args.quantize else "fp32"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", help=".nemo path or NeMo/Hugging Face model id")
@@ -376,6 +382,16 @@ def main() -> None:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Apply projected K/V cache rewrite after quantization.",
+    )
+    parser.add_argument(
+        "--projected-cache-current-projection",
+        choices=("auto", "dynamic-int8", "fp32"),
+        default="auto",
+        help=(
+            "Projection used for the current chunk inside the projected-cache "
+            "rewrite. auto preserves the existing behavior: dynamic-int8 for "
+            "quantized graphs, fp32 for unquantized graphs."
+        ),
     )
     parser.add_argument(
         "--quantize",
@@ -519,6 +535,9 @@ def main() -> None:
         "blank_id": tokenizer_vocab_size(model),
         "num_prompts": int(getattr(model, "num_prompts", 0)) if prompted else 0,
         "projected_cache": args.projected_cache,
+        "projected_cache_current_projection": (
+            projected_cache_current_projection(args) if args.projected_cache else None
+        ),
         "dynamic_quint8_quantization": args.quantize,
         "ort_optimized_final_encoder": args.ort_optimize_final,
         "prompt_dictionary": prompt_dict,
@@ -572,12 +591,13 @@ def main() -> None:
         shutil.copy2(decoder_fp32, args.output_dir / "decoder_joint.onnx")
 
     final_encoder = args.output_dir / "encoder.onnx"
+    current_projection = projected_cache_current_projection(args)
     if args.projected_cache:
         print("[export] rewriting encoder with projected cache", flush=True)
         rewrite_projected_cache(
             encoder_for_projected,
             final_encoder,
-            "dynamic-int8" if args.quantize else "fp32",
+            current_projection,
             external_data=not args.quantize,
         )
     else:

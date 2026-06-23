@@ -46,7 +46,7 @@ only within the same benchmark run.
 | Projected K/V cache | `rewrite_projected_kv_cache.py` | Ported and kept | Wordpipe supports projected-cache graphs and runtime cache rolling. Raw-cache FP32 control showed same WER as projected-cache FP32, with projected cache much faster. |
 | Layered projected-cache ABI | `rewrite_projected_kv_cache.py` | Ported and kept | Wordpipe uses per-layer `cache_key_layer_N` / `cache_value_layer_N` inputs and `projected_current_*` outputs, matching Sayboard's layered ABI. |
 | Stacked projected-cache ABI | `rewrite_projected_kv_cache.py` | Not ported | Not useful for Wordpipe today. Layered ABI avoids in-graph cache rolling and matches the Rust runtime. |
-| FP32 current K/V projection after quantized source graph | `build_deployed_model.py` calls projected-cache rewrite with `current_projection="fp32"` | Pending experiment | Wordpipe default projected-cache quantized graph uses `dynamic-int8` current projection. Build a `current_projection=fp32` variant from the quantized/fixed-shape source and benchmark/WER it. |
+| FP32 current K/V projection after quantized source graph | `build_deployed_model.py` calls projected-cache rewrite with `current_projection="fp32"` | Implemented; benchmark pending | Wordpipe default projected-cache quantized graph uses `dynamic-int8` current projection, but export/transform scripts now accept `--projected-cache-current-projection fp32`. Build and benchmark/WER this variant. |
 | Dynamic int8 quantization by operator family | `run_ablation.py` default variants | Partially ported and benchmarked | Wordpipe tested broad quantized baseline, FFN dequantization, pre-encoder output dequantization, conv dequantization, layer slices/even/odd variants, and MatMulNBits. Current best dequantizes FFN blocks back to FP32. |
 | Per-channel dynamic quantization sweeps | `run_ablation.py` `*_pc` variants | Mostly untested in Wordpipe | Worth testing only from a clean FP32 export or targeted re-quantization path. Current sherpa-derived source is already quantized, so per-channel variants are not a simple post-pass on the default artifact. |
 | Dynamic Conv quantization | `README.md` rejected conv variants | Ported and rejected | Wordpipe `scripts/quantize_nemotron_conv_dynamic.py` and conv dequant experiments showed throughput/accuracy tradeoffs were not attractive. |
@@ -65,9 +65,10 @@ These are the remaining ONNX/ORT-relevant Sayboard ideas that are plausible for
 Wordpipe and still lack a same-WAV 3-run median plus WER result:
 
 1. Quantized projected-cache with FP32 current K/V projection.
-   Build from the quantized source graph, rewrite projected cache with
-   `--current-projection fp32`, apply fixed-shape/ORT extended, then benchmark
-   against the current `ffn_fp32` default and score WER.
+   Build with `--projected-cache-current-projection fp32`, apply
+   fixed-shape/ORT extended, then benchmark against the current `ffn_fp32`
+   default and score WER. The export/transform CLI support is implemented;
+   only the heavy run is pending.
 
 2. Fixed `processed_signal_length` initializer.
    Build with `--constant-processed-signal-length` and benchmark the resulting
