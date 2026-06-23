@@ -57,7 +57,7 @@ only within the same benchmark run.
 | Custom Android ORT with NCHWc/NEON | `build_onnxruntime_android_nchwc.sh` | Not applicable to Linux x86_64 | The analogous Wordpipe path is `scripts/build_onnxruntime_ivybridge.sh`, but current Python/Rust ORT binaries already execute acceptably and custom builds are deferred. |
 | Runtime thread count sweep | Rust bridge config defaults and Wordpipe benchmark harness | Ported and benchmarked | Wordpipe tested 1-4 intra-op threads; 2 threads remains the practical benchmark default for this CPU. |
 | ORT memory pattern / arena / parallel execution toggles | Wordpipe follow-up inspired by runtime tuning | Ported and benchmarked | `scripts/benchmark_parakeet_variant.py` exposes these toggles. Defaults remained best or close enough; explicit parallel execution was worse. |
-| Allocation reduction in Rust runtime | Sayboard Rust bridge and Wordpipe fork changes | Mostly ported | Wordpipe runtime updates caches in place and reuses audio buffers. Prior A/B showed small or noisy gains; no remaining obvious Sayboard allocation trick is unported for the Nemotron path. |
+| Allocation reduction in Rust runtime | Sayboard Rust bridge and Wordpipe fork changes | Ported where applicable | Wordpipe runtime updates caches in place and reuses audio buffers. Prior A/B showed small or noisy gains; no remaining obvious Sayboard allocation trick is unported for the Nemotron path. |
 
 ## Experiment Runner
 
