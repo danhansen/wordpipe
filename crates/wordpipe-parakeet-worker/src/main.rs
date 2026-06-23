@@ -10,7 +10,7 @@ use clap::{Parser, ValueEnum};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, StreamConfig};
 use crossbeam_channel::{bounded, select, Receiver, Sender};
-use parakeet_rs::{ExecutionConfig, GraphOptimization, Nemotron};
+use parakeet_rs::{ExecutionConfig, GraphOptimization, Nemotron, NemotronChunkTrace};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -44,6 +44,8 @@ struct Args {
     ort_parallel_execution: bool,
     #[arg(long, value_enum, default_value_t = CliBoolOverride::Auto)]
     ort_cpu_arena: CliBoolOverride,
+    #[arg(long)]
+    trace_token_decisions: bool,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -242,7 +244,15 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
                     chunk_buf.copy_from_slice(&pending[..args.chunk_samples]);
                     pending.drain(..args.chunk_samples);
                     processed_samples += chunk_buf.len();
-                    let decoded = decode_chunk(&mut model, &chunk_buf, &mut decode_seconds, &mut decode_calls)?;
+                    let decoded = decode_chunk(
+                        &mut model,
+                        &chunk_buf,
+                        &mut decode_seconds,
+                        &mut decode_calls,
+                        args.trace_token_decisions,
+                    )?;
+                    emit_token_trace(&emitter, &decoded);
+                    let decoded = decoded.text;
                     if !decoded.is_empty() {
                         transcript.push_str(&decoded);
                         emitter.emit(json!({
@@ -275,7 +285,10 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
             &chunk_buf,
             &mut decode_seconds,
             &mut decode_calls,
+            args.trace_token_decisions,
         )?;
+        emit_token_trace(&emitter, &decoded);
+        let decoded = decoded.text;
         if !decoded.is_empty() {
             transcript.push_str(&decoded);
             emitter.emit(json!({
@@ -288,7 +301,15 @@ fn run_session(args: Arc<Args>, emitter: Arc<JsonEmitter>, stop_rx: Receiver<()>
 
     for _ in 0..args.flush_chunks {
         processed_samples += silence.len();
-        let decoded = decode_chunk(&mut model, &silence, &mut decode_seconds, &mut decode_calls)?;
+        let decoded = decode_chunk(
+            &mut model,
+            &silence,
+            &mut decode_seconds,
+            &mut decode_calls,
+            args.trace_token_decisions,
+        )?;
+        emit_token_trace(&emitter, &decoded);
+        let decoded = decoded.text;
         if !decoded.is_empty() {
             transcript.push_str(&decoded);
             emitter.emit(json!({
@@ -353,7 +374,10 @@ fn run_wav_file(args: Arc<Args>, emitter: Arc<JsonEmitter>) -> Result<()> {
             &chunk_buf,
             &mut decode_seconds,
             &mut decode_calls,
+            args.trace_token_decisions,
         )?;
+        emit_token_trace(&emitter, &decoded);
+        let decoded = decoded.text;
         if !decoded.is_empty() {
             transcript.push_str(&decoded);
             emitter.emit(json!({
@@ -382,7 +406,15 @@ fn run_wav_file(args: Arc<Args>, emitter: Arc<JsonEmitter>) -> Result<()> {
             },
         }));
         processed_samples += silence.len();
-        let decoded = decode_chunk(&mut model, &silence, &mut decode_seconds, &mut decode_calls)?;
+        let decoded = decode_chunk(
+            &mut model,
+            &silence,
+            &mut decode_seconds,
+            &mut decode_calls,
+            args.trace_token_decisions,
+        )?;
+        emit_token_trace(&emitter, &decoded);
+        let decoded = decoded.text;
         if !decoded.is_empty() {
             transcript.push_str(&decoded);
             emitter.emit(json!({
@@ -427,14 +459,50 @@ fn decode_chunk(
     chunk: &[f32],
     decode_seconds: &mut f64,
     decode_calls: &mut usize,
-) -> Result<String> {
+    trace_tokens: bool,
+) -> Result<NemotronChunkTrace> {
     let started = Instant::now();
-    let text = model
-        .transcribe_chunk(chunk)
-        .context("Nemotron chunk decode failed")?;
+    let trace = if trace_tokens {
+        model
+            .transcribe_chunk_with_trace(chunk)
+            .context("Nemotron chunk decode failed")?
+    } else {
+        NemotronChunkTrace {
+            text: model
+                .transcribe_chunk(chunk)
+                .context("Nemotron chunk decode failed")?,
+            decisions: Vec::new(),
+        }
+    };
     *decode_seconds += started.elapsed().as_secs_f64();
     *decode_calls += 1;
-    Ok(text)
+    Ok(trace)
+}
+
+fn emit_token_trace(emitter: &JsonEmitter, trace: &NemotronChunkTrace) {
+    for decision in &trace.decisions {
+        emitter.emit(json!({
+            "event": "token_decision",
+            "data": {
+                "chunk_index": decision.chunk_index,
+                "frame_index": decision.frame_index,
+                "symbol_index": decision.symbol_index,
+                "input_token_id": decision.input_token_id,
+                "token_id": decision.token_id,
+                "piece": decision.piece,
+                "logit": decision.logit,
+                "blank_logit": decision.blank_logit,
+                "margin": decision.margin,
+                "top": decision.top.iter().map(|top| {
+                    json!({
+                        "id": top.id,
+                        "piece": top.piece,
+                        "logit": top.logit,
+                    })
+                }).collect::<Vec<_>>(),
+            }
+        }));
+    }
 }
 
 fn select_input_device(host: &cpal::Host, requested: Option<&str>) -> Result<cpal::Device> {

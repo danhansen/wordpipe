@@ -1087,6 +1087,84 @@ now exposes this as `--fp32-decoder` on
 `scripts/export_nemotron_parakeet_optimized.py`, and the top-level
 `scripts/build_nemotron_wordpipe_model.py` wrapper.
 
+### Token-Level FP32 Divergence Diagnostics
+
+`wordpipe-parakeet-worker --trace-token-decisions` now emits one
+`token_decision` JSON event for each nonblank RNNT token decision. Each event
+records chunk/frame/symbol position, input token, selected token, blank logit,
+selected-vs-blank margin, and top-k logits. The helper script
+`scripts/compare_token_traces.py` compares two JSONL traces and can print
+windows around visible-text substrings.
+
+Trace generation:
+
+```sh
+env ORT_DYLIB_PATH=.venv/lib/python3.14/site-packages/onnxruntime/capi/libonnxruntime.so.1.27.0 \
+  target/release/wordpipe-parakeet-worker \
+  --model-dir build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort \
+  --wav build/allocation-ablation/librispeech-long.wav \
+  --num-threads 2 \
+  --flush-chunks 3 \
+  --graph-optimization all \
+  --trace-token-decisions \
+  > build/token-trace/current-best.jsonl
+```
+
+FP32 decoder spelling flip:
+
+```sh
+scripts/compare_token_traces.py \
+  build/token-trace/current-best.jsonl \
+  build/token-trace/current-encoder-fp32-decoder.jsonl \
+  --left-label current_best \
+  --right-label fp32_decoder \
+  --needle marvelous \
+  --needle marvellous \
+  --window 4
+```
+
+The models agree through token `mar`, then diverge:
+
+| Model | Token path | Local top-k evidence |
+| --- | --- | --- |
+| Current best quantized decoder | `mar` + `ve` + `lo` + `us` | after `mar`, `ve=-42.350` vs `v=-42.683` |
+| FP32 decoder | `mar` + `v` + `ell` + `ou` + `s` | after `mar`, `v=-42.398` vs `ve=-43.364` |
+
+So this is not a large semantic failure. It is an RNNT tokenization-path flip
+between two valid spelling variants.
+
+FP32 encoder/export `seemed` flip:
+
+```sh
+scripts/compare_token_traces.py \
+  build/token-trace/current-best.jsonl \
+  build/token-trace/fp32-projected-quant-decoder.jsonl \
+  --left-label current_best \
+  --right-label fp32_encoder_quant_decoder \
+  --needle seemed \
+  --needle seem \
+  --window 5
+```
+
+Here the decoder is held constant as the current quantized decoder. The
+decision after token `see` is very close:
+
+| Model | Token path | Local top-k evidence |
+| --- | --- | --- |
+| Current-best encoder | `see` + `me` + `d` | `me=-25.190` vs `m=-25.328` |
+| FP32-export encoder | `see` + `m` | `m=-26.161` vs `me=-26.198` |
+
+The `me`/`m` separation is only `0.138` logit in current best and `0.037` logit
+in the FP32-export path. Because RNNT decoding feeds each emitted token back
+into the prediction network, that tiny local flip changes the subsequent state:
+the current-best path emits `d`, while the FP32-export path moves directly to
+` t`.
+
+Interpretation: FP32 itself is not inherently less accurate here. The tested
+FP32 paths alter graph/export/runtime numerics enough to cross borderline RNNT
+decision boundaries. Some dynamic quantization noise happens to bias this small
+sample toward the LibriSpeech reference spelling/inflection.
+
 ## 2026-06-22: Sayboard Harvest Wrapper Results
 
 The remaining Sayboard-derived experiments are now captured by:
