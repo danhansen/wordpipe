@@ -3,6 +3,9 @@
 This log tracks ONNX/ORT optimization experiments ported from Sayboard's
 Parakeet EOU work onto Wordpipe's Nemotron/Parakeet runtime.
 
+See [sayboard-optimization-harvest.md](sayboard-optimization-harvest.md) for
+the source-level Sayboard optimization inventory and remaining experiment queue.
+
 ## 2026-06-22: ORT Serialization And Linear-Pos Dequantization
 
 Benchmark command:

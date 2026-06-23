@@ -100,6 +100,11 @@ still be selected with `--asr-runtime sherpa`.
 The Rust worker defaults to ONNX Runtime's `all` graph optimization level; use
 `--graph-optimization` only for ablations or debugging.
 
+Optimization work is tracked in
+[docs/optimization-experiments.md](docs/optimization-experiments.md). The
+Sayboard optimization inventory and remaining harvest queue are in
+[docs/sayboard-optimization-harvest.md](docs/sayboard-optimization-harvest.md).
+
 Inspect ONNX graphs and ORT optimization effects:
 
 ```sh
