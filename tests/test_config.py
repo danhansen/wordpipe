@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from wordpipe.config import load_config
+from wordpipe.models import DEFAULT_NEMO_SOURCE_REPO, default_model_root
 
 
 class ConfigTests(unittest.TestCase):
@@ -14,6 +15,9 @@ class ConfigTests(unittest.TestCase):
         self.assertIsNone(config.model_dir)
         self.assertEqual(config.asr_runtime, "parakeet")
         self.assertIsNone(config.asr_worker_path)
+        self.assertEqual(config.model_profile, "fast")
+        self.assertEqual(config.model_root, default_model_root())
+        self.assertEqual(config.nemo_source, DEFAULT_NEMO_SOURCE_REPO)
         self.assertEqual(config.mode, "hold")
         self.assertEqual(config.num_threads, 2)
         self.assertEqual(config.queue_seconds, 10.0)
@@ -25,6 +29,9 @@ class ConfigTests(unittest.TestCase):
                 "\n".join(
                     [
                         'model_dir = "/models/nemotron"',
+                        'model_profile = "compact"',
+                        'model_root = "/models/wordpipe"',
+                        'nemo_source = "/models/source.nemo"',
                         'asr_runtime = "sherpa"',
                         'asr_worker_path = "/tmp/worker"',
                         'provider = "cpu"',
@@ -42,6 +49,9 @@ class ConfigTests(unittest.TestCase):
             config = load_config(path)
 
         self.assertEqual(config.model_dir, Path("/models/nemotron"))
+        self.assertEqual(config.model_profile, "compact")
+        self.assertEqual(config.model_root, Path("/models/wordpipe"))
+        self.assertEqual(config.nemo_source, "/models/source.nemo")
         self.assertEqual(config.asr_runtime, "sherpa")
         self.assertEqual(config.asr_worker_path, Path("/tmp/worker"))
         self.assertEqual(config.num_threads, 4)

@@ -338,6 +338,9 @@ class DictationController:
                     for rendered in self._keyboard.events:
                         print(f"key: {rendered}", file=sys.stderr)
                     self._keyboard.events.clear()
+        elif kind == "stats":
+            if self._config.log_metrics:
+                self._transcript.status(_format_metrics(item.get("data")))
         elif kind == "error":
             self._transcript.error(str(item.get("message", "")))
             self._exit_code = 1
@@ -345,6 +348,7 @@ class DictationController:
         elif kind == "stopped":
             with self._lock:
                 self._listening = False
+            self._transcript.status("idle")
 
 
 def _format_metrics(data: object) -> str:

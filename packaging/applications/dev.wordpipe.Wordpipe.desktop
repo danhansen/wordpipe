@@ -2,7 +2,7 @@
 Type=Application
 Name=Wordpipe
 Comment=Wayland GNOME dictation with streaming ASR
-Exec=wordpipe hotkey-daemon
+Exec=wordpipe app
 Terminal=false
 Categories=Utility;Accessibility;
 StartupNotify=false

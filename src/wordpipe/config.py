@@ -1,16 +1,21 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 from pathlib import Path
 import tomllib
 from typing import Any
 
 from .hotkeys import HotkeyMode
+from .models import DEFAULT_NEMO_SOURCE_REPO, default_model_root
 
 
 DEFAULT_CONFIG = """# Wordpipe configuration
-model_dir = "/path/to/parakeet-nemotron-streaming-model"
+# model_dir overrides model_profile/model_root when set.
+model_dir = ""
+model_profile = "fast"
+model_root = ""
+nemo_source = ""
 asr_runtime = "parakeet"
 asr_worker_path = ""
 provider = "cpu"
@@ -37,6 +42,9 @@ log_metrics = false
 @dataclass(frozen=True)
 class WordpipeConfig:
     model_dir: Path | None = None
+    model_profile: str = "fast"
+    model_root: Path | None = field(default_factory=default_model_root)
+    nemo_source: str = DEFAULT_NEMO_SOURCE_REPO
     asr_runtime: str = "parakeet"
     asr_worker_path: Path | None = None
     provider: str = "cpu"
@@ -76,6 +84,10 @@ def load_config(path: Path | None = None) -> WordpipeConfig:
 
     return WordpipeConfig(
         model_dir=_optional_path(data.get("model_dir")),
+        model_profile=_model_profile(data.get("model_profile", "fast")),
+        model_root=_optional_path(data.get("model_root")) or default_model_root(),
+        nemo_source=_string(data, "nemo_source", DEFAULT_NEMO_SOURCE_REPO)
+        or DEFAULT_NEMO_SOURCE_REPO,
         asr_runtime=_runtime(data.get("asr_runtime", "parakeet")),
         asr_worker_path=_optional_path(data.get("asr_worker_path")),
         provider=_string(data, "provider", "cpu"),
@@ -160,3 +172,10 @@ def _mode(value: object) -> HotkeyMode:
     if value not in {"hold", "toggle"}:
         raise ValueError("mode must be 'hold' or 'toggle'")
     return value  # type: ignore[return-value]
+
+
+def _model_profile(value: object) -> str:
+    profile = _string({"model_profile": value}, "model_profile", "fast")
+    if profile not in {"fast", "compact"}:
+        raise ValueError("model_profile must be 'fast' or 'compact'")
+    return profile

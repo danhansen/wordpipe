@@ -216,6 +216,67 @@ def _cmd_download_model(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_model_install(args: argparse.Namespace) -> int:
+    from .models import build_model_profile, default_nemo_source_path, download_nemo_source
+
+    file_config = _load_cli_config(args)
+    profile = args.profile or file_config.model_profile
+    model_root = Path(args.model_root).expanduser() if args.model_root else file_config.model_root
+    if model_root is None:
+        raise SystemExit("model_root is required")
+    source_value = args.source or file_config.nemo_source
+    source_output = Path(args.source_output).expanduser() if args.source_output else None
+    if args.dry_run:
+        candidate = Path(source_value).expanduser()
+        source_path = candidate if candidate.exists() else source_output or default_nemo_source_path(model_root)
+    else:
+        source_path = download_nemo_source(
+            source_value,
+            source_output or default_nemo_source_path(model_root),
+            force=args.force_source,
+        )
+    runtime_dir = build_model_profile(
+        source=source_path,
+        model_root=model_root,
+        profile=profile,
+        python=Path(args.python).expanduser(),
+        force=args.force,
+        dry_run=args.dry_run,
+    )
+    print(runtime_dir)
+    return 0
+
+
+def _cmd_model_profiles(args: argparse.Namespace) -> int:
+    from .models import MODEL_PROFILES, profile_installed, profile_runtime_dir
+
+    file_config = _load_cli_config(args)
+    model_root = Path(args.model_root).expanduser() if args.model_root else file_config.model_root
+    rows = []
+    for spec in MODEL_PROFILES.values():
+        runtime_dir = profile_runtime_dir(model_root, spec.name) if model_root else None
+        installed = bool(model_root and profile_installed(model_root, spec.name))
+        rows.append(
+            {
+                "name": spec.name,
+                "title": spec.title,
+                "description": spec.description,
+                "build_profile": spec.build_profile,
+                "runtime_dir": str(runtime_dir) if runtime_dir is not None else None,
+                "installed": installed,
+            }
+        )
+    if args.json:
+        _print_json(rows)
+    else:
+        for row in rows:
+            state = "installed" if row["installed"] else "not installed"
+            print(f"{row['name']}: {state}")
+            print(f"  {row['description']}")
+            print(f"  runtime: {row['runtime_dir']}")
+    return 0
+
+
 def _cmd_type_text(args: argparse.Namespace) -> int:
     from .insertion import DryRunKeyboardBackend, PortalKeyboardBackend
 
@@ -238,102 +299,103 @@ def _load_cli_config(args: argparse.Namespace) -> WordpipeConfig:
 
 
 def _resolve_model_dir(args: argparse.Namespace, config: WordpipeConfig) -> Path:
+    from .models import profile_installed, profile_runtime_dir
+
     raw = getattr(args, "model_dir", None)
     model_dir = Path(raw).expanduser() if raw else config.model_dir
-    if model_dir is None:
-        raise SystemExit("--model-dir is required when config.toml does not set model_dir")
-    return model_dir
+    if model_dir is not None:
+        return model_dir
+    profile = getattr(args, "model_profile", None) or config.model_profile
+    raw_model_root = getattr(args, "model_root", None)
+    model_root = Path(raw_model_root).expanduser() if raw_model_root else config.model_root
+    if model_root is not None and profile_installed(model_root, profile):
+        return profile_runtime_dir(model_root, profile)
+    raise SystemExit(
+        "--model-dir is required when config.toml does not set model_dir and "
+        f"profile {profile!r} is not installed. Run `wordpipe model-install "
+        f"--profile {profile}` first."
+    )
+
+
+def _daemon_config_from_args(
+    args: argparse.Namespace,
+    file_config: WordpipeConfig,
+    *,
+    log_metrics_default: bool = False,
+):
+    from .daemon import DaemonConfig
+
+    return DaemonConfig(
+        model_dir=_resolve_model_dir(args, file_config),
+        asr_runtime=getattr(args, "asr_runtime", None) or file_config.asr_runtime,
+        asr_worker_path=Path(args.asr_worker_path).expanduser()
+        if getattr(args, "asr_worker_path", None)
+        else file_config.asr_worker_path,
+        dry_run_insertion=getattr(args, "dry_run_insertion", False)
+        or file_config.dry_run_insertion,
+        provider=getattr(args, "provider", None) or file_config.provider,
+        num_threads=args.num_threads
+        if getattr(args, "num_threads", None) is not None
+        else file_config.num_threads,
+        sample_rate=args.sample_rate
+        if getattr(args, "sample_rate", None) is not None
+        else file_config.sample_rate,
+        input_device=parse_audio_device(args.input_device)
+        if getattr(args, "input_device", None) is not None
+        else file_config.input_device,
+        partial_interval_seconds=args.partial_interval_seconds
+        if getattr(args, "partial_interval_seconds", None) is not None
+        else file_config.partial_interval_seconds,
+        audio_chunk_seconds=args.audio_chunk_seconds
+        if getattr(args, "audio_chunk_seconds", None) is not None
+        else file_config.audio_chunk_seconds,
+        queue_seconds=args.queue_seconds
+        if getattr(args, "queue_seconds", None) is not None
+        else file_config.queue_seconds,
+        stats_interval_seconds=args.stats_interval_seconds
+        if getattr(args, "stats_interval_seconds", None) is not None
+        else file_config.stats_interval_seconds,
+        enable_endpoint_detection=getattr(args, "endpoint", False)
+        or file_config.enable_endpoint_detection,
+        endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence
+        if getattr(args, "endpoint_rule1_min_trailing_silence", None) is not None
+        else file_config.endpoint_rule1_min_trailing_silence,
+        endpoint_rule2_min_trailing_silence=args.endpoint_rule2_min_trailing_silence
+        if getattr(args, "endpoint_rule2_min_trailing_silence", None) is not None
+        else file_config.endpoint_rule2_min_trailing_silence,
+        endpoint_rule3_min_utterance_length=args.endpoint_rule3_min_utterance_length
+        if getattr(args, "endpoint_rule3_min_utterance_length", None) is not None
+        else file_config.endpoint_rule3_min_utterance_length,
+        spoken_punctuation=file_config.spoken_punctuation
+        and not getattr(args, "no_spoken_punctuation", False),
+        log_metrics=getattr(args, "log_metrics", False)
+        or file_config.log_metrics
+        or log_metrics_default,
+    )
+
+
+def _cmd_app(args: argparse.Namespace) -> int:
+    from .app import run_app
+
+    file_config = _load_cli_config(args)
+    return run_app(_daemon_config_from_args(args, file_config, log_metrics_default=True))
 
 
 def _cmd_daemon(args: argparse.Namespace) -> int:
-    from .daemon import DaemonConfig, run_daemon
+    from .daemon import run_daemon
     from .transcript import make_transcript_sink
 
     file_config = _load_cli_config(args)
-    config = DaemonConfig(
-        model_dir=_resolve_model_dir(args, file_config),
-        asr_runtime=args.asr_runtime or file_config.asr_runtime,
-        asr_worker_path=Path(args.asr_worker_path).expanduser()
-        if args.asr_worker_path
-        else file_config.asr_worker_path,
-        dry_run_insertion=args.dry_run_insertion or file_config.dry_run_insertion,
-        provider=args.provider or file_config.provider,
-        num_threads=args.num_threads if args.num_threads is not None else file_config.num_threads,
-        sample_rate=args.sample_rate if args.sample_rate is not None else file_config.sample_rate,
-        input_device=parse_audio_device(args.input_device)
-        if args.input_device is not None
-        else file_config.input_device,
-        partial_interval_seconds=args.partial_interval_seconds
-        if args.partial_interval_seconds is not None
-        else file_config.partial_interval_seconds,
-        audio_chunk_seconds=args.audio_chunk_seconds
-        if args.audio_chunk_seconds is not None
-        else file_config.audio_chunk_seconds,
-        queue_seconds=args.queue_seconds
-        if args.queue_seconds is not None
-        else file_config.queue_seconds,
-        stats_interval_seconds=args.stats_interval_seconds
-        if args.stats_interval_seconds is not None
-        else file_config.stats_interval_seconds,
-        enable_endpoint_detection=args.endpoint or file_config.enable_endpoint_detection,
-        endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence
-        if args.endpoint_rule1_min_trailing_silence is not None
-        else file_config.endpoint_rule1_min_trailing_silence,
-        endpoint_rule2_min_trailing_silence=args.endpoint_rule2_min_trailing_silence
-        if args.endpoint_rule2_min_trailing_silence is not None
-        else file_config.endpoint_rule2_min_trailing_silence,
-        endpoint_rule3_min_utterance_length=args.endpoint_rule3_min_utterance_length
-        if args.endpoint_rule3_min_utterance_length is not None
-        else file_config.endpoint_rule3_min_utterance_length,
-        spoken_punctuation=file_config.spoken_punctuation and not args.no_spoken_punctuation,
-        log_metrics=args.log_metrics or file_config.log_metrics,
-    )
+    config = _daemon_config_from_args(args, file_config)
     return run_daemon(config, make_transcript_sink(args.overlay or file_config.overlay))
 
 
 def _cmd_hotkey_daemon(args: argparse.Namespace) -> int:
-    from .daemon import DaemonConfig, run_hotkey_daemon
+    from .daemon import run_hotkey_daemon
     from .transcript import make_transcript_sink
 
     file_config = _load_cli_config(args)
-    config = DaemonConfig(
-        model_dir=_resolve_model_dir(args, file_config),
-        asr_runtime=args.asr_runtime or file_config.asr_runtime,
-        asr_worker_path=Path(args.asr_worker_path).expanduser()
-        if args.asr_worker_path
-        else file_config.asr_worker_path,
-        dry_run_insertion=args.dry_run_insertion or file_config.dry_run_insertion,
-        provider=args.provider or file_config.provider,
-        num_threads=args.num_threads if args.num_threads is not None else file_config.num_threads,
-        sample_rate=args.sample_rate if args.sample_rate is not None else file_config.sample_rate,
-        input_device=parse_audio_device(args.input_device)
-        if args.input_device is not None
-        else file_config.input_device,
-        partial_interval_seconds=args.partial_interval_seconds
-        if args.partial_interval_seconds is not None
-        else file_config.partial_interval_seconds,
-        audio_chunk_seconds=args.audio_chunk_seconds
-        if args.audio_chunk_seconds is not None
-        else file_config.audio_chunk_seconds,
-        queue_seconds=args.queue_seconds
-        if args.queue_seconds is not None
-        else file_config.queue_seconds,
-        stats_interval_seconds=args.stats_interval_seconds
-        if args.stats_interval_seconds is not None
-        else file_config.stats_interval_seconds,
-        enable_endpoint_detection=args.endpoint or file_config.enable_endpoint_detection,
-        endpoint_rule1_min_trailing_silence=args.endpoint_rule1_min_trailing_silence
-        if args.endpoint_rule1_min_trailing_silence is not None
-        else file_config.endpoint_rule1_min_trailing_silence,
-        endpoint_rule2_min_trailing_silence=args.endpoint_rule2_min_trailing_silence
-        if args.endpoint_rule2_min_trailing_silence is not None
-        else file_config.endpoint_rule2_min_trailing_silence,
-        endpoint_rule3_min_utterance_length=args.endpoint_rule3_min_utterance_length
-        if args.endpoint_rule3_min_utterance_length is not None
-        else file_config.endpoint_rule3_min_utterance_length,
-        spoken_punctuation=file_config.spoken_punctuation and not args.no_spoken_punctuation,
-        log_metrics=args.log_metrics or file_config.log_metrics,
-    )
+    config = _daemon_config_from_args(args, file_config)
     return run_hotkey_daemon(
         config,
         mode=args.mode or file_config.mode,
@@ -403,6 +465,18 @@ def _add_runtime_args(parser: argparse.ArgumentParser, *, default: str | None) -
     parser.add_argument(
         "--asr-worker-path",
         help="Path to wordpipe-parakeet-worker. Defaults to target/debug or PATH.",
+    )
+
+
+def _add_model_selection_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--model-profile",
+        choices=("fast", "compact"),
+        help="Built Wordpipe model profile to load when --model-dir is not set.",
+    )
+    parser.add_argument(
+        "--model-root",
+        help="Directory containing built Wordpipe model profiles.",
     )
 
 
@@ -581,6 +655,55 @@ def build_parser() -> argparse.ArgumentParser:
     download_model.add_argument("--force", action="store_true", help="Redownload existing files.")
     download_model.set_defaults(func=_cmd_download_model)
 
+    model_profiles = subparsers.add_parser(
+        "model-profiles",
+        help="List selectable Wordpipe model profiles and installation state.",
+    )
+    model_profiles.add_argument("--config", help="Path to config.toml.")
+    model_profiles.add_argument("--model-root", help="Directory containing Wordpipe model profiles.")
+    model_profiles.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    model_profiles.set_defaults(func=_cmd_model_profiles)
+
+    model_install = subparsers.add_parser(
+        "model-install",
+        help="Download the source NeMo model if needed and build a selectable Wordpipe profile.",
+    )
+    model_install.add_argument("--config", help="Path to config.toml.")
+    model_install.add_argument(
+        "--profile",
+        choices=("fast", "compact"),
+        help="Profile to build. Defaults to config.toml model_profile.",
+    )
+    model_install.add_argument(
+        "--model-root",
+        help="Directory containing Wordpipe model profiles. Defaults to config.toml model_root.",
+    )
+    model_install.add_argument(
+        "--source",
+        help="Local .nemo path or Hugging Face repo id. Defaults to config.toml nemo_source.",
+    )
+    model_install.add_argument(
+        "--source-output",
+        help="Where to store a downloaded .nemo source checkpoint.",
+    )
+    model_install.add_argument(
+        "--python",
+        default=sys.executable,
+        help="Python interpreter used for the NeMo export/build pipeline.",
+    )
+    model_install.add_argument("--force", action="store_true", help="Overwrite existing profile output.")
+    model_install.add_argument(
+        "--force-source",
+        action="store_true",
+        help="Redownload the source .nemo even when it already exists.",
+    )
+    model_install.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the build command without running the export pipeline.",
+    )
+    model_install.set_defaults(func=_cmd_model_install)
+
     type_text = subparsers.add_parser(
         "type-text",
         help="Insert text using the keyboard insertion backend.",
@@ -599,6 +722,40 @@ def build_parser() -> argparse.ArgumentParser:
     )
     config_example.set_defaults(func=_cmd_config_example)
 
+    app = subparsers.add_parser(
+        "app",
+        help="Run the Wordpipe GNOME control window.",
+    )
+    app.add_argument(
+        "--model-dir",
+        help="Path to Parakeet/Nemotron model directory, or legacy sherpa model when --asr-runtime sherpa.",
+    )
+    _add_model_selection_args(app)
+    app.add_argument("--config", help="Path to config.toml.")
+    app.add_argument(
+        "--dry-run-insertion",
+        action="store_true",
+        help="Print keyboard events instead of opening a portal keyboard session.",
+    )
+    app.add_argument("--provider", help="ONNX Runtime provider.")
+    _add_runtime_args(app, default=None)
+    app.add_argument("--num-threads", type=int)
+    app.add_argument("--sample-rate", type=int)
+    app.add_argument("--input-device", help="sounddevice input device index or name.")
+    _add_asr_tuning_args(app, worker_defaults=False)
+    app.add_argument(
+        "--no-spoken-punctuation",
+        action="store_true",
+        help="Insert raw ASR text instead of converting spoken punctuation commands.",
+    )
+    app.add_argument(
+        "--endpoint",
+        action="store_true",
+        help="Enable endpoint detection/reset. Disabled by default for raw ASR streaming.",
+    )
+    app.add_argument("--log-metrics", action="store_true", help="Show ASR timing metrics.")
+    app.set_defaults(func=_cmd_app)
+
     daemon = subparsers.add_parser(
         "daemon",
         help="Run the MVP dictation loop: ASR subprocess plus text insertion.",
@@ -607,6 +764,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--model-dir",
         help="Path to Parakeet/Nemotron model directory, or legacy sherpa model when --asr-runtime sherpa.",
     )
+    _add_model_selection_args(daemon)
     daemon.add_argument("--config", help="Path to config.toml.")
     daemon.add_argument(
         "--dry-run-insertion",
@@ -645,6 +803,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--model-dir",
         help="Path to Parakeet/Nemotron model directory, or legacy sherpa model when --asr-runtime sherpa.",
     )
+    _add_model_selection_args(hotkey_daemon)
     hotkey_daemon.add_argument("--config", help="Path to config.toml.")
     hotkey_daemon.add_argument(
         "--mode",

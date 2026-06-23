@@ -40,6 +40,12 @@ wordpipe-daemon
   - receives partial/final transcript events
   - inserts committed text through the keyboard injection backend
 
+wordpipe-app
+  - GTK/libadwaita control surface
+  - shows ASR load/listening/error state
+  - shows live partial text, last commit, and RTF metrics
+  - reuses wordpipe-daemon's controller and insertion backend
+
 wordpipe-parakeet-worker
   - loads Parakeet/Nemotron model through parakeet-rs
   - captures microphone audio while active
@@ -108,21 +114,22 @@ choose one default and keep the state machine compatible with both.
 
 Recommended initial UI:
 
+- GTK/libadwaita app window for profile/status/control
 - top-bar status indicator for idle/listening/permission/error states
 - small live transcript overlay for partial text
 - committed text feedback after dictation stops
 
 Partial text is never typed into the target app in v1.
 
-The current overlay backend uses libadwaita when available, with a GTK 4
-fallback. A GNOME Shell top-bar indicator remains future work.
+The current app window and overlay backend use libadwaita when available, with
+a GTK 4 fallback. A GNOME Shell top-bar indicator remains future work.
 
 ## Configuration
 
-The daemon reads `~/.config/wordpipe/config.toml` by default. Configuration
-holds model path, ASR runtime, worker path, provider, thread count, overlay,
-hotkey mode, shortcut, spoken-punctuation behavior, and dry-run insertion. CLI
-flags override file values.
+The app and daemon read `~/.config/wordpipe/config.toml` by default.
+Configuration holds model path/profile, ASR runtime, worker path, provider,
+thread count, overlay, hotkey mode, shortcut, spoken-punctuation behavior, and
+dry-run insertion. CLI flags override file values.
 
 ## Model
 
@@ -138,6 +145,22 @@ tokenizer.model
 
 The earlier sherpa-onnx int8 model remains useful for legacy diagnostics, but it
 is not the default runtime target.
+
+Wordpipe keeps two app-level model profiles:
+
+- `fast`: FP32 projected-cache export, best validated speed/accuracy, largest
+  footprint.
+- `compact`: dynamic-int8 projected-cache export with fixed shapes and
+  ORT-format startup, smaller footprint and sub-second load target.
+
+`wordpipe model-install --profile fast|compact` downloads or reuses the source
+`.nemo` checkpoint and invokes the reproducible NeMo -> Wordpipe export wrapper.
+Both profiles can coexist under `model_root`; changing `model_profile` or
+passing `--model-profile fast|compact` selects which one the app and daemon load
+when `model_dir` is not explicitly set. If the selected profile is missing, the
+install path is the same whether this is first-run setup or a later attempt to
+try the other model: build that profile from the cached or downloaded source
+`.nemo`.
 
 ## Performance
 
@@ -198,16 +221,15 @@ installed on `PATH`; they are not a complete distro package.
    - global shortcut or shell extension trigger
    - daemon session state
    - visible listening/error state
-   - status: GlobalShortcuts daemon path implemented; visual status not
-     implemented
+   - status: GlobalShortcuts daemon path implemented; GTK/libadwaita app window
+     provides visual status; top-bar indicator not implemented
 
 6. First integrated dictation
    - hotkey controls dictation
    - overlay shows partials
    - stop commits non-empty partial
-   - status: CLI daemon, hotkey daemon, and optional Adwaita/GTK overlay
-     implemented and live-validated in manual-hotkey mode; top-bar indicator
-     not implemented
+   - status: CLI daemon, hotkey daemon, app control window, and optional
+     Adwaita/GTK overlay implemented; top-bar indicator not implemented
 
 ## Validation Matrix
 
@@ -224,6 +246,8 @@ installed on `PATH`; they are not a complete distro package.
 - Default hotkey mode: hold-to-dictate, toggle-to-dictate, or both.
 - Whether the first GNOME integration should use portals only or include a Shell
   extension immediately.
-- Model installation: manually configured model directory or managed downloader.
+- Model installation: managed `model-install` path builds source NeMo into the
+  selected `fast` or `compact` profile; graphical install controls remain a
+  UI follow-up.
 - Whether spoken punctuation should remain always-on by default after live
   testing.

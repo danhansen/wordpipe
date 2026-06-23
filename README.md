@@ -29,6 +29,7 @@ The current implementation provides:
 - `wordpipe type-text` keyboard insertion through the RemoteDesktop portal.
 - `wordpipe daemon` MVP loop that connects the ASR worker to text insertion.
 - `wordpipe hotkey-daemon` manual or GlobalShortcuts-controlled dictation.
+- `wordpipe app` GTK/libadwaita control window for local app-style use.
 - Optional libadwaita/GTK live transcript overlay.
 
 The GNOME Shell extension and top-bar indicator are not built yet.
@@ -222,7 +223,9 @@ Use `--dry-run-insertion` to exercise ASR without opening a portal keyboard
 session.
 
 When `~/.config/wordpipe/config.toml` contains `model_dir`, `daemon` and
-`hotkey-daemon` can run without `--model-dir`. CLI flags override config values.
+`hotkey-daemon` can run without `--model-dir`. If `model_dir` is unset, the
+commands load the selected `model_profile` from `model_root`. CLI flags override
+config values, including `--model-profile fast|compact` and `--model-root`.
 
 Packaging templates live under `packaging/`:
 
@@ -252,6 +255,22 @@ PYTHONPATH=src python3 -m wordpipe hotkey-daemon \
 ```
 
 Manual commands are `down`, `up`, `toggle`, and `quit`.
+
+Run the app control window:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe app
+```
+
+To try the other built profile without editing config:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe app --model-profile compact
+```
+
+The app uses the same config and portal insertion path as `daemon` and
+`hotkey-daemon`. Endpoint detection remains disabled unless `--endpoint` or
+`enable_endpoint_detection = true` is set.
 
 ## Runtime Dependencies
 
@@ -309,6 +328,58 @@ library is present in `.venv`; the `onnxruntime` wheel library is preferred
 because it loads the projected-cache Nemotron encoder reliably here.
 
 ### Building A Wordpipe Nemotron Model
+
+Wordpipe has two named app profiles:
+
+- `fast`: FP32 projected-cache model. This is the fastest/most accurate
+  validated profile so far and has the largest disk/RAM footprint.
+- `compact`: dynamic-int8 projected-cache model with fixed shapes and native
+  ORT-format startup. This is the small model option and loads in under a
+  second on the test machine.
+
+List profile status:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe model-profiles
+```
+
+Download the source `.nemo` checkpoint if needed and build a profile:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe model-install \
+  --profile compact \
+  --source models/nemotron-3.5-asr-streaming-0.6b-source/nemotron-3.5-asr-streaming-0.6b.nemo \
+  --python .venv-nemo-export/bin/python
+```
+
+If `--source` is a Hugging Face repo id instead of a local `.nemo` path,
+Wordpipe uses `huggingface_hub` and enables `HF_HUB_ENABLE_HF_TRANSFER=1` for
+the download. Building `compact` emits the ORT-format runtime directory
+automatically. Building `fast` emits the FP32 projected-cache runtime directory.
+Run `model-install` again with the other profile when you want to try it; both
+artifacts can coexist under `model_root`.
+
+Select the default profile in `~/.config/wordpipe/config.toml`:
+
+```toml
+model_profile = "compact"
+model_root = "/home/you/.local/share/wordpipe/models"
+nemo_source = "nvidia/nemotron-3.5-asr-streaming-0.6b"
+```
+
+`model_dir` still overrides the selected profile when set explicitly.
+
+Any runtime command that normally loads the default profile can also select one
+for a single launch:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe daemon --model-profile fast
+PYTHONPATH=src python3 -m wordpipe hotkey-daemon --model-profile compact
+```
+
+If that profile has not been built yet, run the same `model-install` command
+with the missing profile name. The source `.nemo` is reused from
+`model_root/sources/` unless `--force-source` is provided.
 
 The current high-performance export path is codified as a thin wrapper around
 the individual phase scripts:
