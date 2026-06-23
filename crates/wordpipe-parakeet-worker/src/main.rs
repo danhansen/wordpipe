@@ -45,6 +45,8 @@ struct Args {
     #[arg(long, value_enum, default_value_t = CliBoolOverride::Auto)]
     ort_cpu_arena: CliBoolOverride,
     #[arg(long)]
+    ort_optimized_model_cache_dir: Option<PathBuf>,
+    #[arg(long)]
     trace_token_decisions: bool,
 }
 
@@ -474,6 +476,11 @@ fn load_model(args: &Args) -> Result<Nemotron> {
         .with_memory_pattern(args.ort_memory_pattern.option())
         .with_parallel_execution(args.ort_parallel_execution)
         .with_cpu_arena(args.ort_cpu_arena.option());
+    let config = if let Some(cache_dir) = args.ort_optimized_model_cache_dir.as_ref() {
+        config.with_ort_optimized_model_cache_dir(cache_dir)
+    } else {
+        config
+    };
     Nemotron::from_pretrained(args.model_dir.to_string_lossy().as_ref(), Some(config)).with_context(
         || {
             format!(

@@ -1373,6 +1373,76 @@ Interpretation:
 - Keep `fp32_projected` as the default quality/speed profile, and keep
   `compact_fixed_shape` as the documented small-footprint fallback.
 
+## 2026-06-23: ORT Format Load-Time Experiment
+
+Sayboard's model startup work suggested two distinct approaches:
+
+1. save an optimized ONNX graph after ORT's offline graph optimizations;
+2. convert the model to native ORT format and load it with
+   `session.use_ort_model_bytes_directly`.
+
+Wordpipe now supports both paths experimentally. The Rust worker accepts
+`--ort-optimized-model-cache-dir` for the first approach, but this is not
+enabled by default because the smoke results were mixed:
+
+| Variant | No-cache median load | Optimized-ONNX cache median load | Notes |
+| --- | ---: | ---: | --- |
+| `fp32_projected` | 2.781 | 3.235 | External-data cache works after hard-linking `encoder.onnx.data`, but load time is noisy and not improved. |
+| `ffn_fp32` | 3.845 | 3.875 | First cache creation was expensive; steady-state was no better than normal ONNX. |
+| `compact_fixed_shape` | 1.135 | 1.127 | Small improvement, but not enough to justify default multi-file cache artifacts. |
+
+The native ORT-format path was more useful for the compact model. Conversion:
+
+```sh
+.venv-nemo-export/bin/python scripts/convert_nemotron_to_ort_format.py \
+  build/model-variants/nemotron-c56-fixed-shape-ort-extended \
+  build/model-variants/nemotron-c56-fixed-shape-ort-extended-format \
+  --force \
+  --optimization-level all
+```
+
+Benchmark:
+
+```sh
+PARAKEET_LOAD_TRACE=1 scripts/benchmark_parakeet_variant.py \
+  --interleave \
+  --wav build/librispeech-backend-eval-smoke/wavs/1089-134686-0019.wav \
+  --runs 5 \
+  --num-threads 2 \
+  --flush-chunks 0 \
+  --timeout-seconds 120 \
+  --min-mem-available-gb 5 \
+  --child-memory-limit-gb 8 \
+  --output build/parakeet-variant-bench/load-ort-format-compact-smoke-001.json \
+  compact_onnx=build/model-variants/nemotron-c56-fixed-shape-ort-extended \
+  compact_ort_format=build/model-variants/nemotron-c56-fixed-shape-ort-extended-format
+```
+
+Results:
+
+| Variant | Size | Median load seconds | Median real-audio RTF | Median decode seconds |
+| --- | ---: | ---: | ---: | ---: |
+| `compact_onnx` | 599 MiB | 1.154 | 0.749 | 10.413 |
+| `compact_ort_format` | 599 MiB | 0.461 | 0.774 | 10.754 |
+
+The transcript was identical across all five runs. Trace output confirmed that
+the `.ort` model uses the direct ORT-format path for both encoder and decoder.
+
+Interpretation:
+
+- ORT format gets the compact model comfortably below the one-second model-load
+  target. This is the best current answer for shortcut-to-first-word startup
+  when a resident preloaded daemon is not enough.
+- The ORT-format files are about the same size as the compact ONNX files; this
+  is a load-time/deserialization optimization, not a storage optimization.
+- The FP32 projected encoder conversion crashed with exit 139 on the 16 GB test
+  machine after swap pressure rose. Keep ORT-format conversion optional and use
+  it first for the compact model.
+- `session.use_ort_model_bytes_directly` avoids ORT copying the supplied model
+  bytes internally. A separate mmap-backed buffer may still be useful later to
+  avoid reading the whole file into heap memory first, but it is not required
+  for the ORT-side zero-copy initializer path.
+
 ## 2026-06-22: Sayboard Harvest Wrapper Results
 
 The remaining Sayboard-derived experiments are now captured by:

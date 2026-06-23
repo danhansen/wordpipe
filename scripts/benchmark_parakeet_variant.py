@@ -274,6 +274,13 @@ def run_once(args: argparse.Namespace, label: str, model_dir: Path, run_index: i
         command.append("--ort-parallel-execution")
     if args.ort_cpu_arena != "auto":
         command.extend(["--ort-cpu-arena", args.ort_cpu_arena])
+    if args.ort_optimized_model_cache_dir:
+        command.extend(
+            [
+                "--ort-optimized-model-cache-dir",
+                str(args.ort_optimized_model_cache_dir),
+            ]
+        )
     started = time.perf_counter()
     power_before = read_power_metadata()
     memory_before = read_memory_metadata()
@@ -364,6 +371,11 @@ def make_output(
             "ort_memory_pattern": args.ort_memory_pattern,
             "ort_parallel_execution": args.ort_parallel_execution,
             "ort_cpu_arena": args.ort_cpu_arena,
+            "ort_optimized_model_cache_dir": (
+                str(args.ort_optimized_model_cache_dir)
+                if args.ort_optimized_model_cache_dir
+                else None
+            ),
         },
         "power_at_start": power_at_start,
         "power_at_end": read_power_metadata(),
@@ -432,6 +444,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--ort-memory-pattern", choices=("auto", "enable", "disable"), default="auto")
     parser.add_argument("--ort-parallel-execution", action="store_true")
     parser.add_argument("--ort-cpu-arena", choices=("auto", "enable", "disable"), default="auto")
+    parser.add_argument(
+        "--ort-optimized-model-cache-dir",
+        type=Path,
+        help="Directory for ORT optimized model cache artifacts used by the worker.",
+    )
     parser.add_argument("--timeout-seconds", type=float, default=300.0)
     parser.add_argument("--ort-dylib", type=Path, default=DEFAULT_ORT_DYLIB)
     parser.add_argument("--output", type=Path, default=Path("build/parakeet-variant-bench/summary.json"))

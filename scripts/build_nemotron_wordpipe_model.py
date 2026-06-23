@@ -27,6 +27,12 @@ Pipeline:
    Benchmarks on the Ivy Bridge test machine show ORT's FP32 GEMM path is faster
    than dynamic activation quantization plus int8 matmul overhead for these FFN
    blocks. This preserves the older mixed-int8/FP32 candidate.
+
+5. Optionally convert the final ONNX components to native ORT format.
+   ORT format avoids protobuf model parsing at runtime and lets the Rust worker
+   use `session.use_ort_model_bytes_directly` for faster model startup. This is
+   currently most useful for the compact profile; the FP32 encoder conversion is
+   memory-heavy on 16 GB systems.
 """
 
 from __future__ import annotations
@@ -135,6 +141,22 @@ def parse_args() -> argparse.Namespace:
             "Keep decoder_joint.onnx as FP32 while quantizing the encoder. "
             "Experimental speed/accuracy tradeoff; validate WER before use."
         ),
+    )
+    parser.add_argument(
+        "--emit-ort-format",
+        action="store_true",
+        help="Also write a native ORT-format model directory after the final ONNX output is built.",
+    )
+    parser.add_argument(
+        "--ort-format-output-dir",
+        type=Path,
+        help="Output directory for --emit-ort-format. Default: <output_dir>-ort-format.",
+    )
+    parser.add_argument(
+        "--ort-format-optimization-level",
+        choices=("disable", "basic", "extended", "all"),
+        default="all",
+        help="Optimization level used by convert_nemotron_to_ort_format.py.",
     )
     return parser.parse_args()
 
@@ -291,6 +313,23 @@ def main() -> None:
                 args.ort_optimize_final,
                 "--ort-optimize-threads",
                 str(args.ort_optimize_threads),
+            ],
+            dry_run=args.dry_run,
+        )
+
+    if args.emit_ort_format and args.stop_after == phases[-1]:
+        ort_format_dir = args.ort_format_output_dir or args.output_dir.with_name(
+            f"{args.output_dir.name}-ort-format"
+        )
+        run(
+            [
+                python,
+                "scripts/convert_nemotron_to_ort_format.py",
+                str(args.output_dir),
+                str(ort_format_dir),
+                "--optimization-level",
+                args.ort_format_optimization_level,
+                *(["--force"] if args.force else []),
             ],
             dry_run=args.dry_run,
         )

@@ -379,6 +379,34 @@ tokenizer.model
 config.json
 ```
 
+For the compact profile, native ORT format is the fastest startup artifact. The
+Rust worker automatically prefers `encoder.ort` and `decoder_joint.ort` when
+they are present, falling back to ONNX otherwise:
+
+```sh
+.venv-nemo-export/bin/python scripts/convert_nemotron_to_ort_format.py \
+  models/nemotron-wordpipe-compact-fixed-shape \
+  models/nemotron-wordpipe-compact-fixed-shape-ort-format \
+  --force \
+  --optimization-level all
+```
+
+The wrapper can emit that directory after a full build:
+
+```sh
+.venv/bin/python scripts/build_nemotron_wordpipe_model.py \
+  /path/to/model.nemo \
+  models/nemotron-wordpipe-compact-fixed-shape \
+  --work-dir build/nemotron-wordpipe-pipeline-compact \
+  --profile compact-fixed-shape \
+  --emit-ort-format
+```
+
+On the local benchmark, the compact ORT-format model loaded in `0.461s` median
+versus `1.154s` for the same compact ONNX model. The FP32 projected model is
+still the best quality/speed profile, but its ORT-format conversion is
+memory-heavy on a 16 GB machine and is not the default build path.
+
 The wrapper supports `--start-at` and `--stop-after` for resuming or debugging
 individual phases. For example, after a successful FP32 export:
 
