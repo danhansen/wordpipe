@@ -731,3 +731,81 @@ Next paper-derived experiments:
 - Compare against `ffn_fp32` and compact `fixed_shape_ort` with the same
   long-WAV 3-run median harness and the larger LibriSpeech sampled validation.
 - Preserve decoder/joiner FP32 in that experiment.
+
+### Int8 K-Quant MatMulNBits First Pass
+
+`scripts/quantize_nemotron_matmul_nbits.py` wraps ONNX Runtime's lower-level
+weight-only quantization implementation so the `MatMulNBits` experiment is
+repeatable. The first pass targeted the current `ffn_fp32` candidate rather
+than a fully FP32 pre-fusion encoder; this is intentionally narrow and should
+not be read as a complete reproduction of the paper export.
+
+Dry-run:
+
+```sh
+.venv/bin/python scripts/quantize_nemotron_matmul_nbits.py \
+  --source-dir build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort \
+  --output-dir build/model-variants/nemotron-c56-fixed-shape-ffn-nbits-int8-dryrun \
+  --bits 8 \
+  --block-size 32 \
+  --algorithm k_quant \
+  --dry-run
+```
+
+Result: 72 static-RHS `MatMul` nodes selected.
+
+Build:
+
+```sh
+.venv/bin/python scripts/quantize_nemotron_matmul_nbits.py \
+  --source-dir build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort \
+  --output-dir build/model-variants/nemotron-c56-fixed-shape-ffn-nbits-int8-k32 \
+  --bits 8 \
+  --block-size 32 \
+  --algorithm k_quant
+```
+
+Build output:
+
+| Artifact | Value |
+| --- | ---: |
+| Selected `MatMul` nodes | 72 |
+| Saved `MatMulNBits` nodes | 48 |
+| Encoder size | 1.2 GiB |
+| Baseline `ffn_fp32` encoder size | 1.7 GiB |
+
+Benchmark:
+
+```sh
+.venv/bin/python scripts/benchmark_parakeet_variant.py \
+  ffn_fp32=build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort \
+  ffn_nbits_int8_k32=build/model-variants/nemotron-c56-fixed-shape-ffn-nbits-int8-k32 \
+  --runs 3 \
+  --num-threads 2 \
+  --min-mem-available-gb 6 \
+  --child-memory-limit-gb 10 \
+  --set-power-profile balanced \
+  --output build/parakeet-variant-bench/ffn-nbits-int8-k32-001.json
+```
+
+Results:
+
+| Variant | Median real-audio RTF | Median RTF | Median decode seconds | Median wall seconds | Rough WER |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `ffn_fp32` | 0.623 | 0.614 | 76.992 | 81.073 | 9 / 313 = 2.88% |
+| `ffn_nbits_int8_k32` | 1.580 | 1.558 | 195.385 | 198.132 | 10 / 313 = 3.19% |
+
+Observations:
+
+- ORT 1.27's CPUExecutionProvider can execute `MatMulNBits` from the Rust
+  worker, so the contrib-op path is functionally viable.
+- This first pass is a throughput loss on the Ivy Bridge i5-3320M despite
+  reducing encoder size by about 30%. It is also one edit worse on the rough
+  concatenated sample.
+- The likely reason is that this path quantized a partially optimized mixed
+  graph: 99 `DynamicQuantizeMatMul`, 48 `FusedMatMul`, and 72 ordinary
+  `MatMul` nodes remained alongside 48 `MatMulNBits` nodes. It did not recreate
+  the paper's encoder-wide FP32-to-weight-only export.
+- Next `MatMulNBits` attempts, if any, should start earlier in the pipeline:
+  export/fold/fix shapes while preserving ordinary static-RHS `MatMul` nodes,
+  then apply weight-only quantization before ORT fuses the graph.

@@ -16,6 +16,11 @@ asr = [
   "sounddevice",
   "numpy",
 ]
+model-tools = [
+  "onnx",
+  "onnxruntime>=1.27",
+  "onnx_ir",
+]
 
 [project.scripts]
 wordpipe = "wordpipe.cli:main"
