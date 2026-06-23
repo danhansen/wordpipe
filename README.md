@@ -272,6 +272,65 @@ loading. `scripts/wordpipe-dev`, `listen-test`, and daemon launch paths set
 library is present in `.venv`; the `onnxruntime` wheel library is preferred
 because it loads the projected-cache Nemotron encoder reliably here.
 
+### Building A Wordpipe Nemotron Model
+
+The current best export path is codified as a thin wrapper around the individual
+phase scripts:
+
+```sh
+.venv/bin/python scripts/build_nemotron_wordpipe_model.py \
+  /path/to/model.nemo \
+  models/nemotron-wordpipe-ffn-fp32 \
+  --work-dir build/nemotron-wordpipe-pipeline
+```
+
+Use `--force` to overwrite an existing work/output directory. Use `--dry-run`
+to print the phase commands without running them.
+
+The wrapper deliberately keeps the phases separate:
+
+- `export_nemotron_parakeet_optimized.py --export-only` exports FP32 ONNX from
+  NeMo and then exits before quantization so Torch/NeMo memory is released.
+- `transform_nemotron_parakeet_export.py` applies dynamic QUInt8 quantization
+  and rewrites the encoder to use projected K/V cache.
+- `build_nemotron_fixed_shape_model.py` specializes the streaming graph to the
+  current c56 runtime shape and serializes ORT's optimized encoder graph.
+- `dequantize_nemotron_matmul_blocks.py --include /feed_forward` rewrites FFN
+  MatMul/Gemm blocks back to FP32, the fastest validated variant on the current
+  Ivy Bridge test machine.
+
+Important defaults:
+
+```text
+left_context = 56
+right_context = 6
+input_frames = 65
+output_frames = 7
+cache_len = 56
+hidden_dim = 1024
+ort_optimize_final = extended
+```
+
+The final output directory contains the runtime model files:
+
+```text
+encoder.onnx
+decoder_joint.onnx
+tokenizer.model
+config.json
+```
+
+The wrapper supports `--start-at` and `--stop-after` for resuming or debugging
+individual phases. For example, after a successful FP32 export:
+
+```sh
+.venv/bin/python scripts/build_nemotron_wordpipe_model.py \
+  /path/to/model.nemo \
+  models/nemotron-wordpipe-ffn-fp32 \
+  --work-dir build/nemotron-wordpipe-pipeline \
+  --start-at transform
+```
+
 ## Live Validation
 
 Validated in GNOME 50.2 on Wayland:
