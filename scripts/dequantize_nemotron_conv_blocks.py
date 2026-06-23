@@ -181,6 +181,7 @@ def apply_rewrites(model: onnx.ModelProto, specs: list[RewriteSpec]) -> int:
 
 def prune_unused_initializers(model: onnx.ModelProto) -> int:
     used = {input_name for node in model.graph.node for input_name in node.input if input_name}
+    used.update(output.name for output in model.graph.output)
     kept = [initializer for initializer in model.graph.initializer if initializer.name in used]
     removed = len(model.graph.initializer) - len(kept)
     if removed:
