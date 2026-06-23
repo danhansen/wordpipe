@@ -16,7 +16,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPERIMENTS = ("fixed-length", "fp32-current-projection", "per-channel-quantization")
+EXPERIMENTS = (
+    "fixed-length",
+    "fp32-default-quantization",
+    "fp32-current-projection",
+    "per-channel-quantization",
+)
 
 
 def run(command: list[str | Path], *, dry_run: bool) -> None:
@@ -242,6 +247,16 @@ def build_fp32_current_projection(args: argparse.Namespace) -> Path:
     )
 
 
+def build_fp32_default_quantization(args: argparse.Namespace) -> Path:
+    return build_fp32_transform_variant(
+        args,
+        stem="fp32-default-quantization",
+        transform_extra_args=[],
+        benchmark_label="fp32_default_quantization",
+        output_json_name="sayboard-fp32-default-quantization-001.json",
+    )
+
+
 def build_per_channel_quantization(args: argparse.Namespace) -> Path:
     return build_fp32_transform_variant(
         args,
@@ -314,6 +329,8 @@ def main() -> None:
     experiments = args.experiment or list(EXPERIMENTS)
     if "fixed-length" in experiments:
         build_fixed_length(args)
+    if "fp32-default-quantization" in experiments:
+        build_fp32_default_quantization(args)
     if "fp32-current-projection" in experiments:
         build_fp32_current_projection(args)
     if "per-channel-quantization" in experiments:

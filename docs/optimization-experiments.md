@@ -4,7 +4,7 @@ This log tracks ONNX/ORT optimization experiments ported from Sayboard's
 Parakeet EOU work onto Wordpipe's Nemotron/Parakeet runtime.
 
 See [sayboard-optimization-harvest.md](sayboard-optimization-harvest.md) for
-the source-level Sayboard optimization inventory and remaining experiment queue.
+the source-level Sayboard optimization inventory and harvest results.
 
 ## 2026-06-22: ORT Serialization And Linear-Pos Dequantization
 
@@ -1085,6 +1085,40 @@ Conclusion:
 - Keep `build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort` as the
   current best local candidate.
 
+### Clean FP32 Default Dynamic Quantization
+
+This tests the default clean-FP32 transform path directly: dynamic QUInt8
+quantization, projected cache with dynamic-int8 current projection, fixed-shape
+ORT `extended`, and the same FFN FP32 post-pass.
+
+```sh
+.venv/bin/python scripts/run_sayboard_harvest_experiments.py \
+  --experiment fp32-default-quantization \
+  --force
+```
+
+The FFN dequantization phase rewrote `0` blocks, so the clean FP32 quantized
+graph still does not reach the same mixed int8/FP32 encoder form as the current
+sherpa-derived best candidate.
+
+Result file:
+`build/parakeet-variant-bench/sayboard-fp32-default-quantization-001.json`
+
+Power state: AC online, battery charging, GNOME profile `balanced`.
+
+| Variant | Median real-audio RTF | Median RTF | Median decode seconds | Median wall seconds | Rough WER |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `baseline` | 0.655 | 0.646 | 81.000 | 85.521 | 9 / 313 = 2.88% |
+| `fp32_default_quantization` | 0.747 | 0.736 | 92.377 | 93.683 | 10 / 313 = 3.19% |
+
+Conclusion:
+
+- The default clean-FP32 dynamic quantization path is perf-negative and worsens
+  rough WER on the current long-WAV sample.
+- This reinforces that the current best result depends on the sherpa-derived
+  encoder graph form plus the FFN FP32 rewrite, not merely on starting from a
+  clean FP32 export and applying ORT dynamic quantization.
+
 ### Per-Channel Dynamic Quantization
 
 Sayboard's ablation matrix included `*_pc` variants using ONNX Runtime dynamic
@@ -1144,6 +1178,7 @@ now scripted:
 Additional reports:
 
 - `build/export-parity/current-best-vs-fp32-projected.json`
+- `build/export-parity/current-best-vs-fp32-default-quantization.json`
 - `build/export-parity/current-best-vs-per-channel.json`
 
 Findings:
@@ -1159,9 +1194,10 @@ Findings:
   `DynamicQuantizeLinear=3`, matching current best.
 - The encoder graph is not equivalent. Current best has `FusedMatMul=48`,
   `DynamicQuantizeMatMul=99`, `DynamicQuantizeLinear=173`,
-  `ConvInteger=77`, and `MatMul=120`. The FP32-current-projection variant has
-  `FusedMatMul=0`, `DynamicQuantizeMatMul=147`, `DynamicQuantizeLinear=77`,
-  `ConvInteger=77`, and `MatMul=120`.
+  `ConvInteger=77`, and `MatMul=120`. The FP32-default-quantization variant has
+  `FusedMatMul=0`, `DynamicQuantizeMatMul=195`, `DynamicQuantizeLinear=77`,
+  `ConvInteger=77`, and `MatMul=72`; FP32-current-projection has
+  `DynamicQuantizeMatMul=147` and `MatMul=120`.
 - The current best FFN dequantization pass rewrote `96` blocks and pruned `192`
   initializers. The FP32-export quantized variants rewrote `0` blocks in the
   same phase, so they did not reach the same mixed int8/FP32 encoder graph.
