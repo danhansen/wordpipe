@@ -58,6 +58,11 @@ def parse_args() -> argparse.Namespace:
         help="Run dynamic QUInt8 quantization.",
     )
     parser.add_argument(
+        "--quantize-per-channel",
+        action="store_true",
+        help="Use per-channel weight quantization during dynamic QUInt8 quantization.",
+    )
+    parser.add_argument(
         "--keep-fp32",
         action="store_true",
         help="Keep FP32 encoder/decoder artifacts after transform.",
@@ -88,12 +93,16 @@ def cleanup_export_shards(model_dir: Path) -> None:
             path.unlink()
 
 
-def quantize_to_single_file(input_path: Path, output_path: Path) -> None:
-    print(f"[transform] quantizing {input_path.name} -> {output_path.name}", flush=True)
+def quantize_to_single_file(input_path: Path, output_path: Path, *, per_channel: bool) -> None:
+    print(
+        f"[transform] quantizing {input_path.name} -> {output_path.name} perChannel={per_channel}",
+        flush=True,
+    )
     quantize_dynamic(
         model_input=input_path,
         model_output=output_path,
         weight_type=QuantType.QUInt8,
+        per_channel=per_channel,
         use_external_data_format=False,
     )
     onnx.checker.check_model(str(output_path))
@@ -143,8 +152,8 @@ def main() -> None:
     if args.quantize:
         encoder_quant = model_dir / "encoder.quant.onnx"
         decoder_quant = model_dir / "decoder_joint.onnx"
-        quantize_to_single_file(encoder_fp32, encoder_quant)
-        quantize_to_single_file(decoder_fp32, decoder_quant)
+        quantize_to_single_file(encoder_fp32, encoder_quant, per_channel=args.quantize_per_channel)
+        quantize_to_single_file(decoder_fp32, decoder_quant, per_channel=args.quantize_per_channel)
         encoder_for_projected = encoder_quant
     else:
         (model_dir / "decoder_joint.onnx").write_bytes(decoder_fp32.read_bytes())
@@ -176,6 +185,7 @@ def main() -> None:
     config["projected_cache"] = args.projected_cache
     config["projected_cache_current_projection"] = current_projection if args.projected_cache else None
     config["dynamic_quint8_quantization"] = args.quantize
+    config["dynamic_quint8_per_channel"] = args.quantize_per_channel if args.quantize else False
     config["ort_optimized_final_encoder"] = args.ort_optimize_final
     (model_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
 

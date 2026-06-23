@@ -1084,3 +1084,47 @@ Conclusion:
   export accuracy gap.
 - Keep `build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort` as the
   current best local candidate.
+
+### Per-Channel Dynamic Quantization
+
+Sayboard's ablation matrix included `*_pc` variants using ONNX Runtime dynamic
+quantization with `per_channel=True`. Wordpipe now exposes the same switch on
+the clean FP32 transform path:
+
+```sh
+.venv/bin/python scripts/run_sayboard_harvest_experiments.py \
+  --experiment per-channel-quantization \
+  --force
+```
+
+The build path is:
+
+1. Copy the existing FP32 consolidated export artifacts.
+2. Run `scripts/transform_nemotron_parakeet_export.py --quantize --projected-cache --quantize-per-channel`.
+3. Run fixed-shape specialization with ORT `extended`.
+4. Run the same FFN FP32 dequantization phase.
+5. Benchmark against `build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort`.
+
+The FFN dequantization phase rewrote `0` blocks for this variant because
+per-channel quantized weights use vector scale/zero-point tensors, while the
+current MatMul dequantizer intentionally handles only scalar-scale quantized
+weights. This result is therefore a clean FP32-export per-channel quantization
+test, not the current best `ffn_fp32` pipeline with per-channel weights.
+
+Result file:
+`build/parakeet-variant-bench/sayboard-per-channel-quantization-001.json`
+
+Power state: AC online, battery charging, GNOME profile `balanced`.
+
+| Variant | Median real-audio RTF | Median RTF | Median decode seconds | Median wall seconds | Rough WER |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `baseline` | 0.645 | 0.636 | 79.792 | 84.353 | 9 / 313 = 2.88% |
+| `per_channel_quantization` | 0.723 | 0.713 | 89.429 | 90.704 | 10 / 313 = 3.19% |
+
+Conclusion:
+
+- Per-channel dynamic QUInt8 quantization from the clean FP32 export is
+  perf-negative on this ORT CPU path.
+- It also carries the same rough accuracy concern as the other FP32-export
+  variants.
+- Do not promote per-channel quantization into the default model pipeline.

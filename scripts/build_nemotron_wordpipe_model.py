@@ -111,6 +111,11 @@ def parse_args() -> argparse.Namespace:
             "rewrite. auto preserves the default transform behavior."
         ),
     )
+    parser.add_argument(
+        "--quantize-per-channel",
+        action="store_true",
+        help="Experimental: use per-channel weights for dynamic QUInt8 quantization.",
+    )
     return parser.parse_args()
 
 
@@ -191,6 +196,7 @@ def main() -> None:
                 "--projected-cache",
                 "--projected-cache-current-projection",
                 args.projected_cache_current_projection,
+                *(["--quantize-per-channel"] if args.quantize_per_channel else []),
                 *(["--keep-fp32"] if args.keep_fp32 else []),
             ],
             dry_run=args.dry_run,

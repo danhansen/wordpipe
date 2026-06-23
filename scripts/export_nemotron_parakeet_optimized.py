@@ -286,12 +286,16 @@ def consolidate_onnx(input_path: Path, output_path: Path, external_data_name: st
     )
 
 
-def quantize_to_single_file(input_path: Path, output_path: Path) -> None:
-    print(f"[export] quantizing {input_path.name} -> {output_path.name}", flush=True)
+def quantize_to_single_file(input_path: Path, output_path: Path, *, per_channel: bool) -> None:
+    print(
+        f"[export] quantizing {input_path.name} -> {output_path.name} perChannel={per_channel}",
+        flush=True,
+    )
     quantize_dynamic(
         model_input=input_path,
         model_output=output_path,
         weight_type=QuantType.QUInt8,
+        per_channel=per_channel,
         use_external_data_format=False,
     )
     onnx.checker.check_model(str(output_path))
@@ -398,6 +402,11 @@ def main() -> None:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Run full dynamic QUInt8 quantization before projected-cache rewrite.",
+    )
+    parser.add_argument(
+        "--quantize-per-channel",
+        action="store_true",
+        help="Use per-channel weight quantization during dynamic QUInt8 quantization.",
     )
     parser.add_argument(
         "--export-only",
@@ -539,6 +548,7 @@ def main() -> None:
             projected_cache_current_projection(args) if args.projected_cache else None
         ),
         "dynamic_quint8_quantization": args.quantize,
+        "dynamic_quint8_per_channel": args.quantize_per_channel if args.quantize else False,
         "ort_optimized_final_encoder": args.ort_optimize_final,
         "prompt_dictionary": prompt_dict,
         "preprocessor": jsonable(getattr(model.cfg, "preprocessor", {})),
@@ -584,8 +594,8 @@ def main() -> None:
     if args.quantize:
         quant_encoder = args.output_dir / "encoder.quant.onnx"
         quant_decoder = args.output_dir / "decoder_joint.onnx"
-        quantize_to_single_file(consolidated_encoder, quant_encoder)
-        quantize_to_single_file(decoder_fp32, quant_decoder)
+        quantize_to_single_file(consolidated_encoder, quant_encoder, per_channel=args.quantize_per_channel)
+        quantize_to_single_file(decoder_fp32, quant_decoder, per_channel=args.quantize_per_channel)
         encoder_for_projected = quant_encoder
     else:
         shutil.copy2(decoder_fp32, args.output_dir / "decoder_joint.onnx")

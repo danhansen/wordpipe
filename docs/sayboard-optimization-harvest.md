@@ -48,7 +48,7 @@ only within the same benchmark run.
 | Stacked projected-cache ABI | `rewrite_projected_kv_cache.py` | Not ported | Not useful for Wordpipe today. Layered ABI avoids in-graph cache rolling and matches the Rust runtime. |
 | FP32 current K/V projection after quantized source graph | `build_deployed_model.py` calls projected-cache rewrite with `current_projection="fp32"` | Implemented and rejected | `scripts/run_sayboard_harvest_experiments.py` built the variant. Same-run benchmark: baseline `0.642` real-audio RTF, FP32-current projection `0.729`; WER worsened from `9 / 313 = 2.88%` to `12 / 313 = 3.83%`. |
 | Dynamic int8 quantization by operator family | `run_ablation.py` default variants | Partially ported and benchmarked | Wordpipe tested broad quantized baseline, FFN dequantization, pre-encoder output dequantization, conv dequantization, layer slices/even/odd variants, and MatMulNBits. Current best dequantizes FFN blocks back to FP32. |
-| Per-channel dynamic quantization sweeps | `run_ablation.py` `*_pc` variants | Mostly untested in Wordpipe | Worth testing only from a clean FP32 export or targeted re-quantization path. Current sherpa-derived source is already quantized, so per-channel variants are not a simple post-pass on the default artifact. |
+| Per-channel dynamic quantization sweeps | `run_ablation.py` `*_pc` variants | Implemented and rejected for current path | `scripts/transform_nemotron_parakeet_export.py --quantize-per-channel` and `scripts/run_sayboard_harvest_experiments.py --experiment per-channel-quantization` test this from the clean FP32 export. Same-run benchmark: baseline `0.645` real-audio RTF, per-channel `0.723`; WER worsened from `9 / 313 = 2.88%` to `10 / 313 = 3.19%`. |
 | Dynamic Conv quantization | `README.md` rejected conv variants | Ported and rejected | Wordpipe `scripts/quantize_nemotron_conv_dynamic.py` and conv dequant experiments showed throughput/accuracy tradeoffs were not attractive. |
 | MatMul/Gemm dynamic quantization from fixed raw-cache FP32 | `build_deployed_model.py`, `run_ablation.py` `fullpre_*` variants | Partially tested | Wordpipe's FP32 NeMo raw-cache/projected-cache controls are functional, but the FP32 export path scored worse WER than the sherpa-derived candidate. Do not use as default without explaining the export parity gap. |
 | Remove fixed length input and replace with initializer | `rewrite_fixed_streaming_shapes.py --keep-length-input` default removes `length` | Implemented and rejected | `scripts/run_sayboard_harvest_experiments.py` built the ABI with `--constant-processed-signal-length`. Same-run benchmark: baseline `0.641` real-audio RTF, fixed-length `0.706`; WER worsened from `9 / 313 = 2.88%` to `10 / 313 = 3.19%`. |
@@ -70,21 +70,16 @@ wrapper:
 
 The wrapper rebuilds `target/release/wordpipe-parakeet-worker`, builds the model
 variants, runs the long-WAV 3-run median benchmark under GNOME `balanced`, and
-then scores WER. Use `--experiment fixed-length` or
-`--experiment fp32-current-projection` to run one variant.
+then scores WER. Use `--experiment fixed-length`,
+`--experiment fp32-current-projection`, or
+`--experiment per-channel-quantization` to run one variant.
 
 ## Pending Experiments
 
 These are the remaining ONNX/ORT-relevant Sayboard ideas that are plausible for
 Wordpipe and still lack a same-WAV 3-run median plus WER result:
 
-1. Per-channel quantization from a clean FP32 source.
-   Only run this if the FP32 export parity issue is resolved or if we can
-   reconstruct a sherpa-equivalent FP32 source. Applying per-channel dynamic
-   quantization after the current sherpa-derived int8 export is not the same
-   experiment.
-
-2. Export parity investigation.
+1. Export parity investigation.
    The FP32 NeMo raw-cache and projected-cache controls both scored `11 / 313`
    WER while the sherpa-derived `ffn_fp32` candidate scores `9 / 313`. Before
    promoting any FP32-export-derived optimization, compare graph inputs,

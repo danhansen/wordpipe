@@ -16,7 +16,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPERIMENTS = ("fixed-length", "fp32-current-projection")
+EXPERIMENTS = ("fixed-length", "fp32-current-projection", "per-channel-quantization")
 
 
 def run(command: list[str | Path], *, dry_run: bool) -> None:
@@ -162,10 +162,17 @@ def prepare_fp32_export(args: argparse.Namespace, export_dir: Path) -> None:
         copy_or_reflink(src, export_dir / name, dry_run=args.dry_run)
 
 
-def build_fp32_current_projection(args: argparse.Namespace) -> Path:
-    export_dir = args.output_root / "fp32-current-projection-export"
-    fixed_dir = args.output_root / "fp32-current-projection-fixed-shape"
-    final_dir = args.output_root / "fp32-current-projection-ffn-fp32-ort"
+def build_fp32_transform_variant(
+    args: argparse.Namespace,
+    *,
+    stem: str,
+    transform_extra_args: list[str],
+    benchmark_label: str,
+    output_json_name: str,
+) -> Path:
+    export_dir = args.output_root / f"{stem}-export"
+    fixed_dir = args.output_root / f"{stem}-fixed-shape"
+    final_dir = args.output_root / f"{stem}-ffn-fp32-ort"
     prepare_fp32_export(args, export_dir)
     prepare_dir(fixed_dir, force=args.force, dry_run=args.dry_run)
     prepare_dir(final_dir, force=args.force, dry_run=args.dry_run)
@@ -176,8 +183,7 @@ def build_fp32_current_projection(args: argparse.Namespace) -> Path:
             export_dir,
             "--quantize",
             "--projected-cache",
-            "--projected-cache-current-projection",
-            "fp32",
+            *transform_extra_args,
             "--keep-fp32",
         ],
         dry_run=args.dry_run,
@@ -216,11 +222,36 @@ def build_fp32_current_projection(args: argparse.Namespace) -> Path:
     )
     benchmark(
         args,
-        label="fp32_current_projection",
+        label=benchmark_label,
         model_dir=final_dir,
-        output_json=args.bench_root / "sayboard-fp32-current-projection-001.json",
+        output_json=args.bench_root / output_json_name,
     )
     return final_dir
+
+
+def build_fp32_current_projection(args: argparse.Namespace) -> Path:
+    return build_fp32_transform_variant(
+        args,
+        stem="fp32-current-projection",
+        transform_extra_args=[
+            "--projected-cache-current-projection",
+            "fp32",
+        ],
+        benchmark_label="fp32_current_projection",
+        output_json_name="sayboard-fp32-current-projection-001.json",
+    )
+
+
+def build_per_channel_quantization(args: argparse.Namespace) -> Path:
+    return build_fp32_transform_variant(
+        args,
+        stem="per-channel-quantization",
+        transform_extra_args=[
+            "--quantize-per-channel",
+        ],
+        benchmark_label="per_channel_quantization",
+        output_json_name="sayboard-per-channel-quantization-001.json",
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -285,6 +316,8 @@ def main() -> None:
         build_fixed_length(args)
     if "fp32-current-projection" in experiments:
         build_fp32_current_projection(args)
+    if "per-channel-quantization" in experiments:
+        build_per_channel_quantization(args)
 
 
 if __name__ == "__main__":
