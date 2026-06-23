@@ -348,6 +348,7 @@ def make_output(
         "settings": {
             "wav": str(args.wav),
             "runs": args.runs,
+            "interleave": args.interleave,
             "num_threads": args.num_threads,
             "flush_chunks": args.flush_chunks,
             "graph_optimization": args.graph_optimization,
@@ -394,6 +395,18 @@ def write_output(
     args.output.write_text(json.dumps(output, indent=2), encoding="utf-8")
 
 
+def print_run_result(label: str, run_index: int, row: dict[str, Any]) -> None:
+    metrics = row["metrics"]
+    print(
+        f"[bench] {label} run {run_index}: "
+        f"load={row.get('load_seconds')} "
+        f"rtf={metrics.get('real_time_factor')} "
+        f"real_audio_rtf={metrics.get('real_audio_real_time_factor')} "
+        f"decode={metrics.get('decode_seconds')} wall={row['wall_seconds']:.3f}",
+        flush=True,
+    )
+
+
 def parse_model_arg(value: str) -> tuple[str, Path]:
     if "=" in value:
         label, path = value.split("=", 1)
@@ -408,6 +421,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wav", type=Path, default=Path("build/allocation-ablation/librispeech-long.wav"))
     parser.add_argument("--worker", type=Path, default=Path("target/release/wordpipe-parakeet-worker"))
     parser.add_argument("--runs", type=int, default=3)
+    parser.add_argument(
+        "--interleave",
+        action="store_true",
+        help="Run pass 1 for every model, then pass 2, instead of finishing one model at a time.",
+    )
     parser.add_argument("--num-threads", type=int, default=2)
     parser.add_argument("--flush-chunks", type=int, default=3)
     parser.add_argument("--graph-optimization", default="all")
@@ -479,43 +497,66 @@ def main() -> None:
         memory_at_start = read_memory_metadata()
         results = []
         summaries = []
-        for label, model_dir in map(parse_model_arg, args.model):
+        models = list(map(parse_model_arg, args.model))
+        for label, model_dir in models:
             if not model_dir.exists():
                 raise SystemExit(f"Missing model dir for {label}: {model_dir}")
-            rows = []
+
+        if args.interleave:
+            rows_by_label: dict[str, list[dict[str, Any]]] = {label: [] for label, _ in models}
             for run_index in range(1, args.runs + 1):
-                print(f"[bench] {label} run {run_index}/{args.runs}", flush=True)
-                row = run_once(args, label, model_dir, run_index)
-                rows.append(row)
-                metrics = row["metrics"]
-                print(
-                    f"[bench] {label} run {run_index}: "
-                    f"load={row.get('load_seconds')} "
-                    f"rtf={metrics.get('real_time_factor')} "
-                    f"real_audio_rtf={metrics.get('real_audio_real_time_factor')} "
-                    f"decode={metrics.get('decode_seconds')} wall={row['wall_seconds']:.3f}",
-                    flush=True,
-                )
+                for label, model_dir in models:
+                    print(f"[bench] {label} run {run_index}/{args.runs}", flush=True)
+                    row = run_once(args, label, model_dir, run_index)
+                    rows_by_label[label].append(row)
+                    results.append(row)
+                    print_run_result(label, run_index, row)
+                    summaries = [
+                        summarize(label, rows)
+                        for label, rows in rows_by_label.items()
+                        if rows
+                    ]
+                    write_output(
+                        args,
+                        power_at_start=power_at_start,
+                        memory_at_start=memory_at_start,
+                        summaries=summaries,
+                        results=results,
+                        status="partial",
+                    )
+            summaries = []
+            for label, _ in models:
+                summary = summarize(label, rows_by_label[label])
+                summaries.append(summary)
+                print(f"[bench] {label} median {json.dumps(summary, sort_keys=True)}", flush=True)
+        else:
+            for label, model_dir in models:
+                rows = []
+                for run_index in range(1, args.runs + 1):
+                    print(f"[bench] {label} run {run_index}/{args.runs}", flush=True)
+                    row = run_once(args, label, model_dir, run_index)
+                    rows.append(row)
+                    print_run_result(label, run_index, row)
+                    write_output(
+                        args,
+                        power_at_start=power_at_start,
+                        memory_at_start=memory_at_start,
+                        summaries=summaries,
+                        results=results + rows,
+                        status="partial",
+                    )
+                results.extend(rows)
+                summary = summarize(label, rows)
+                summaries.append(summary)
+                print(f"[bench] {label} median {json.dumps(summary, sort_keys=True)}", flush=True)
                 write_output(
                     args,
                     power_at_start=power_at_start,
                     memory_at_start=memory_at_start,
                     summaries=summaries,
-                    results=results + rows,
+                    results=results,
                     status="partial",
                 )
-            results.extend(rows)
-            summary = summarize(label, rows)
-            summaries.append(summary)
-            print(f"[bench] {label} median {json.dumps(summary, sort_keys=True)}", flush=True)
-            write_output(
-                args,
-                power_at_start=power_at_start,
-                memory_at_start=memory_at_start,
-                summaries=summaries,
-                results=results,
-                status="partial",
-            )
 
         write_output(
             args,

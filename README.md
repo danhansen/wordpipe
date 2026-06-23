@@ -333,6 +333,31 @@ quantization and projected cache, then
 MatMul/Gemm blocks back to FP32. `--fp32-decoder` is also available only in this
 profile as a modest-speed experimental option.
 
+The best compact option is the fixed-shape ORT-optimized rebuild of the
+sherpa-derived int8/projected-cache package:
+
+```sh
+.venv/bin/python scripts/build_nemotron_fixed_shape_model.py \
+  --source-dir models/nemotron-3.5-asr-streaming-0.6b-parakeet-int8-projected-c56 \
+  --output-dir build/model-variants/nemotron-c56-fixed-shape-ort-extended \
+  --ort-optimize-final extended \
+  --ort-optimize-threads 1
+```
+
+This keeps the model around 600 MB and avoids the selective FP32 rewrites used
+by the larger `ffn-fp32` profile.
+
+To build the same compact profile from a NeMo checkpoint instead of an existing
+int8/projected-cache package:
+
+```sh
+.venv/bin/python scripts/build_nemotron_wordpipe_model.py \
+  /path/to/model.nemo \
+  models/nemotron-wordpipe-compact-fixed-shape \
+  --work-dir build/nemotron-wordpipe-pipeline-compact \
+  --profile compact-fixed-shape
+```
+
 Important defaults:
 
 ```text

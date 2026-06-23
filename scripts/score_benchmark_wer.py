@@ -84,10 +84,11 @@ def score(benchmark_path: Path, manifest_path: Path) -> dict[str, Any]:
                     "rtf": row_metric(row, "rtf", "real_time_factor"),
                     "decode_seconds": row_metric(row, "decode_seconds"),
                     "wall_seconds": row.get("wall_seconds"),
+                    "load_seconds": row.get("load_seconds"),
                 }
             )
         numeric_medians = {}
-        for key in ("real_audio_rtf", "rtf", "decode_seconds", "wall_seconds"):
+        for key in ("real_audio_rtf", "rtf", "decode_seconds", "wall_seconds", "load_seconds"):
             values = [float(run[key]) for run in runs if run.get(key) is not None]
             numeric_medians[f"median_{key}"] = statistics.median(values) if values else None
         labels.append(
@@ -139,6 +140,8 @@ def main() -> None:
             perf_bits.append(f"RTF={label['median_rtf']:.3f}")
         if label.get("median_decode_seconds") is not None:
             perf_bits.append(f"decode={label['median_decode_seconds']:.3f}s")
+        if label.get("median_load_seconds") is not None:
+            perf_bits.append(f"load={label['median_load_seconds']:.3f}s")
         perf_suffix = f" ({', '.join(perf_bits)})" if perf_bits else ""
         print(
             f"{label['label']}: median {label['median_edits']:.0f}/{label['words']} "
@@ -150,6 +153,8 @@ def main() -> None:
                 run_perf.append(f"real-audio RTF={float(run['real_audio_rtf']):.3f}")
             if run.get("decode_seconds") is not None:
                 run_perf.append(f"decode={float(run['decode_seconds']):.3f}s")
+            if run.get("load_seconds") is not None:
+                run_perf.append(f"load={float(run['load_seconds']):.3f}s")
             run_suffix = f" ({', '.join(run_perf)})" if run_perf else ""
             print(
                 f"  run {run['run_index']}: {run['edits']}/{run['words']} "

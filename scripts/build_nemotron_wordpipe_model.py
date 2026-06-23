@@ -16,7 +16,7 @@ Pipeline:
    The projected-cache rewrite stores already-projected attention K/V tensors so
    the runtime avoids recomputing old context every streaming chunk. The default
    high-performance profile keeps the encoder and decoder in FP32. The legacy
-   compact profile first runs one coherent dynamic QUInt8 pass.
+   compact and mixed profiles first run one coherent dynamic QUInt8 pass.
 
 3. Specialize fixed streaming shapes.
    Wordpipe currently runs the Nemotron c56 streaming shape: 65 mel frames in,
@@ -26,7 +26,7 @@ Pipeline:
 4. Optionally dequantize feed-forward MatMul/Gemm blocks back to FP32.
    Benchmarks on the Ivy Bridge test machine show ORT's FP32 GEMM path is faster
    than dynamic activation quantization plus int8 matmul overhead for these FFN
-   blocks. This preserves the older compact mixed-int8/FP32 candidate.
+   blocks. This preserves the older mixed-int8/FP32 candidate.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_WORK_DIR = ROOT / "build" / "nemotron-wordpipe-pipeline"
 PHASES = ("export", "transform", "fixed-shape", "ffn-fp32")
-PROFILES = ("fp32-projected", "ffn-fp32")
+PROFILES = ("fp32-projected", "compact-fixed-shape", "ffn-fp32")
 
 
 def parse_args() -> argparse.Namespace:
@@ -65,8 +65,8 @@ def parse_args() -> argparse.Namespace:
         default="fp32-projected",
         help=(
             "Model build profile. fp32-projected is the current high-performance "
-            "default; ffn-fp32 keeps the older compact quantized/projected-cache "
-            "encoder with FP32 feed-forward blocks."
+            "default; compact-fixed-shape keeps the small quantized/projected-cache "
+            "encoder; ffn-fp32 adds FP32 feed-forward blocks to that compact base."
         ),
     )
     parser.add_argument("--python", type=Path, default=Path(sys.executable))
@@ -150,7 +150,7 @@ def phase_enabled(args: argparse.Namespace, phase: str) -> bool:
 
 
 def active_phases(args: argparse.Namespace) -> tuple[str, ...]:
-    if args.profile == "fp32-projected":
+    if args.profile in {"fp32-projected", "compact-fixed-shape"}:
         return ("export", "transform", "fixed-shape")
     if args.profile == "ffn-fp32":
         return PHASES
@@ -161,7 +161,7 @@ def phase_output(args: argparse.Namespace, phase: str) -> Path:
     if phase in {"export", "transform"}:
         return args.work_dir / "01-fp32-export"
     if phase == "fixed-shape":
-        return args.output_dir if args.profile == "fp32-projected" else args.work_dir / "02-fixed-shape"
+        return args.output_dir if args.profile in {"fp32-projected", "compact-fixed-shape"} else args.work_dir / "02-fixed-shape"
     if phase == "ffn-fp32":
         return args.output_dir
     raise ValueError(phase)
@@ -197,10 +197,10 @@ def main() -> None:
         raise SystemExit(f"--stop-after {args.stop_after!r} is not part of profile {args.profile!r}")
     if args.start_at not in phases:
         raise SystemExit(f"--start-at {args.start_at!r} is not part of profile {args.profile!r}")
-    if args.profile == "fp32-projected" and args.fp32_decoder:
+    if args.profile != "ffn-fp32" and args.fp32_decoder:
         raise SystemExit("--fp32-decoder only applies to --profile ffn-fp32")
     if args.profile == "fp32-projected" and args.quantize_per_channel:
-        raise SystemExit("--quantize-per-channel only applies to --profile ffn-fp32")
+        raise SystemExit("--quantize-per-channel only applies to quantized profiles")
 
     python = str(args.python)
     export_dir = phase_output(args, "export")
@@ -233,11 +233,11 @@ def main() -> None:
                 python,
                 "scripts/transform_nemotron_parakeet_export.py",
                 str(export_dir),
-                "--quantize" if args.profile == "ffn-fp32" else "--no-quantize",
+                "--no-quantize" if args.profile == "fp32-projected" else "--quantize",
                 "--projected-cache",
                 "--projected-cache-current-projection",
                 args.projected_cache_current_projection,
-                *(["--quantize-per-channel"] if args.profile == "ffn-fp32" and args.quantize_per_channel else []),
+                *(["--quantize-per-channel"] if args.profile != "fp32-projected" and args.quantize_per_channel else []),
                 *(["--fp32-decoder"] if args.profile == "ffn-fp32" and args.fp32_decoder else []),
                 *(["--keep-fp32"] if args.keep_fp32 else []),
             ],
