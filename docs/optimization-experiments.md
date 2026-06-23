@@ -1443,6 +1443,95 @@ Interpretation:
   avoid reading the whole file into heap memory first, but it is not required
   for the ORT-side zero-copy initializer path.
 
+### OnnxSlim Before ORT Format
+
+The FP32 projected ORT-format conversion failed under memory pressure, so the
+next experiment tested whether `onnxslim` can simplify the ONNX graph before
+any ORT-format conversion. The goal was explicitly to validate graph and runtime
+behavior first, not to proceed straight to `.ort`.
+
+Slim command:
+
+```sh
+.venv-nemo-export/bin/python scripts/slim_nemotron_onnx.py \
+  build/model-variants/nemotron-fp32-projected-fixed-shape \
+  build/model-variants/nemotron-fp32-projected-slim-onnx \
+  --force \
+  --size-threshold 1048576
+```
+
+Notes:
+
+- `scripts/slim_nemotron_onnx.py` stages private copies of ONNX external-data
+  files before invoking `onnxslim`. This avoids ONNX's hard-link safety guard,
+  which rejected the source `encoder.onnx.data` after earlier cache experiments
+  created additional hard links.
+- Defaults are conservative for large external-data models: no shape inference,
+  external-data output, and a 1 MiB constant-folding threshold.
+
+Graph diagnostics:
+
+| Component | Nodes | Initializers | Key op changes |
+| --- | ---: | ---: | --- |
+| Encoder original | 1735 | 888 | Baseline |
+| Encoder slim | 1703 | 691 | `Pad` 51 -> 24, `Expand` 13 -> 8 |
+| Decoder original | 42 | 13 | Baseline |
+| Decoder slim | 26 | 16 | `Constant` 16 -> 0 |
+
+Smoke benchmark:
+
+```sh
+PARAKEET_LOAD_TRACE=1 scripts/benchmark_parakeet_variant.py \
+  --interleave \
+  --wav build/librispeech-backend-eval-smoke/wavs/1089-134686-0019.wav \
+  --runs 5 \
+  --num-threads 2 \
+  --flush-chunks 0 \
+  --timeout-seconds 120 \
+  --min-mem-available-gb 5 \
+  --child-memory-limit-gb 12 \
+  --output build/parakeet-variant-bench/fp32-projected-slim-onnx-smoke-001.json \
+  fp32_projected=build/model-variants/nemotron-fp32-projected-fixed-shape \
+  fp32_projected_slim=build/model-variants/nemotron-fp32-projected-slim-onnx
+```
+
+| Variant | Median load seconds | Median real-audio RTF | Median decode seconds | Transcript |
+| --- | ---: | ---: | ---: | --- |
+| `fp32_projected` | 2.865 | 0.570 | 7.926 | Same |
+| `fp32_projected_slim` | 2.895 | 0.555 | 7.706 | Same |
+
+Broad slim-only check, compared against the recorded baseline from
+`compact-vs-top-broad-interleaved-001.json` instead of rerunning the unchanged
+baseline:
+
+```sh
+PARAKEET_LOAD_TRACE=1 scripts/benchmark_parakeet_variant.py \
+  --wav build/librispeech-highperf-validation/librispeech-long.wav \
+  --runs 1 \
+  --num-threads 2 \
+  --flush-chunks 3 \
+  --timeout-seconds 900 \
+  --min-mem-available-gb 5 \
+  --child-memory-limit-gb 12 \
+  --output build/parakeet-variant-bench/fp32-projected-slim-onnx-broad-slim-only-001.json \
+  fp32_projected_slim=build/model-variants/nemotron-fp32-projected-slim-onnx
+```
+
+| Variant | Source | Load seconds | Real-audio RTF | Decode seconds | WER |
+| --- | --- | ---: | ---: | ---: | ---: |
+| `fp32_projected` | recorded 3-run median | 2.717 | 0.501 | 187.533 | 25 / 985 = 2.54% |
+| `fp32_projected_slim` | new 1-run check | 2.866 | 0.534 | 199.931 | 25 / 985 = 2.54% |
+
+Interpretation:
+
+- The graph was genuinely simplified and WER was unchanged on the 985-word
+  sampled LibriSpeech validation.
+- Performance was not clearly improved. The smoke run was neutral/slightly
+  positive, but the broad one-run check was slower than the recorded baseline.
+- Do not promote slimming into the default FP32 projected recipe yet. If we use
+  it as a preprocessing step for another ORT-format conversion attempt, treat it
+  as a memory-pressure experiment and validate performance again afterward.
+
 ## 2026-06-22: Sayboard Harvest Wrapper Results
 
 The remaining Sayboard-derived experiments are now captured by:
