@@ -1532,6 +1532,19 @@ Interpretation:
   it as a preprocessing step for another ORT-format conversion attempt, treat it
   as a memory-pressure experiment and validate performance again afterward.
 
+Follow-up ORT-format conversion attempts:
+
+- `--optimization-level all` on the slimmed FP32 projected model still drove
+  available memory below 1 GiB during encoder conversion, so the run was
+  interrupted before swap pressure became dangerous.
+- `--optimization-level disable` avoided the first memory collapse but still
+  crashed with exit 139 during encoder conversion.
+- Conclusion: `onnxslim` reduces graph/protobuf complexity, but does not make
+  the 2.3 GiB FP32 external-data encoder safe to convert to ORT format on this
+  16 GiB system. Keep ORT format focused on the compact model unless we move
+  conversion to a larger-memory host or find a converter path that streams
+  external data instead of materializing it.
+
 ## 2026-06-22: Sayboard Harvest Wrapper Results
 
 The remaining Sayboard-derived experiments are now captured by:
