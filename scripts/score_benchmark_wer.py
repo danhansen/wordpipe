@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Score rough WER for benchmark_parakeet_variant.py output.
+"""Score rough WER and matching RTF for benchmark_parakeet_variant.py output.
 
 The long-WAV benchmark concatenates a small LibriSpeech manifest into one WAV
-and stores the final transcript for each run. This script reconstructs that
-concatenated reference and applies the same normalization/edit-distance helpers
-used by eval_librispeech_backends.py.
+and stores the final transcript and worker metrics for each run. This script
+reconstructs that concatenated reference, applies the same normalization/edit
+distance helpers used by eval_librispeech_backends.py, and reports speed and
+accuracy from the same benchmark rows.
 """
 
 from __future__ import annotations
@@ -50,6 +51,15 @@ def rows_by_label(benchmark: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     return rows
 
 
+def row_metric(row: dict[str, Any], flat_key: str, metrics_key: str | None = None) -> Any:
+    if row.get(flat_key) is not None:
+        return row.get(flat_key)
+    metrics = row.get("metrics") or {}
+    if isinstance(metrics, dict):
+        return metrics.get(metrics_key or flat_key)
+    return None
+
+
 def score(benchmark_path: Path, manifest_path: Path) -> dict[str, Any]:
     helpers = load_eval_helpers()
     reference = read_reference(manifest_path)
@@ -66,8 +76,20 @@ def score(benchmark_path: Path, manifest_path: Path) -> dict[str, Any]:
                     "edits": edits,
                     "words": words,
                     "wer": wer,
+                    "real_audio_rtf": row_metric(
+                        row,
+                        "real_audio_rtf",
+                        "real_audio_real_time_factor",
+                    ),
+                    "rtf": row_metric(row, "rtf", "real_time_factor"),
+                    "decode_seconds": row_metric(row, "decode_seconds"),
+                    "wall_seconds": row.get("wall_seconds"),
                 }
             )
+        numeric_medians = {}
+        for key in ("real_audio_rtf", "rtf", "decode_seconds", "wall_seconds"):
+            values = [float(run[key]) for run in runs if run.get(key) is not None]
+            numeric_medians[f"median_{key}"] = statistics.median(values) if values else None
         labels.append(
             {
                 "label": label,
@@ -75,6 +97,7 @@ def score(benchmark_path: Path, manifest_path: Path) -> dict[str, Any]:
                 "median_wer": statistics.median(run["wer"] for run in runs) if runs else None,
                 "median_edits": statistics.median(run["edits"] for run in runs) if runs else None,
                 "words": runs[0]["words"] if runs else 0,
+                **numeric_medians,
             }
         )
 
@@ -109,14 +132,28 @@ def main() -> None:
     print(f"manifest: {result['manifest']}")
     for label in result["labels"]:
         wer_percent = 100.0 * float(label["median_wer"])
+        perf_bits = []
+        if label.get("median_real_audio_rtf") is not None:
+            perf_bits.append(f"real-audio RTF={label['median_real_audio_rtf']:.3f}")
+        if label.get("median_rtf") is not None:
+            perf_bits.append(f"RTF={label['median_rtf']:.3f}")
+        if label.get("median_decode_seconds") is not None:
+            perf_bits.append(f"decode={label['median_decode_seconds']:.3f}s")
+        perf_suffix = f" ({', '.join(perf_bits)})" if perf_bits else ""
         print(
             f"{label['label']}: median {label['median_edits']:.0f}/{label['words']} "
-            f"WER={wer_percent:.2f}%"
+            f"WER={wer_percent:.2f}%{perf_suffix}"
         )
         for run in label["runs"]:
+            run_perf = []
+            if run.get("real_audio_rtf") is not None:
+                run_perf.append(f"real-audio RTF={float(run['real_audio_rtf']):.3f}")
+            if run.get("decode_seconds") is not None:
+                run_perf.append(f"decode={float(run['decode_seconds']):.3f}s")
+            run_suffix = f" ({', '.join(run_perf)})" if run_perf else ""
             print(
                 f"  run {run['run_index']}: {run['edits']}/{run['words']} "
-                f"WER={100.0 * run['wer']:.2f}%"
+                f"WER={100.0 * run['wer']:.2f}%{run_suffix}"
             )
 
 

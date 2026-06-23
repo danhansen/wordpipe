@@ -105,6 +105,16 @@ Optimization work is tracked in
 Sayboard optimization inventory and harvest results are in
 [docs/sayboard-optimization-harvest.md](docs/sayboard-optimization-harvest.md).
 
+For model A/B checks on a concatenated LibriSpeech WAV, build a broader sample
+with `scripts/build_librispeech_long_wav.py`, run
+`scripts/benchmark_parakeet_variant.py`, then score speed and accuracy together:
+
+```sh
+.venv/bin/python scripts/score_benchmark_wer.py \
+  build/parakeet-variant-bench/highperf-broad-wer-rtf-001.json \
+  --manifest build/librispeech-highperf-validation/manifest.jsonl
+```
+
 Inspect ONNX graphs and ORT optimization effects:
 
 ```sh

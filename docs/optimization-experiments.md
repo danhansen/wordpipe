@@ -1165,6 +1165,87 @@ FP32 paths alter graph/export/runtime numerics enough to cross borderline RNNT
 decision boundaries. Some dynamic quantization noise happens to bias this small
 sample toward the LibriSpeech reference spelling/inflection.
 
+### Broader High-Performance RTF/WER Sweep
+
+The narrow 313-word sample made the full FP32 projected-cache export look like
+an accuracy regression. To check whether that held up, a broader concatenated
+LibriSpeech sample was built and scored with RTF and WER from the same benchmark
+JSON.
+
+Build the broader long WAV and matching manifest:
+
+```sh
+scripts/build_librispeech_long_wav.py \
+  --work-dir build/librispeech-highperf-validation \
+  --count 40 \
+  --candidate-count 1000 \
+  --max-audio-sec 420 \
+  --seed 29
+```
+
+Dataset summary:
+
+| Samples | Audio seconds | Reference words |
+| ---: | ---: | ---: |
+| 40 | 374.190 | 985 |
+
+Benchmark:
+
+```sh
+.venv/bin/python scripts/benchmark_parakeet_variant.py \
+  --wav build/librispeech-highperf-validation/librispeech-long.wav \
+  --runs 1 \
+  --num-threads 2 \
+  --flush-chunks 3 \
+  --graph-optimization all \
+  --timeout-seconds 900 \
+  --min-mem-available-gb 6 \
+  --child-memory-limit-gb 12 \
+  --output build/parakeet-variant-bench/highperf-broad-wer-rtf-001.json \
+  baseline=build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort \
+  fp32_projected=build/model-variants/nemotron-fp32-projected-fixed-shape \
+  fp32_decoder=build/model-variants/nemotron-current-encoder-fp32-decoder-hybrid
+```
+
+Score WER and RTF together from the same run rows:
+
+```sh
+.venv/bin/python scripts/score_benchmark_wer.py \
+  build/parakeet-variant-bench/highperf-broad-wer-rtf-001.json \
+  --manifest build/librispeech-highperf-validation/manifest.jsonl
+```
+
+Results:
+
+| Variant | Real-audio RTF | RTF | Decode seconds | Rough WER |
+| --- | ---: | ---: | ---: | ---: |
+| `baseline` | 0.600 | 0.596 | 224.429 | 27 / 985 = 2.74% |
+| `fp32_projected` | 0.500 | 0.498 | 187.273 | 25 / 985 = 2.54% |
+| `fp32_decoder` | 0.567 | 0.563 | 212.035 | 28 / 985 = 2.84% |
+
+Edit-diff summary versus `baseline`:
+
+- `fp32_projected` fixed 8 baseline edits and introduced 6 new edits, for a net
+  improvement of 2 strict WER edits. Most changed edits are spelling/name or
+  tokenization variants; one clear new bad regression was `secured` -> `sered`.
+- `fp32_decoder` fixed 5 baseline edits and introduced 6 new edits, for one
+  additional strict WER edit.
+
+Interpretation:
+
+- On this broader same-run sample, full FP32 projected-cache is both faster and
+  slightly better under the rough strict WER scorer. Its real-audio RTF is 0.500
+  versus the baseline's 0.600, a 16.7% lower RTF and 37.156 fewer decode seconds
+  over 374.190 seconds of audio.
+- The earlier 313-word result was too small to treat the FP32 projected-cache
+  export as an accuracy failure. The token-level divergences are still real, but
+  on a broader sample they are not consistently negative.
+- `fp32_decoder` remains a modest-speed experimental option. It improved
+  real-audio RTF by 5.5% versus baseline here but was slightly worse on WER.
+- This is one long run per variant. The transcripts are deterministic for a
+  fixed graph and input, but if absolute timing confidence becomes important,
+  rerun this same broader benchmark with `--runs 3` and compare medians.
+
 ## 2026-06-22: Sayboard Harvest Wrapper Results
 
 The remaining Sayboard-derived experiments are now captured by:
