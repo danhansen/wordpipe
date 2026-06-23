@@ -1718,3 +1718,273 @@ Interpretation:
   graph form from the NeMo export path, or on extending the dequantizer to
   handle the FP32-export quantized patterns if they can be matched without
   hurting WER.
+
+## 2026-06-23: Microsoft Olive Spike
+
+Olive setup was done in the existing Nemo export environment instead of a fresh
+default Olive venv. A normal `pip install olive-ai` attempted to pull a large
+PyTorch/CUDA dependency stack, while `.venv-nemo-export` already had CPU torch
+and the ONNX stack. The working lightweight setup was:
+
+```sh
+.venv-nemo-export/bin/pip install olive-ai==0.13.0 --no-deps
+.venv-nemo-export/bin/pip install \
+  onnxscript==0.7.0 \
+  onnxoptimizer==0.4.2 \
+  onnx_ir==0.2.1 \
+  questionary \
+  opentelemetry-sdk \
+  opentelemetry-api==1.42.1 \
+  opentelemetry-semantic-conventions==0.63b1
+```
+
+Use `MPLCONFIGDIR=build/matplotlib-cache` for Olive commands so matplotlib
+does not try to populate an unwritable home-cache path.
+
+The repeatable wrapper is:
+
+```sh
+MPLCONFIGDIR=build/matplotlib-cache \
+  .venv-nemo-export/bin/python scripts/run_olive_onnx_pass.py \
+  build/model-variants/nemotron-c56-fixed-shape-ort-extended \
+  build/model-variants/nemotron-c56-fixed-shape-olive-peephole \
+  --pass-name peephole \
+  --force
+```
+
+It preserves the Wordpipe model directory layout and writes
+`olive_pass_summary.json` with before/after graph counts. Supported experiment
+passes are `peephole`, `quant-preprocess`, `dynamic-quant`, and
+`ort-transformers`.
+
+### Compact Fixed-Shape Peephole
+
+```sh
+MPLCONFIGDIR=build/matplotlib-cache \
+  .venv-nemo-export/bin/python scripts/run_olive_onnx_pass.py \
+  build/model-variants/nemotron-c56-fixed-shape-ort-extended \
+  build/model-variants/nemotron-c56-fixed-shape-olive-peephole \
+  --pass-name peephole \
+  --force
+```
+
+Graph changes:
+
+| Component | Nodes | Initializers | Size delta | Notable op deltas |
+| --- | ---: | ---: | ---: | --- |
+| encoder | 2,091 -> 2,036 | 1,428 -> 1,056 | -253 KiB | `Slice -26`, `Pad -24`, `Expand -5` |
+| decoder_joint | 55 -> 39 | 29 -> 29 | -818 B | `Constant -16` |
+
+Additional diagnostics:
+
+- Encoder unresolved dims improved from `222` to `0`.
+- Quantized operator counts were preserved:
+  `DynamicQuantizeMatMul=195`, `DynamicQuantizeLinear=77`,
+  `ConvInteger=77`.
+- Decoder quantized operator counts were preserved:
+  `DynamicQuantizeLinear=3`, `MatMulInteger=3`, `DynamicQuantizeLSTM=2`.
+
+Long-WAV benchmark:
+
+```sh
+.venv/bin/python scripts/benchmark_parakeet_variant.py \
+  compact=build/model-variants/nemotron-c56-fixed-shape-ort-extended \
+  olive_peephole=build/model-variants/nemotron-c56-fixed-shape-olive-peephole \
+  --runs 3 \
+  --min-mem-available-gb 6 \
+  --child-memory-limit-gb 10 \
+  --set-power-profile balanced \
+  --output build/parakeet-variant-bench/olive-peephole-compact-001.json
+
+.venv/bin/python scripts/score_benchmark_wer.py \
+  build/parakeet-variant-bench/olive-peephole-compact-001.json
+```
+
+| Variant | Median load seconds | Median real-audio RTF | Median decode seconds | Rough WER |
+| --- | ---: | ---: | ---: | ---: |
+| `compact` | 1.169 | 0.736 | 91.064 | 10 / 313 = 3.19% |
+| `olive_peephole` | 1.072 | 0.735 | 90.933 | 10 / 313 = 3.19% |
+
+Interpretation: Olive peephole is correct and slightly reduces ONNX startup
+cost, but decode speed is effectively neutral.
+
+### Compact Peephole Plus ORT Format
+
+The peephole output converted cleanly to native ORT format:
+
+```sh
+.venv/bin/python scripts/convert_nemotron_to_ort_format.py \
+  build/model-variants/nemotron-c56-fixed-shape-olive-peephole \
+  build/model-variants/nemotron-c56-fixed-shape-olive-peephole-ort-format \
+  --optimization-level all \
+  --optimization-style fixed \
+  --force
+```
+
+Benchmark:
+
+```sh
+.venv/bin/python scripts/benchmark_parakeet_variant.py \
+  compact_ort=build/model-variants/nemotron-c56-fixed-shape-ort-extended-format \
+  olive_peephole_ort=build/model-variants/nemotron-c56-fixed-shape-olive-peephole-ort-format \
+  --runs 3 \
+  --min-mem-available-gb 6 \
+  --child-memory-limit-gb 10 \
+  --set-power-profile balanced \
+  --output build/parakeet-variant-bench/olive-peephole-ort-format-001.json
+
+.venv/bin/python scripts/score_benchmark_wer.py \
+  build/parakeet-variant-bench/olive-peephole-ort-format-001.json
+```
+
+| Variant | Median load seconds | Median real-audio RTF | Median decode seconds | Rough WER |
+| --- | ---: | ---: | ---: | ---: |
+| `compact_ort` | 0.473 | 0.765 | 94.567 | 10 / 313 = 3.19% |
+| `olive_peephole_ort` | 0.452 | 0.756 | 93.438 | 10 / 313 = 3.19% |
+
+Interpretation: ORT format remains the main load-time win. Olive peephole adds
+a small, clean improvement on top, but the delta is small enough to treat as
+nice-to-have rather than a major optimization.
+
+### Quantization Preprocess
+
+Default Olive quantization preprocessing failed on the compact encoder:
+
+```text
+Exception: Incomplete symbolic shape inference
+```
+
+Retrying with symbolic shape inference disabled completed:
+
+```sh
+MPLCONFIGDIR=build/matplotlib-cache \
+  .venv-nemo-export/bin/python scripts/run_olive_onnx_pass.py \
+  build/model-variants/nemotron-c56-fixed-shape-ort-extended \
+  build/model-variants/nemotron-c56-fixed-shape-olive-quant-preprocess-nosym \
+  --pass-name quant-preprocess \
+  --pass-config '{"skip_symbolic_shape": true}' \
+  --force
+```
+
+| Component | Nodes | Size delta |
+| --- | ---: | ---: |
+| encoder | 2,091 -> 2,091 | +42 KiB |
+| decoder_joint | 55 -> 55 | +2 KiB |
+
+Interpretation: this path is not useful for the current already-fixed-shape,
+already-optimized compact graph.
+
+### Dynamic Quantization
+
+```sh
+MPLCONFIGDIR=build/matplotlib-cache \
+  .venv-nemo-export/bin/python scripts/run_olive_onnx_pass.py \
+  build/model-variants/nemotron-c56-fixed-shape-ort-extended \
+  build/model-variants/nemotron-c56-fixed-shape-olive-dynamic-quant \
+  --pass-name dynamic-quant \
+  --force
+```
+
+Olive/ORT preprocessing again failed symbolic shape inference and fell back to
+the original graph. The encoder changed from `2,091` to `2,187` nodes:
+
+| Op | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| `MatMul` | 72 | 48 | -24 |
+| `MatMulInteger` | 0 | 24 | +24 |
+| `DynamicQuantizeLinear` | 77 | 101 | +24 |
+| `Cast` | 92 | 116 | +24 |
+| `Mul` | 235 | 283 | +48 |
+
+Single-run long-WAV screen:
+
+```sh
+.venv/bin/python scripts/benchmark_parakeet_variant.py \
+  olive_dynamic_quant=build/model-variants/nemotron-c56-fixed-shape-olive-dynamic-quant \
+  --runs 1 \
+  --min-mem-available-gb 6 \
+  --child-memory-limit-gb 10 \
+  --set-power-profile balanced \
+  --output build/parakeet-variant-bench/olive-dynamic-quant-screen-001.json
+
+.venv/bin/python scripts/score_benchmark_wer.py \
+  build/parakeet-variant-bench/olive-dynamic-quant-screen-001.json
+```
+
+Result: `load=1.288s`, `real-audio RTF=0.764`, `decode=94.515s`,
+`12 / 313 = 3.83%` rough WER.
+
+Interpretation: rejected. It is slower than the compact ONNX baseline in the
+same experiment family and worsens rough WER.
+
+### ORT Transformer Optimization
+
+```sh
+MPLCONFIGDIR=build/matplotlib-cache \
+  .venv-nemo-export/bin/python scripts/run_olive_onnx_pass.py \
+  build/model-variants/nemotron-c56-fixed-shape-ort-extended \
+  build/model-variants/nemotron-c56-fixed-shape-olive-ort-transformers \
+  --pass-name ort-transformers \
+  --force
+```
+
+Olive skipped both graphs:
+
+```text
+Unsupported model type: None, will skip this pass.
+```
+
+Supported model families listed by Olive included BART, BERT, GPT-2, GPT-NeoX,
+Phi, Qwen3, T5, ViT, conformer, and diffusion components. The current
+Nemotron/Parakeet RNNT package does not present metadata or graph structure
+that this pass recognizes.
+
+### FP32 Projected Model Boundary
+
+FP32 decoder-only peephole is safe:
+
+```sh
+MPLCONFIGDIR=build/matplotlib-cache \
+  .venv-nemo-export/bin/python scripts/run_olive_onnx_pass.py \
+  build/model-variants/nemotron-fp32-projected-fixed-shape \
+  build/model-variants/nemotron-fp32-projected-fixed-shape-olive-peephole-decoder \
+  --pass-name peephole \
+  --component decoder_joint \
+  --force
+```
+
+Decoder graph: `42 -> 26` nodes, size `+992 B`.
+
+FP32 encoder peephole is not safe on this machine. The first attempt failed
+before optimization because ONNX 1.22 refused to load hard-linked external data:
+
+```text
+ValidationError: Data of TensorProto (...) should be stored in .../encoder.onnx.data,
+but it has multiple hard links, indicating a potential hardlink attack.
+```
+
+A private non-hardlinked copy bypassed that loader check, but the process ran
+out of memory while Olive tried to load/optimize the 2.45 GiB external-data
+encoder. This matches Olive's implementation: `OnnxPeepholeOptimizer` calls
+`onnx.load(...)` and materializes external data in memory. Do not run Olive
+peephole/quantization passes over the FP32 projected encoder on this 16 GiB
+machine unless Olive gains a streaming external-data path or the conversion is
+moved to a larger-memory host.
+
+### Olive Upshot
+
+- Useful: `OnnxPeepholeOptimizer` on the compact fixed-shape graph. It is
+  correct, reproducible, removes some remaining graph clutter, improves encoder
+  shape metadata, and gives a small load/RTF improvement when combined with ORT
+  format.
+- Not useful: `OnnxQuantizationPreprocess` for this graph. Default symbolic
+  shape inference fails; the no-symbolic retry is a no-op.
+- Rejected: `OnnxDynamicQuantization` on the compact graph. It quantizes
+  remaining attention matmuls but regresses both speed and rough WER.
+- Not applicable: `OrtTransformersOptimization`; the graph is unsupported.
+- Unsafe locally: FP32 projected encoder Olive passes, due to full external
+  data materialization and observed out-of-memory behavior.
+
+Recommendation: keep the Olive wrapper as an experimental tool and consider
+adding compact peephole before ORT-format conversion in the compact-model
+recipe. Do not make Olive a required dependency of the normal model-tools path.

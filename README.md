@@ -131,6 +131,24 @@ load and serialize an optimized model, add `--emit-optimized --opt-level all`.
 The resulting summary makes ORT fusions visible, such as
 `DynamicQuantizeLinear + MatMulInteger` becoming `DynamicQuantizeMatMul`.
 
+Run a Microsoft Olive ONNX pass experiment against a Wordpipe model directory:
+
+```sh
+MPLCONFIGDIR=build/matplotlib-cache \
+  .venv-nemo-export/bin/python scripts/run_olive_onnx_pass.py \
+  build/model-variants/nemotron-c56-fixed-shape-ort-extended \
+  build/model-variants/nemotron-c56-fixed-shape-olive-peephole \
+  --pass-name peephole \
+  --force
+```
+
+The wrapper keeps Wordpipe's `encoder.onnx`, `decoder_joint.onnx`,
+`config.json`, and `tokenizer.model` layout and writes
+`olive_pass_summary.json` with before/after node, initializer, size, and op
+counts. Olive is not part of the default model-tools extra; see
+[docs/optimization-experiments.md](docs/optimization-experiments.md) for the
+exact Olive setup and the current pass results.
+
 If you run `target/release/wordpipe-parakeet-worker` directly, set
 `ORT_DYLIB_PATH` to the ONNX Runtime library from the local Python wheel. The
 `ort` crate's default runtime can hang while loading this encoder on the current
