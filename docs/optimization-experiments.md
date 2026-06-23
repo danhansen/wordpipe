@@ -1041,3 +1041,46 @@ Conclusion:
 - The remaining accuracy question is why this FP32 NeMo export path differs
   from the sherpa-derived `ffn_fp32` candidate (`11/313` vs `9/313` on this
   rough sample).
+
+## 2026-06-22: Sayboard Harvest Wrapper Results
+
+The remaining Sayboard-derived experiments are now captured by:
+
+```sh
+.venv/bin/python scripts/run_sayboard_harvest_experiments.py --force
+```
+
+The wrapper rebuilds the release worker before benchmarking, because stale
+worker binaries can otherwise hide ABI changes such as removing
+`processed_signal_length` from the encoder inputs.
+
+Fixed-length ABI result:
+
+| Variant | Median real-audio RTF | Median RTF | Median decode seconds | Median wall seconds | Rough WER |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `baseline` | 0.641 | 0.631 | 79.202 | 83.357 | 9 / 313 = 2.88% |
+| `fixed_length` | 0.706 | 0.696 | 87.338 | 88.534 | 10 / 313 = 3.19% |
+
+Result file:
+`build/parakeet-variant-bench/sayboard-fixed-length-001.json`
+
+FP32 current-projection result:
+
+| Variant | Median real-audio RTF | Median RTF | Median decode seconds | Median wall seconds | Rough WER |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `baseline` | 0.642 | 0.632 | 79.330 | 83.529 | 9 / 313 = 2.88% |
+| `fp32_current_projection` | 0.729 | 0.718 | 90.114 | 91.732 | 12 / 313 = 3.83% |
+
+Result file:
+`build/parakeet-variant-bench/sayboard-fp32-current-projection-001.json`
+
+Conclusion:
+
+- Removing `processed_signal_length` is not a win for the current ORT CPU path.
+  It made the graph smaller but produced slower decoding and a small WER
+  regression on this sample.
+- FP32 current K/V projection after quantization is also not a win here. It is
+  slower than the current `ffn_fp32` baseline and inherits/worsens the FP32
+  export accuracy gap.
+- Keep `build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort` as the
+  current best local candidate.

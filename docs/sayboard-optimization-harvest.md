@@ -46,12 +46,12 @@ only within the same benchmark run.
 | Projected K/V cache | `rewrite_projected_kv_cache.py` | Ported and kept | Wordpipe supports projected-cache graphs and runtime cache rolling. Raw-cache FP32 control showed same WER as projected-cache FP32, with projected cache much faster. |
 | Layered projected-cache ABI | `rewrite_projected_kv_cache.py` | Ported and kept | Wordpipe uses per-layer `cache_key_layer_N` / `cache_value_layer_N` inputs and `projected_current_*` outputs, matching Sayboard's layered ABI. |
 | Stacked projected-cache ABI | `rewrite_projected_kv_cache.py` | Not ported | Not useful for Wordpipe today. Layered ABI avoids in-graph cache rolling and matches the Rust runtime. |
-| FP32 current K/V projection after quantized source graph | `build_deployed_model.py` calls projected-cache rewrite with `current_projection="fp32"` | Implemented; benchmark pending | Wordpipe default projected-cache quantized graph uses `dynamic-int8` current projection, but export/transform scripts now accept `--projected-cache-current-projection fp32`. Build and benchmark/WER this variant. |
+| FP32 current K/V projection after quantized source graph | `build_deployed_model.py` calls projected-cache rewrite with `current_projection="fp32"` | Implemented and rejected | `scripts/run_sayboard_harvest_experiments.py` built the variant. Same-run benchmark: baseline `0.642` real-audio RTF, FP32-current projection `0.729`; WER worsened from `9 / 313 = 2.88%` to `12 / 313 = 3.83%`. |
 | Dynamic int8 quantization by operator family | `run_ablation.py` default variants | Partially ported and benchmarked | Wordpipe tested broad quantized baseline, FFN dequantization, pre-encoder output dequantization, conv dequantization, layer slices/even/odd variants, and MatMulNBits. Current best dequantizes FFN blocks back to FP32. |
 | Per-channel dynamic quantization sweeps | `run_ablation.py` `*_pc` variants | Mostly untested in Wordpipe | Worth testing only from a clean FP32 export or targeted re-quantization path. Current sherpa-derived source is already quantized, so per-channel variants are not a simple post-pass on the default artifact. |
 | Dynamic Conv quantization | `README.md` rejected conv variants | Ported and rejected | Wordpipe `scripts/quantize_nemotron_conv_dynamic.py` and conv dequant experiments showed throughput/accuracy tradeoffs were not attractive. |
 | MatMul/Gemm dynamic quantization from fixed raw-cache FP32 | `build_deployed_model.py`, `run_ablation.py` `fullpre_*` variants | Partially tested | Wordpipe's FP32 NeMo raw-cache/projected-cache controls are functional, but the FP32 export path scored worse WER than the sherpa-derived candidate. Do not use as default without explaining the export parity gap. |
-| Remove fixed length input and replace with initializer | `rewrite_fixed_streaming_shapes.py --keep-length-input` default removes `length` | Implemented; benchmark pending | Wordpipe can now build this ABI with `scripts/build_nemotron_fixed_shape_model.py --constant-processed-signal-length`, and the Rust runtime feeds `processed_signal_length` only when the encoder exposes it. Needs same-WAV 3-run benchmark plus WER scoring. |
+| Remove fixed length input and replace with initializer | `rewrite_fixed_streaming_shapes.py --keep-length-input` default removes `length` | Implemented and rejected | `scripts/run_sayboard_harvest_experiments.py` built the ABI with `--constant-processed-signal-length`. Same-run benchmark: baseline `0.641` real-audio RTF, fixed-length `0.706`; WER worsened from `9 / 313 = 2.88%` to `10 / 313 = 3.19%`. |
 | MatMulInteger quantization tail to FP32 `Gemm` cleanup | `rewrite_quantized_matmulinteger_to_gemm.py` | Not directly applicable as an ORT speed optimization | Sayboard used this before TFLite conversion. For ORT it intentionally dequantizes quantized blocks, overlapping with Wordpipe's targeted FFN FP32 dequantization but too broad for the default path. |
 | TFLite/LiteRT conversion and static-RHS BMM to FC rewrite | `scripts/litert_spike/*` | Out of current Linux ORT scope | Useful if Wordpipe later adds a LiteRT backend. Sayboard's own notes show ORT was faster than host LiteRT FP32 for the simple encoder, while Android/device results were the main motivation. |
 | Custom Android ORT with NCHWc/NEON | `build_onnxruntime_android_nchwc.sh` | Not applicable to Linux x86_64 | The analogous Wordpipe path is `scripts/build_onnxruntime_ivybridge.sh`, but current Python/Rust ORT binaries already execute acceptably and custom builds are deferred. |
@@ -59,30 +59,32 @@ only within the same benchmark run.
 | ORT memory pattern / arena / parallel execution toggles | Wordpipe follow-up inspired by runtime tuning | Ported and benchmarked | `scripts/benchmark_parakeet_variant.py` exposes these toggles. Defaults remained best or close enough; explicit parallel execution was worse. |
 | Allocation reduction in Rust runtime | Sayboard Rust bridge and Wordpipe fork changes | Mostly ported | Wordpipe runtime updates caches in place and reuses audio buffers. Prior A/B showed small or noisy gains; no remaining obvious Sayboard allocation trick is unported for the Nemotron path. |
 
+## Experiment Runner
+
+The remaining Sayboard-harvest build/benchmark sequence is codified in one
+wrapper:
+
+```sh
+.venv/bin/python scripts/run_sayboard_harvest_experiments.py --force
+```
+
+The wrapper rebuilds `target/release/wordpipe-parakeet-worker`, builds the model
+variants, runs the long-WAV 3-run median benchmark under GNOME `balanced`, and
+then scores WER. Use `--experiment fixed-length` or
+`--experiment fp32-current-projection` to run one variant.
+
 ## Pending Experiments
 
 These are the remaining ONNX/ORT-relevant Sayboard ideas that are plausible for
 Wordpipe and still lack a same-WAV 3-run median plus WER result:
 
-1. Quantized projected-cache with FP32 current K/V projection.
-   Build with `--projected-cache-current-projection fp32`, apply
-   fixed-shape/ORT extended, then benchmark against the current `ffn_fp32`
-   default and score WER. The export/transform CLI support is implemented;
-   only the heavy run is pending.
-
-2. Fixed `processed_signal_length` initializer.
-   Build with `--constant-processed-signal-length` and benchmark the resulting
-   variant against the current default. The builder/runtime ABI support is
-   implemented; only the heavy run is pending because current machine power is
-   low.
-
-3. Per-channel quantization from a clean FP32 source.
+1. Per-channel quantization from a clean FP32 source.
    Only run this if the FP32 export parity issue is resolved or if we can
    reconstruct a sherpa-equivalent FP32 source. Applying per-channel dynamic
    quantization after the current sherpa-derived int8 export is not the same
    experiment.
 
-4. Export parity investigation.
+2. Export parity investigation.
    The FP32 NeMo raw-cache and projected-cache controls both scored `11 / 313`
    WER while the sherpa-derived `ffn_fp32` candidate scores `9 / 313`. Before
    promoting any FP32-export-derived optimization, compare graph inputs,
