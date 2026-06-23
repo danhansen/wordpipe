@@ -891,3 +891,84 @@ Observations:
   and ORT 1.27 CPU EP. The paper's full encoder-wide export may still behave
   differently on newer CPUs or with a different ORT build, but the practical
   Wordpipe path remains `ffn_fp32`.
+
+## 2026-06-22: FP32 NeMo Export With Projected Cache
+
+The projected-cache rewrite originally targeted the quantized sherpa-style
+encoder graph. To test whether the same cache rewrite was applicable earlier in
+the NeMo export pipeline, `scripts/rewrite_nemotron_projected_kv_cache.py` was
+extended to support native FP32 `MatMul` K/V projection nodes and external-data
+serialization. `scripts/build_nemotron_fixed_shape_model.py` was also updated
+to save/check large external-data models by path so FP32 graphs do not hit
+ONNX's in-memory >2 GB checker path.
+
+Build from the existing interrupted FP32 export artifacts:
+
+```sh
+.venv/bin/python scripts/transform_nemotron_parakeet_export.py \
+  build/model-variants/nemotron-fp32-projected \
+  --no-quantize \
+  --projected-cache \
+  --keep-fp32
+```
+
+Fixed-shape and ORT-optimized build:
+
+```sh
+.venv/bin/python scripts/build_nemotron_fixed_shape_model.py \
+  --source-dir build/model-variants/nemotron-fp32-projected \
+  --output-dir build/model-variants/nemotron-fp32-projected-fixed-shape \
+  --ort-optimize-final extended \
+  --ort-optimize-threads 1
+```
+
+Resulting fixed-shape artifact:
+
+| Artifact | Size |
+| --- | ---: |
+| `encoder.onnx` | 12.2 MiB |
+| `encoder.onnx.data` | 2340.7 MiB |
+| `decoder_joint.onnx` | 93.1 MiB |
+
+Benchmark:
+
+```sh
+.venv/bin/python scripts/benchmark_parakeet_variant.py \
+  ffn_fp32=build/model-variants/nemotron-c56-fixed-shape-ffn-fp32-ort \
+  fp32_projected=build/model-variants/nemotron-fp32-projected-fixed-shape \
+  --runs 3 \
+  --num-threads 2 \
+  --min-mem-available-gb 6 \
+  --child-memory-limit-gb 10 \
+  --set-power-profile balanced \
+  --output build/parakeet-variant-bench/fp32-projected-001.json
+```
+
+The system reported `BAT0/status=Discharging` for this run even though GNOME's
+power profile was pinned to `balanced`, so compare it as a same-run A/B result
+rather than a clean AC-powered absolute benchmark.
+
+WER scoring:
+
+```sh
+.venv/bin/python scripts/score_benchmark_wer.py \
+  build/parakeet-variant-bench/fp32-projected-001.json
+```
+
+Results:
+
+| Variant | Median real-audio RTF | Median RTF | Median decode seconds | Median wall seconds | Rough WER |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `ffn_fp32` | 0.666 | 0.656 | 82.289 | 87.045 | 9 / 313 = 2.88% |
+| `fp32_projected` | 0.590 | 0.582 | 73.013 | 76.506 | 11 / 313 = 3.51% |
+
+Observations:
+
+- The FP32 NeMo export plus projected cache is throughput-positive in this
+  A/B: median real-audio RTF improved by about 11.4% versus `ffn_fp32`.
+- It fails the WER gate. The transcript changed consistently across all three
+  runs, including "had seemed" -> "had seem", raising rough WER from 9/313 to
+  11/313.
+- Do not promote this as the default runtime candidate. The useful harvest is
+  the hardened projected-cache/export tooling and the reusable
+  `scripts/score_benchmark_wer.py` WER check.

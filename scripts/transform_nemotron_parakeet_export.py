@@ -136,7 +136,12 @@ def main() -> None:
     final_encoder = model_dir / "encoder.onnx"
     if args.projected_cache:
         print("[transform] rewriting encoder with projected cache", flush=True)
-        rewrite_projected_cache(encoder_for_projected, final_encoder, "dynamic-int8")
+        rewrite_projected_cache(
+            encoder_for_projected,
+            final_encoder,
+            "dynamic-int8" if args.quantize else "fp32",
+            external_data=not args.quantize,
+        )
     else:
         final_encoder.write_bytes(encoder_for_projected.read_bytes())
 

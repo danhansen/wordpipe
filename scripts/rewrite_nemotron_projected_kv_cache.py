@@ -136,8 +136,20 @@ def projection_node_name(layer: int, kind: str) -> str:
     return f"{layer_prefix(layer)}/linear_{kind}/MatMul_quant"
 
 
+def find_projection_node(model: onnx.ModelProto, layer: int, kind: str) -> onnx.NodeProto:
+    candidates = [
+        projection_node_name(layer, kind),
+        f"{layer_prefix(layer)}/linear_{kind}/MatMul",
+    ]
+    for name in candidates:
+        for node in model.graph.node:
+            if node.name == name:
+                return node
+    raise SystemExit(f"Missing expected K/V projection node for layer={layer} kind={kind}: {candidates}")
+
+
 def layer_from_projection_node(node_name: str) -> int:
-    match = re.search(r"/encoder/layers\.(\d+)/self_attn/linear_[kv]/MatMul_quant$", node_name)
+    match = re.search(r"/encoder/layers\.(\d+)/self_attn/linear_[kv]/MatMul(?:_quant)?$", node_name)
     if not match:
         raise SystemExit(f"Cannot infer layer from projection node name: {node_name}")
     return int(match.group(1))
@@ -146,9 +158,11 @@ def layer_from_projection_node(node_name: str) -> int:
 def find_current_source(model: onnx.ModelProto, layer: int, projection_input: str) -> str:
     producers = producer_by_output(model)
     quantize = producers.get(projection_input)
-    if quantize is None or quantize.op_type != "DynamicQuantizeLinear":
-        raise SystemExit(f"Layer {layer} K/V projection input is not DynamicQuantizeLinear output.")
-    concat = producers.get(quantize.input[0])
+    if quantize is not None and quantize.op_type == "DynamicQuantizeLinear":
+        concat_input = quantize.input[0]
+    else:
+        concat_input = projection_input
+    concat = producers.get(concat_input)
     if concat is None or concat.op_type != "Concat" or len(concat.input) < 2:
         raise SystemExit(f"Layer {layer} K/V source is not the expected raw-cache/current Concat.")
     return concat.input[1]
@@ -156,6 +170,12 @@ def find_current_source(model: onnx.ModelProto, layer: int, projection_input: st
 
 def projection_replacement(model: onnx.ModelProto, node: onnx.NodeProto) -> tuple[str, str, str, str]:
     """Return quantized weight, weight scale, weight zero point, final float output."""
+    if node.op_type == "MatMul":
+        return "", "", "", node.output[0]
+    if node.op_type == "MatMulIntegerToFloat":
+        if len(node.input) < 6:
+            raise SystemExit(f"Unexpected MatMulIntegerToFloat input count for {node.name}")
+        return node.input[1], node.input[3], node.input[5], node.output[0]
     if node.op_type != "MatMulInteger":
         raise SystemExit(f"Unsupported K/V projection node type for {node.name}: {node.op_type}")
 
@@ -167,6 +187,10 @@ def projection_replacement(model: onnx.ModelProto, node: onnx.NodeProto) -> tupl
 
 
 def obsolete_projection_tail_names(model: onnx.ModelProto, node: onnx.NodeProto) -> set[str]:
+    if node.op_type == "MatMul":
+        return {node.name}
+    if node.op_type == "MatMulIntegerToFloat":
+        return {node.name}
     if node.op_type != "MatMulInteger":
         raise SystemExit(f"Unsupported K/V projection node type for {node.name}: {node.op_type}")
 
@@ -180,8 +204,13 @@ def obsolete_projection_tail_names(model: onnx.ModelProto, node: onnx.NodeProto)
 
 
 def dequantized_weight_initializer(model: onnx.ModelProto, node: onnx.NodeProto, name: str) -> str:
-    quantized_name, scale_name, zero_point_name, _ = projection_replacement(model, node)
     initializers = {initializer.name: initializer for initializer in model.graph.initializer}
+    if node.op_type == "MatMul":
+        weight_name = node.input[1]
+        if weight_name not in initializers:
+            raise SystemExit(f"Expected static FP32 weight initializer for {node.name}")
+        return weight_name
+    quantized_name, scale_name, zero_point_name, _ = projection_replacement(model, node)
     try:
         quantized = numpy_helper.to_array(initializers[quantized_name]).astype(np.float32)
         scale = numpy_helper.to_array(initializers[scale_name]).astype(np.float32)
@@ -203,6 +232,9 @@ def current_projection_node(
     if current_projection == "fp32":
         weight_name = dequantized_weight_initializer(model, original_node, f"{node_name}_weight_fp32")
         return helper.make_node("MatMul", [current_source, weight_name], [output_name], name=node_name)
+
+    if original_node.op_type == "MatMul":
+        raise SystemExit("dynamic-int8 current projection requires a quantized K/V source graph.")
 
     quantized_weight, weight_scale, weight_zero_point, _ = projection_replacement(model, original_node)
     return helper.make_node(
@@ -248,18 +280,34 @@ def prune_unused_initializers(model: onnx.ModelProto) -> None:
     model.graph.initializer.extend(kept)
 
 
-def rewrite_model(input_path: Path, output_path: Path, current_projection: str) -> None:
+def save_model(model: onnx.ModelProto, output_path: Path, external_data: bool) -> None:
+    if external_data:
+        (output_path.parent / f"{output_path.name}.data").unlink(missing_ok=True)
+        onnx.save_model(
+            model,
+            output_path,
+            save_as_external_data=True,
+            all_tensors_to_one_file=True,
+            location=output_path.name + ".data",
+            size_threshold=1024,
+            convert_attribute=False,
+        )
+    else:
+        onnx.save(model, output_path)
+
+
+def rewrite_model(input_path: Path, output_path: Path, current_projection: str, external_data: bool = False) -> None:
     model = onnx.load(input_path)
     spec = infer_spec(model)
     if current_projection == "dynamic-int8" and not any(opset.domain == "com.microsoft" for opset in model.opset_import):
         model.opset_import.append(helper.make_operatorsetid("com.microsoft", 1))
 
-    projection_names = {
-        projection_node_name(layer, kind)
-        for layer in range(spec.num_layers)
-        for kind in ("k", "v")
-    }
-    projection_nodes = {name: find_node(model, name) for name in projection_names}
+    projection_nodes: dict[str, onnx.NodeProto] = {}
+    for layer in range(spec.num_layers):
+        for kind in ("k", "v"):
+            node = find_projection_node(model, layer, kind)
+            projection_nodes[node.name] = node
+    projection_names = set(projection_nodes)
     remove_names: set[str] = set()
     for node in projection_nodes.values():
         remove_names.update(obsolete_projection_tail_names(model, node))
@@ -321,11 +369,12 @@ def rewrite_model(input_path: Path, output_path: Path, current_projection: str) 
     prune_unused_initializers(model)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    onnx.checker.check_model(model)
-    onnx.save(model, output_path)
+    save_model(model, output_path, external_data)
+    onnx.checker.check_model(str(output_path))
     print(
         f"[rewrite] wrote {output_path} layers={spec.num_layers} cacheLen={spec.cache_len} "
-        f"hidden={spec.hidden_size} currentProjection={current_projection} nodes={len(model.graph.node)}"
+        f"hidden={spec.hidden_size} currentProjection={current_projection} "
+        f"externalData={external_data} nodes={len(model.graph.node)}"
     )
 
 
@@ -339,8 +388,9 @@ def main() -> None:
         default="dynamic-int8",
         help="Projection used for the current chunk before concatenating with projected cache.",
     )
+    parser.add_argument("--external-data", action="store_true", help="Save tensor data beside the ONNX protobuf.")
     args = parser.parse_args()
-    rewrite_model(args.input, args.output, args.current_projection)
+    rewrite_model(args.input, args.output, args.current_projection, args.external_data)
 
 
 if __name__ == "__main__":

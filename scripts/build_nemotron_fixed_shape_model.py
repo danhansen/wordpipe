@@ -17,6 +17,7 @@ from onnx import numpy_helper
 
 ORT_OPTIMIZATION_LEVELS = {"disable", "basic", "extended", "all"}
 METADATA_PREFIX = "wordpipe.fixed_streaming."
+EXTERNAL_DATA_THRESHOLD_BYTES = 1500 * 1024 * 1024
 
 
 def hardlink_or_copy(src: Path, dst: Path) -> None:
@@ -209,13 +210,46 @@ def ort_optimize_to_file(input_path: Path, output_path: Path, level: str, thread
     onnx.checker.check_model(str(output_path))
 
 
+def initializer_bytes(model: onnx.ModelProto) -> int:
+    total = 0
+    for initializer in model.graph.initializer:
+        if initializer.raw_data:
+            total += len(initializer.raw_data)
+        elif initializer.HasField("data_location") and initializer.data_location == onnx.TensorProto.EXTERNAL:
+            for item in initializer.external_data:
+                if item.key == "length":
+                    try:
+                        total += int(item.value)
+                    except ValueError:
+                        pass
+        else:
+            total += initializer.ByteSize()
+    return total
+
+
+def save_model(model: onnx.ModelProto, output_path: Path) -> None:
+    if initializer_bytes(model) > EXTERNAL_DATA_THRESHOLD_BYTES:
+        (output_path.parent / f"{output_path.name}.data").unlink(missing_ok=True)
+        onnx.save_model(
+            model,
+            output_path,
+            save_as_external_data=True,
+            all_tensors_to_one_file=True,
+            location=output_path.name + ".data",
+            size_threshold=1024,
+            convert_attribute=False,
+        )
+    else:
+        onnx.save(model, output_path)
+
+
 def build_variant(source_dir: Path, output_dir: Path, args: argparse.Namespace) -> None:
     source_encoder = source_dir / "encoder.onnx"
     if not source_encoder.exists():
         raise SystemExit(f"Missing source encoder: {source_encoder}")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    model = onnx.load(source_encoder, load_external_data=False)
+    model = onnx.load(source_encoder, load_external_data=True)
     set_fixed_shapes(
         model,
         input_frames=args.input_frames,
@@ -233,8 +267,8 @@ def build_variant(source_dir: Path, output_dir: Path, args: argparse.Namespace) 
     set_metadata(model, args)
 
     fixed_encoder = output_dir / "encoder.onnx"
-    onnx.checker.check_model(model)
-    onnx.save(model, fixed_encoder)
+    save_model(model, fixed_encoder)
+    onnx.checker.check_model(str(fixed_encoder))
 
     if args.ort_optimize_final:
         optimized_encoder = output_dir / "encoder.ort_optimized.onnx"
