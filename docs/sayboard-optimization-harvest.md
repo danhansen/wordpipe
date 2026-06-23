@@ -51,7 +51,7 @@ only within the same benchmark run.
 | Per-channel dynamic quantization sweeps | `run_ablation.py` `*_pc` variants | Mostly untested in Wordpipe | Worth testing only from a clean FP32 export or targeted re-quantization path. Current sherpa-derived source is already quantized, so per-channel variants are not a simple post-pass on the default artifact. |
 | Dynamic Conv quantization | `README.md` rejected conv variants | Ported and rejected | Wordpipe `scripts/quantize_nemotron_conv_dynamic.py` and conv dequant experiments showed throughput/accuracy tradeoffs were not attractive. |
 | MatMul/Gemm dynamic quantization from fixed raw-cache FP32 | `build_deployed_model.py`, `run_ablation.py` `fullpre_*` variants | Partially tested | Wordpipe's FP32 NeMo raw-cache/projected-cache controls are functional, but the FP32 export path scored worse WER than the sherpa-derived candidate. Do not use as default without explaining the export parity gap. |
-| Remove fixed length input and replace with initializer | `rewrite_fixed_streaming_shapes.py --keep-length-input` default removes `length` | Pending experiment | Wordpipe fixes `processed_signal_length` shape but still feeds it as an input. This may enable extra folding but requires Rust runtime input detection before benchmarking. |
+| Remove fixed length input and replace with initializer | `rewrite_fixed_streaming_shapes.py --keep-length-input` default removes `length` | Implemented; benchmark pending | Wordpipe can now build this ABI with `scripts/build_nemotron_fixed_shape_model.py --constant-processed-signal-length`, and the Rust runtime feeds `processed_signal_length` only when the encoder exposes it. Needs same-WAV 3-run benchmark plus WER scoring. |
 | MatMulInteger quantization tail to FP32 `Gemm` cleanup | `rewrite_quantized_matmulinteger_to_gemm.py` | Not directly applicable as an ORT speed optimization | Sayboard used this before TFLite conversion. For ORT it intentionally dequantizes quantized blocks, overlapping with Wordpipe's targeted FFN FP32 dequantization but too broad for the default path. |
 | TFLite/LiteRT conversion and static-RHS BMM to FC rewrite | `scripts/litert_spike/*` | Out of current Linux ORT scope | Useful if Wordpipe later adds a LiteRT backend. Sayboard's own notes show ORT was faster than host LiteRT FP32 for the simple encoder, while Android/device results were the main motivation. |
 | Custom Android ORT with NCHWc/NEON | `build_onnxruntime_android_nchwc.sh` | Not applicable to Linux x86_64 | The analogous Wordpipe path is `scripts/build_onnxruntime_ivybridge.sh`, but current Python/Rust ORT binaries already execute acceptably and custom builds are deferred. |
@@ -70,11 +70,10 @@ Wordpipe and still lack a same-WAV 3-run median plus WER result:
    against the current `ffn_fp32` default and score WER.
 
 2. Fixed `processed_signal_length` initializer.
-   Extend `scripts/build_nemotron_fixed_shape_model.py` with an option to
-   remove `processed_signal_length` from graph inputs and add a constant
-   initializer. Update `third_party/parakeet-rs/src/model_nemotron.rs` to only
-   feed the length tensor when the encoder exposes that input. Benchmark the
-   resulting variant against the current default.
+   Build with `--constant-processed-signal-length` and benchmark the resulting
+   variant against the current default. The builder/runtime ABI support is
+   implemented; only the heavy run is pending because current machine power is
+   low.
 
 3. Per-channel quantization from a clean FP32 source.
    Only run this if the FP32 export parity issue is resolved or if we can

@@ -124,6 +124,33 @@ def replace_static_shape_nodes(model: onnx.ModelProto) -> int:
     return replaced
 
 
+def add_or_replace_initializer(model: onnx.ModelProto, name: str, value: np.ndarray) -> None:
+    kept = [initializer for initializer in model.graph.initializer if initializer.name != name]
+    del model.graph.initializer[:]
+    model.graph.initializer.extend(kept)
+    model.graph.initializer.append(numpy_helper.from_array(value, name))
+
+
+def remove_graph_input(model: onnx.ModelProto, name: str) -> bool:
+    kept = [value_info for value_info in model.graph.input if value_info.name != name]
+    if len(kept) == len(model.graph.input):
+        return False
+    del model.graph.input[:]
+    model.graph.input.extend(kept)
+    return True
+
+
+def fix_processed_signal_length(model: onnx.ModelProto, input_frames: int) -> bool:
+    removed = remove_graph_input(model, "processed_signal_length")
+    if removed:
+        add_or_replace_initializer(
+            model,
+            "processed_signal_length",
+            np.asarray([input_frames], dtype=np.int64),
+        )
+    return removed
+
+
 def set_fixed_shapes(
     model: onnx.ModelProto,
     *,
@@ -177,6 +204,7 @@ def update_config(source_dir: Path, output_dir: Path, args: argparse.Namespace) 
         "conv_context": args.conv_context,
         "replaced_shape_nodes": args.replaced_shape_nodes,
         "resolved_symbolic_dims": args.resolved_symbolic_dims,
+        "constant_processed_signal_length": args.constant_processed_signal_length_applied,
     }
     config["ort_optimized_final_encoder"] = args.ort_optimize_final
     (output_dir / "config.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
@@ -186,7 +214,14 @@ def set_metadata(model: onnx.ModelProto, args: argparse.Namespace) -> None:
     kept = [item for item in model.metadata_props if not item.key.startswith(METADATA_PREFIX)]
     del model.metadata_props[:]
     model.metadata_props.extend(kept)
-    for key in ("input_frames", "output_frames", "cache_len", "hidden_dim", "conv_context"):
+    for key in (
+        "input_frames",
+        "output_frames",
+        "cache_len",
+        "hidden_dim",
+        "conv_context",
+        "constant_processed_signal_length_applied",
+    ):
         item = model.metadata_props.add()
         item.key = f"{METADATA_PREFIX}{key}"
         item.value = str(getattr(args, key))
@@ -259,6 +294,11 @@ def build_variant(source_dir: Path, output_dir: Path, args: argparse.Namespace) 
         hidden_dim=args.hidden_dim,
         conv_context=args.conv_context,
     )
+    if args.constant_processed_signal_length:
+        args.constant_processed_signal_length_applied = fix_processed_signal_length(
+            model,
+            args.input_frames,
+        )
     args.resolved_symbolic_dims = resolve_symbolic_shapes(
         model,
         {"batch": 1, "time": args.input_frames, "current_frames": args.output_frames},
@@ -289,7 +329,9 @@ def build_variant(source_dir: Path, output_dir: Path, args: argparse.Namespace) 
     print(
         f"[fixed-shape] wrote {output_dir} inputFrames={args.input_frames} "
         f"outputFrames={args.output_frames} resolvedSymbolicDims={args.resolved_symbolic_dims} "
-        f"replacedShapeNodes={args.replaced_shape_nodes} ortFinal={args.ort_optimize_final}"
+        f"replacedShapeNodes={args.replaced_shape_nodes} "
+        f"constantProcessedSignalLength={args.constant_processed_signal_length_applied} "
+        f"ortFinal={args.ort_optimize_final}"
     )
     for path in sorted(output_dir.iterdir()):
         if path.is_file():
@@ -306,11 +348,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cache-len", type=int, default=56)
     parser.add_argument("--hidden-dim", type=int, default=1024)
     parser.add_argument("--conv-context", type=int, default=8)
+    parser.add_argument(
+        "--constant-processed-signal-length",
+        action="store_true",
+        help=(
+            "Remove processed_signal_length from graph inputs and replace it "
+            "with a fixed int64 initializer equal to --input-frames."
+        ),
+    )
     parser.add_argument("--ort-optimize-final", choices=sorted(ORT_OPTIMIZATION_LEVELS))
     parser.add_argument("--ort-optimize-threads", type=int, default=1)
     args = parser.parse_args()
     args.resolved_symbolic_dims = 0
     args.replaced_shape_nodes = 0
+    args.constant_processed_signal_length_applied = False
     return args
 
 

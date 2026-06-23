@@ -83,6 +83,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hidden-dim", type=int, default=1024)
     parser.add_argument("--conv-context", type=int, default=8)
     parser.add_argument(
+        "--constant-processed-signal-length",
+        action="store_true",
+        help=(
+            "During the fixed-shape phase, replace processed_signal_length "
+            "with a constant initializer. Experimental; benchmark before use."
+        ),
+    )
+    parser.add_argument(
         "--ort-optimize-final",
         choices=("disable", "basic", "extended", "all"),
         default="extended",
@@ -199,6 +207,7 @@ def main() -> None:
                 str(args.hidden_dim),
                 "--conv-context",
                 str(args.conv_context),
+                *(["--constant-processed-signal-length"] if args.constant_processed_signal_length else []),
                 "--ort-optimize-final",
                 args.ort_optimize_final,
                 "--ort-optimize-threads",
