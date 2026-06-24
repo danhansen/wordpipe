@@ -285,9 +285,10 @@ class WordpipeApp:
         if self._controller is not None:
             self._controller.close()
             self._controller = None
-            self._config = None
             self._set_button_state(False)
             self._set_button_sensitive(False)
+        if self._controller_config_factory is not None:
+            self._config = None
         self._setup_error = None
         self._refresh_profile_state()
         if self._selected_profile_installed():

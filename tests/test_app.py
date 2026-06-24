@@ -164,6 +164,47 @@ class AppControllerStateTests(unittest.TestCase):
         self.assertEqual(config.model_profile, "compact")
         self.assertEqual(app._selected_profile, "compact")
 
+    def test_profile_change_rebuilds_config_when_no_controller_is_open(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            model_root = root / "models"
+            fast_runtime_dir = profile_runtime_dir(model_root, "fast")
+            compact_runtime_dir = profile_runtime_dir(model_root, "compact")
+            compact_runtime_dir.mkdir(parents=True)
+            (compact_runtime_dir / "tokenizer.model").write_text("", encoding="utf-8")
+            (compact_runtime_dir / "encoder.ort").write_text("", encoding="utf-8")
+            (compact_runtime_dir / "decoder_joint.ort").write_text("", encoding="utf-8")
+
+            def config_for_profile(profile: str) -> DaemonConfig:
+                return DaemonConfig(
+                    model_dir=profile_runtime_dir(model_root, profile),
+                    dry_run_insertion=True,
+                )
+
+            app = WordpipeApp(
+                DaemonConfig(model_dir=fast_runtime_dir, dry_run_insertion=True),
+                model_setup=AppModelSetup(
+                    model_root=model_root,
+                    model_profile="fast",
+                    nemo_source="nvidia/example",
+                ),
+                controller_config_factory=config_for_profile,
+            )
+            app._glib = FakeGLib()
+            app._status_label = FakeLabel()
+            app._profile_status_label = FakeLabel()
+            app._toggle_button = FakeButton()
+            app._install_button = FakeButton()
+
+            with mock.patch("wordpipe.app.DictationController") as controller_cls:
+                controller_cls.return_value.open.return_value = None
+
+                app._profile_changed(FakeDropdown(1), None)
+
+        self.assertEqual(app._selected_profile, "compact")
+        controller_config = controller_cls.call_args.args[0]
+        self.assertEqual(controller_config.model_dir, compact_runtime_dir)
+
     def test_install_complete_does_not_report_ready_when_controller_open_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
