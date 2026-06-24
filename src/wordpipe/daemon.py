@@ -205,6 +205,14 @@ class AsrProcess:
                 continue
             yield json.loads(line)
 
+    def stderr_lines(self) -> Iterator[str]:
+        if self._proc is None or self._proc.stderr is None:
+            raise RuntimeError("ASR process is not running")
+        for line in self._proc.stderr:
+            text = line.rstrip()
+            if text:
+                yield text
+
     def close(self) -> None:
         if self._proc is None:
             return
@@ -252,6 +260,7 @@ class DictationController:
         self._transcript = transcript if transcript is not None else StderrTranscriptSink()
         self._asr = AsrProcess(config)
         self._reader: threading.Thread | None = None
+        self._stderr_reader: threading.Thread | None = None
         self._done = threading.Event()
         self._lock = threading.Lock()
         self._opened = False
@@ -275,6 +284,12 @@ class DictationController:
         self._asr.start()
         self._reader = threading.Thread(target=self._read_events, name="wordpipe-events", daemon=True)
         self._reader.start()
+        self._stderr_reader = threading.Thread(
+            target=self._read_stderr,
+            name="wordpipe-stderr",
+            daemon=True,
+        )
+        self._stderr_reader.start()
         self._opened = True
 
     def start_dictation(self) -> None:
@@ -318,6 +333,14 @@ class DictationController:
             self._transcript.error(f"{type(exc).__name__}: {exc}")
             self._exit_code = 1
             self._done.set()
+
+    def _read_stderr(self) -> None:
+        try:
+            for line in self._asr.stderr_lines():
+                self._transcript.error(f"ASR worker stderr: {line}")
+        except Exception as exc:  # noqa: BLE001 - stderr drain must not kill dictation.
+            if not self._done.is_set():
+                self._transcript.error(f"ASR stderr reader failed: {type(exc).__name__}: {exc}")
 
     def _handle_event(self, item: dict[str, object]) -> None:
         kind = item.get("event")

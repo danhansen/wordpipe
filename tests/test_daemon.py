@@ -62,6 +62,12 @@ class FakeEvent:
         return
 
 
+class FakeAsrStderr:
+    def stderr_lines(self):
+        yield "first warning"
+        yield "second warning"
+
+
 class DaemonTests(unittest.TestCase):
     def test_commit_formatter_strips_and_adds_space(self) -> None:
         self.assertEqual(format_committed_text(" hello "), "hello ")
@@ -97,6 +103,20 @@ class DaemonTests(unittest.TestCase):
         self.assertIn("wordpipe", command)
         self.assertIn("asr-worker", command)
         self.assertIn("--provider", command)
+
+    def test_stderr_reader_surfaces_worker_stderr(self) -> None:
+        transcript = FakeTranscript()
+        controller = DictationController(
+            DaemonConfig(model_dir=Path("/models/parakeet")),
+            FakeKeyboard(),
+            transcript,
+        )
+        controller._asr = FakeAsrStderr()  # type: ignore[assignment]
+
+        controller._read_stderr()
+
+        self.assertIn(("error", "ASR worker stderr: first warning"), transcript.events)
+        self.assertIn(("error", "ASR worker stderr: second warning"), transcript.events)
 
     def test_signal_hotkey_pid_file_is_written_after_controller_opens(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
