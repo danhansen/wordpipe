@@ -120,6 +120,28 @@ class FakeAsrStderr:
         yield "second warning"
 
 
+class ReusableAsr:
+    def __init__(self) -> None:
+        self.starts = 0
+        self.closes = 0
+        self.commands: list[str] = []
+
+    def start(self) -> None:
+        self.starts += 1
+
+    def send(self, command: str) -> None:
+        self.commands.append(command)
+
+    def events(self):
+        return iter(())
+
+    def stderr_lines(self):
+        return iter(())
+
+    def close(self) -> None:
+        self.closes += 1
+
+
 class DaemonTests(unittest.TestCase):
     def test_commit_formatter_strips_and_adds_space(self) -> None:
         self.assertEqual(format_committed_text(" hello "), "hello ")
@@ -220,6 +242,25 @@ class DaemonTests(unittest.TestCase):
             order,
             ["asr-close", "stdout-join", "stderr-join", "transcript-close"],
         )
+
+    def test_controller_can_reopen_after_close(self) -> None:
+        asr = ReusableAsr()
+        controller = DictationController(
+            DaemonConfig(model_dir=Path("/models/parakeet")),
+            FakeKeyboard(),
+            FakeTranscript(),
+        )
+        controller._asr = asr  # type: ignore[assignment]
+
+        controller.open()
+        controller.close()
+        controller.start_dictation()
+
+        self.assertEqual(asr.starts, 2)
+        self.assertEqual(asr.closes, 1)
+        self.assertEqual(asr.commands, ["start"])
+        self.assertTrue(controller._opened)
+        self.assertFalse(controller._done.is_set())
 
     def test_open_cleans_up_transcript_and_keyboard_when_asr_start_fails(self) -> None:
         order: list[str] = []

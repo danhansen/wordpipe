@@ -294,6 +294,8 @@ class DictationController:
     def open(self) -> None:
         if self._opened:
             return
+        self._done.clear()
+        self._exit_code = 0
         transcript_opened = False
         keyboard_opened = False
         try:
@@ -352,7 +354,10 @@ class DictationController:
             self._transcript.close()
             with self._lock:
                 self._listening = False
+                self._opened = False
             self._done.set()
+            self._reader = None
+            self._stderr_reader = None
 
     def _cleanup_failed_open(self, *, keyboard_opened: bool, transcript_opened: bool) -> None:
         try:
@@ -365,6 +370,9 @@ class DictationController:
                 self._transcript.close()
             with self._lock:
                 self._listening = False
+                self._opened = False
+            self._reader = None
+            self._stderr_reader = None
 
     def _join_reader_threads(self) -> None:
         current = threading.current_thread()
