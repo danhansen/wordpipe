@@ -42,14 +42,11 @@ class ProbeResult:
     @property
     def usable(self) -> bool:
         remote = self.portals.get(REMOTE_DESKTOP_IFACE)
-        shortcuts = self.portals.get(GLOBAL_SHORTCUTS_IFACE)
         return bool(
             self.session_type == "wayland"
             and self.python_modules.get("gi", False)
             and remote
             and remote.available
-            and shortcuts
-            and shortcuts.available
         )
 
     def to_dict(self) -> dict[str, object]:

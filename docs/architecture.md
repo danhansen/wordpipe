@@ -231,11 +231,13 @@ installed on `PATH`; they are not a complete distro package.
      live-validated
 
 5. GNOME hotkey and status
-   - global shortcut or shell extension trigger
+   - GNOME custom shortcut plus signal-triggered daemon, GlobalShortcuts portal,
+     or shell extension trigger
    - daemon session state
    - visible listening/error state
-   - status: GlobalShortcuts daemon path implemented; GTK/libadwaita app window
-     provides visual status; top-bar indicator not implemented
+   - status: signal-hotkey daemon and GlobalShortcuts daemon paths implemented;
+     GTK/libadwaita app window provides visual status; top-bar indicator not
+     implemented
 
 6. First integrated dictation
    - hotkey controls dictation

@@ -29,6 +29,20 @@ class ProbeTests(unittest.TestCase):
     def test_probe_is_usable_on_wayland_with_gi_and_required_portals(self) -> None:
         self.assertTrue(_probe_result().usable)
 
+    def test_probe_does_not_require_global_shortcuts_for_signal_hotkey_path(self) -> None:
+        result = _probe_result()
+        portals = dict(result.portals)
+        portals[GLOBAL_SHORTCUTS_IFACE] = PortalInterface(GLOBAL_SHORTCUTS_IFACE, False)
+        result = ProbeResult(
+            session_type=result.session_type,
+            gnome_shell=result.gnome_shell,
+            commands=result.commands,
+            python_modules=result.python_modules,
+            portals=portals,
+        )
+
+        self.assertTrue(result.usable)
+
     def test_probe_is_not_usable_outside_wayland(self) -> None:
         self.assertFalse(_probe_result(session_type="x11").usable)
         self.assertFalse(_probe_result(session_type=None).usable)
