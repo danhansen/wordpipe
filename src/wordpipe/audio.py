@@ -33,14 +33,14 @@ def list_input_devices() -> list[InputDeviceInfo]:
 
     devices = sd.query_devices()
     hostapis = sd.query_hostapis()
-    default_input = sd.default.device[0] if isinstance(sd.default.device, list | tuple) else None
+    default_input = _default_input_device_index(sd.default.device)
     results: list[InputDeviceInfo] = []
     for index, raw in enumerate(devices):
         max_inputs = int(raw.get("max_input_channels", 0))
         if max_inputs <= 0:
             continue
         hostapi_index = int(raw.get("hostapi", -1))
-        hostapi = str(hostapis[hostapi_index]["name"]) if hostapi_index >= 0 else "unknown"
+        hostapi = _hostapi_name(hostapis, hostapi_index)
         results.append(
             InputDeviceInfo(
                 index=index,
@@ -56,7 +56,11 @@ def list_input_devices() -> list[InputDeviceInfo]:
 
 def render_input_devices() -> str:
     lines = ["Input devices:"]
-    for device in list_input_devices():
+    devices = list_input_devices()
+    if not devices:
+        lines.append("  none found")
+        return "\n".join(lines)
+    for device in devices:
         marker = "*" if device.is_default else " "
         lines.append(
             f"{marker} {device.index:>3} {device.name} "
@@ -64,6 +68,24 @@ def render_input_devices() -> str:
             f"default_sr={device.default_samplerate:g})"
         )
     return "\n".join(lines)
+
+
+def _default_input_device_index(value: object) -> int | None:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, list | tuple) and value:
+        first = value[0]
+        return first if isinstance(first, int) else None
+    return None
+
+
+def _hostapi_name(hostapis: object, index: int) -> str:
+    if index < 0:
+        return "unknown"
+    try:
+        return str(hostapis[index]["name"])  # type: ignore[index]
+    except (IndexError, KeyError, TypeError):
+        return "unknown"
 
 
 def describe_input_device(device: AudioDevice | None) -> dict[str, Any]:
