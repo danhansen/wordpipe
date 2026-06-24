@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import sys
 import tempfile
 import types
@@ -118,6 +119,21 @@ class ModelDiscoveryTests(unittest.TestCase):
 
             with self.assertRaisesRegex(RuntimeError, "Rust parakeet runtime"):
                 _create_recognizer(AsrWorkerConfig(model_dir=model_dir))
+
+    def test_asr_worker_config_rejects_invalid_runtime_values(self) -> None:
+        cases = [
+            ({"num_threads": 0}, "num_threads must be positive"),
+            ({"sample_rate": 0}, "sample_rate must be positive"),
+            ({"feature_dim": 0}, "feature_dim must be positive"),
+            ({"partial_interval_seconds": 0.0}, "partial_interval_seconds must be positive"),
+            ({"audio_chunk_seconds": 0.0}, "audio_chunk_seconds must be positive"),
+            ({"queue_seconds": 0.0}, "queue_seconds must be positive"),
+            ({"stats_interval_seconds": math.inf}, "stats_interval_seconds must be positive"),
+        ]
+        for overrides, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    AsrWorkerConfig(model_dir=Path("/models/sherpa"), **overrides)
 
 
 if __name__ == "__main__":

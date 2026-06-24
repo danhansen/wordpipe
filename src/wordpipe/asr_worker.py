@@ -37,6 +37,23 @@ class AsrWorkerConfig:
     endpoint_rule2_min_trailing_silence: float = 0.35
     endpoint_rule3_min_utterance_length: float = 20.0
 
+    def __post_init__(self) -> None:
+        if self.num_threads <= 0:
+            raise ValueError("num_threads must be positive")
+        if self.sample_rate <= 0:
+            raise ValueError("sample_rate must be positive")
+        if self.feature_dim <= 0:
+            raise ValueError("feature_dim must be positive")
+        _require_positive_finite(self.partial_interval_seconds, "partial_interval_seconds")
+        _require_positive_finite(self.audio_chunk_seconds, "audio_chunk_seconds")
+        _require_positive_finite(self.queue_seconds, "queue_seconds")
+        _require_positive_finite(self.stats_interval_seconds, "stats_interval_seconds")
+
+
+def _require_positive_finite(value: float, name: str) -> None:
+    if not math.isfinite(value) or value <= 0.0:
+        raise ValueError(f"{name} must be positive")
+
 
 @dataclass(frozen=True)
 class ModelLayout:
