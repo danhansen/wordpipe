@@ -12,6 +12,7 @@ from wordpipe.models import (
     _progress_reporter,
     build_model_profile,
     build_profile_command,
+    download_nemo_source,
     install_built_profile,
     make_download_plan,
     model_file_url,
@@ -142,6 +143,37 @@ class ModelDownloadTests(unittest.TestCase):
                 )
 
             self.assertTrue(build_dir.exists())
+
+    def test_download_nemo_source_reports_cached_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "source.nemo"
+            source.write_text("cached", encoding="utf-8")
+            events: list[str] = []
+
+            result = download_nemo_source(str(source), progress=events.append)
+
+        self.assertEqual(result, source)
+        self.assertEqual(events, [f"Using local source model: {source}"])
+
+    def test_build_model_profile_reports_command_and_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            events: list[str] = []
+
+            with mock.patch("wordpipe.models._run_with_progress") as run:
+                runtime_dir = build_model_profile(
+                    source=root / "source.nemo",
+                    model_root=root,
+                    profile="compact",
+                    python=Path("/usr/bin/python3"),
+                    progress=events.append,
+                )
+
+        run.assert_called_once()
+        self.assertEqual(run.call_args.args[1], events.append)
+        self.assertEqual(runtime_dir, profile_runtime_dir(root, "compact"))
+        self.assertTrue(any("build_nemotron_wordpipe_model.py" in event for event in events))
+        self.assertEqual(events[-1], f"Model profile ready: {runtime_dir}")
 
 
 if __name__ == "__main__":

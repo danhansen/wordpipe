@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import sys
 import threading
+import time
 from typing import Callable
 
 from .daemon import DaemonConfig, DictationController
@@ -91,6 +92,7 @@ class WordpipeApp:
         self._profile_status_label = None
         self._install_button = None
         self._install_thread: threading.Thread | None = None
+        self._last_install_progress = 0.0
         self._selected_profile = model_setup.model_profile if model_setup else "fast"
         self._updating_button = False
 
@@ -311,6 +313,7 @@ class WordpipeApp:
             source_path = download_nemo_source(
                 setup.nemo_source,
                 default_nemo_source_path(setup.model_root),
+                progress=self._post_install_progress,
             )
             self._post_event(UiEvent("status", f"Building {MODEL_PROFILES[profile].title} model"))
             runtime_dir = build_model_profile(
@@ -318,10 +321,18 @@ class WordpipeApp:
                 model_root=setup.model_root,
                 profile=profile,
                 python=setup.python,
+                progress=self._post_install_progress,
             )
             self._post_event(UiEvent("install-complete", f"{profile}:{runtime_dir}"))
         except Exception as exc:  # noqa: BLE001 - surface setup failures in the UI.
             self._post_event(UiEvent("install-error", f"{type(exc).__name__}: {exc}"))
+
+    def _post_install_progress(self, message: str) -> None:
+        now = time.monotonic()
+        if now - self._last_install_progress < 0.5:
+            return
+        self._last_install_progress = now
+        self._post_event(UiEvent("status", _summarize_progress(message)))
 
     def _toggle_dictation(self, button) -> None:  # type: ignore[no-untyped-def]
         if self._updating_button or self._controller is None:
@@ -437,3 +448,12 @@ def run_app(
         model_setup=model_setup,
         controller_config_factory=controller_config_factory,
     ).run()
+
+
+def _summarize_progress(message: str) -> str:
+    text = message.strip()
+    if not text:
+        return "Installing model"
+    if len(text) <= 120:
+        return text
+    return f"...{text[-117:]}"

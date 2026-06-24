@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 import tempfile
 
-from wordpipe.app import UiEvent, UiTranscriptSink, profile_status_text
+from wordpipe.app import UiEvent, UiTranscriptSink, _summarize_progress, profile_status_text
 from wordpipe.models import profile_runtime_dir
 
 
@@ -49,6 +49,15 @@ class AppModelSetupTests(unittest.TestCase):
         self.assertIn("Compact: not installed", missing)
         self.assertIn(str(runtime_dir), missing)
         self.assertIn("Compact: installed", installed)
+
+    def test_progress_summary_keeps_recent_tail_for_long_build_output(self) -> None:
+        message = "x" * 200
+
+        summary = _summarize_progress(message)
+
+        self.assertEqual(len(summary), 120)
+        self.assertTrue(summary.startswith("..."))
+        self.assertTrue(summary.endswith("x" * 20))
 
 
 if __name__ == "__main__":

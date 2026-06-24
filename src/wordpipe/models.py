@@ -8,7 +8,7 @@ import subprocess
 import sys
 import tarfile
 import time
-from typing import Literal
+from typing import Callable, Literal
 from urllib.request import urlretrieve
 import zipfile
 
@@ -26,6 +26,7 @@ DEFAULT_MODEL_FILES = (
 DEFAULT_NEMO_SOURCE_REPO = "nvidia/nemotron-3.5-asr-streaming-0.6b"
 DEFAULT_NEMO_SOURCE_FILENAME = "nemotron-3.5-asr-streaming-0.6b.nemo"
 ModelProfile = Literal["fast", "compact"]
+ProgressCallback = Callable[[str], None]
 
 
 @dataclass(frozen=True)
@@ -235,19 +236,23 @@ def download_nemo_source(
     output_path: Path | None = None,
     *,
     force: bool = False,
+    progress: ProgressCallback | None = None,
 ) -> Path:
     candidate = Path(source).expanduser()
     if candidate.exists():
+        _progress(progress, f"Using local source model: {candidate}")
         return candidate
 
     destination = output_path.expanduser() if output_path is not None else default_nemo_source_path()
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists() and not force:
+        _progress(progress, f"Using cached source model: {destination}")
         return destination
 
     try:
         from huggingface_hub import hf_hub_download
 
+        _progress(progress, f"Downloading source model from {source}")
         env_value = os.environ.get("HF_HUB_ENABLE_HF_TRANSFER")
         try:
             import hf_transfer  # noqa: F401
@@ -275,6 +280,7 @@ def download_nemo_source(
             if destination.exists():
                 destination.unlink()
             path.replace(destination)
+        _progress(progress, f"Source model ready: {destination}")
         return destination
     except ImportError as exc:
         raise RuntimeError(
@@ -342,6 +348,7 @@ def build_model_profile(
     force: bool = False,
     dry_run: bool = False,
     keep_build_dir: bool = False,
+    progress: ProgressCallback | None = None,
 ) -> Path:
     command = build_profile_command(
         source=source,
@@ -350,10 +357,42 @@ def build_model_profile(
         python=python,
         force=force,
     )
-    print(" ".join(command), file=sys.stderr)
+    rendered_command = " ".join(command)
+    print(rendered_command, file=sys.stderr)
+    _progress(progress, rendered_command)
     build_dir = profile_build_dir(model_root, profile)
     if not dry_run:
-        subprocess.run(command, check=True)
+        _run_with_progress(command, progress)
         if not keep_build_dir and build_dir.exists():
+            _progress(progress, f"Removing build intermediates: {build_dir}")
             shutil.rmtree(build_dir)
-    return profile_runtime_dir(model_root, profile)
+    runtime_dir = profile_runtime_dir(model_root, profile)
+    _progress(progress, f"Model profile ready: {runtime_dir}")
+    return runtime_dir
+
+
+def _run_with_progress(command: list[str], progress: ProgressCallback | None) -> None:
+    if progress is None:
+        subprocess.run(command, check=True)
+        return
+
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    assert process.stdout is not None
+    for line in process.stdout:
+        message = line.rstrip()
+        if message:
+            _progress(progress, message)
+    return_code = process.wait()
+    if return_code != 0:
+        raise subprocess.CalledProcessError(return_code, command)
+
+
+def _progress(progress: ProgressCallback | None, message: str) -> None:
+    if progress is not None:
+        progress(message)
