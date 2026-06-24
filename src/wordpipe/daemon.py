@@ -277,20 +277,31 @@ class DictationController:
     def open(self) -> None:
         if self._opened:
             return
-        self._transcript.open()
-        self._keyboard.open()
-        if isinstance(self._keyboard, DryRunKeyboardBackend):
-            self._keyboard.events.clear()
-        self._asr.start()
-        self._reader = threading.Thread(target=self._read_events, name="wordpipe-events", daemon=True)
-        self._reader.start()
-        self._stderr_reader = threading.Thread(
-            target=self._read_stderr,
-            name="wordpipe-stderr",
-            daemon=True,
-        )
-        self._stderr_reader.start()
-        self._opened = True
+        transcript_opened = False
+        keyboard_opened = False
+        try:
+            self._transcript.open()
+            transcript_opened = True
+            self._keyboard.open()
+            keyboard_opened = True
+            if isinstance(self._keyboard, DryRunKeyboardBackend):
+                self._keyboard.events.clear()
+            self._asr.start()
+            self._reader = threading.Thread(target=self._read_events, name="wordpipe-events", daemon=True)
+            self._reader.start()
+            self._stderr_reader = threading.Thread(
+                target=self._read_stderr,
+                name="wordpipe-stderr",
+                daemon=True,
+            )
+            self._stderr_reader.start()
+            self._opened = True
+        except Exception:
+            self._cleanup_failed_open(
+                keyboard_opened=keyboard_opened,
+                transcript_opened=transcript_opened,
+            )
+            raise
 
     def start_dictation(self) -> None:
         self.open()
@@ -325,6 +336,18 @@ class DictationController:
             with self._lock:
                 self._listening = False
             self._done.set()
+
+    def _cleanup_failed_open(self, *, keyboard_opened: bool, transcript_opened: bool) -> None:
+        try:
+            self._asr.close()
+            self._join_reader_threads()
+        finally:
+            if keyboard_opened:
+                self._keyboard.close()
+            if transcript_opened:
+                self._transcript.close()
+            with self._lock:
+                self._listening = False
 
     def _join_reader_threads(self) -> None:
         current = threading.current_thread()

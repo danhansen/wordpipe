@@ -28,6 +28,18 @@ class FakeKeyboard:
         return
 
 
+class OrderedKeyboard(FakeKeyboard):
+    def __init__(self, order: list[str]) -> None:
+        super().__init__()
+        self._order = order
+
+    def open(self) -> None:
+        self._order.append("keyboard-open")
+
+    def close(self) -> None:
+        self._order.append("keyboard-close")
+
+
 class FakeTranscript:
     def __init__(self) -> None:
         self.events: list[tuple[str, str]] = []
@@ -56,13 +68,22 @@ class OrderedTranscript(FakeTranscript):
         super().__init__()
         self._order = order
 
+    def open(self) -> None:
+        self._order.append("transcript-open")
+
     def close(self) -> None:
         self._order.append("transcript-close")
 
 
 class OrderedAsr:
-    def __init__(self, order: list[str]) -> None:
+    def __init__(self, order: list[str], *, fail_start: bool = False) -> None:
         self._order = order
+        self._fail_start = fail_start
+
+    def start(self) -> None:
+        self._order.append("asr-start")
+        if self._fail_start:
+            raise RuntimeError("asr start failed")
 
     def close(self) -> None:
         self._order.append("asr-close")
@@ -164,6 +185,31 @@ class DaemonTests(unittest.TestCase):
             order,
             ["asr-close", "stdout-join", "stderr-join", "transcript-close"],
         )
+
+    def test_open_cleans_up_transcript_and_keyboard_when_asr_start_fails(self) -> None:
+        order: list[str] = []
+        controller = DictationController(
+            DaemonConfig(model_dir=Path("/models/parakeet")),
+            OrderedKeyboard(order),
+            OrderedTranscript(order),
+        )
+        controller._asr = OrderedAsr(order, fail_start=True)  # type: ignore[assignment]
+
+        with self.assertRaisesRegex(RuntimeError, "asr start failed"):
+            controller.open()
+
+        self.assertEqual(
+            order,
+            [
+                "transcript-open",
+                "keyboard-open",
+                "asr-start",
+                "asr-close",
+                "keyboard-close",
+                "transcript-close",
+            ],
+        )
+        self.assertFalse(controller._opened)
 
     def test_signal_hotkey_pid_file_is_written_after_controller_opens(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
