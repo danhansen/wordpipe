@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import Mock, patch
 
 from wordpipe.insertion import (
     KEY_PRESSED,
@@ -46,11 +47,19 @@ class InsertionTests(unittest.TestCase):
 
         self.assertEqual(backend.events, ["open", "press 0x78", "release 0x78", "close"])
 
-    def test_portal_backend_open_is_lazy(self) -> None:
-        backend = PortalKeyboardBackend()
+    def test_portal_backend_opens_session_before_first_insert(self) -> None:
+        portal = Mock()
 
-        backend.open()
-        backend.close()
+        with patch("wordpipe.insertion.RemoteDesktopPortalSession", return_value=portal):
+            backend = PortalKeyboardBackend()
+            backend.open()
+            backend.insert_text("x")
+            backend.close()
+
+        portal.open.assert_called_once_with()
+        portal.notify_keysym.assert_any_call(ord("x"), KEY_PRESSED)
+        portal.notify_keysym.assert_any_call(ord("x"), KEY_RELEASED)
+        portal.close.assert_called_once_with()
 
 
 if __name__ == "__main__":

@@ -95,6 +95,23 @@ class DaemonTests(unittest.TestCase):
         self.assertEqual(keyboard.inserted, ["hello", " world"])
         self.assertEqual(transcript.events[-1], ("commit", "hello world "))
 
+    def test_streaming_final_commit_inserts_when_no_partial_text_was_inserted(self) -> None:
+        keyboard = FakeKeyboard()
+        transcript = FakeTranscript()
+        controller = DictationController(
+            DaemonConfig(model_dir=Path("/models/parakeet"), insert_partial_text=True),
+            keyboard,
+            transcript,
+        )
+
+        controller._handle_event({"event": "commit", "text": "hello world"})
+
+        self.assertEqual(keyboard.inserted, ["hello world "])
+        self.assertIn(
+            ("status", "no streamed text inserted; inserting final commit"),
+            transcript.events,
+        )
+
     def test_streaming_partials_do_not_duplicate_rewritten_text(self) -> None:
         keyboard = FakeKeyboard()
         transcript = FakeTranscript()

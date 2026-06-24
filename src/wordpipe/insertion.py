@@ -100,12 +100,14 @@ class PortalKeyboardBackend:
         self._portal: RemoteDesktopPortalSession | None = None
 
     def open(self) -> None:
-        return
-
-    def insert_text(self, text: str) -> None:
         if self._portal is None:
             self._portal = RemoteDesktopPortalSession()
             self._portal.open()
+
+    def insert_text(self, text: str) -> None:
+        if self._portal is None:
+            self.open()
+        assert self._portal is not None
         for key_event in text_to_key_events(text):
             self._portal.notify_keysym(key_event.keysym, key_event.state)
 

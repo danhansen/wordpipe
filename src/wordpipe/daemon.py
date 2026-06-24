@@ -251,6 +251,7 @@ class DictationController:
         self._opened = False
         self._listening = False
         self._inserted_partial_text = ""
+        self._streaming_inserted_any = False
         self._exit_code = 0
 
     @property
@@ -277,6 +278,7 @@ class DictationController:
                 return
             self._listening = True
             self._inserted_partial_text = ""
+            self._streaming_inserted_any = False
         self._transcript.status("starting dictation")
         self._asr.send("start")
 
@@ -339,7 +341,12 @@ class DictationController:
                 if self._config.log_metrics:
                     self._transcript.status(_format_metrics(item.get("data")))
                 if self._config.insert_partial_text:
-                    return
+                    with self._lock:
+                        streaming_inserted_any = self._streaming_inserted_any
+                    if streaming_inserted_any:
+                        return
+                    self._transcript.status("no streamed text inserted; inserting final commit")
+                    self._insert_text(text)
                 else:
                     self._insert_text(text)
         elif kind == "stats":
@@ -366,9 +373,12 @@ class DictationController:
                 self._transcript.status("partial changed before already-inserted text; waiting for append")
                 return
             suffix = current[len(previous) :]
-            self._inserted_partial_text = current
         if suffix:
             self._insert_text(suffix)
+            with self._lock:
+                self._streaming_inserted_any = True
+        with self._lock:
+            self._inserted_partial_text = current
 
     def _insert_text(self, text: str) -> None:
         self._keyboard.insert_text(text)
