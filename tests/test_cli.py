@@ -45,6 +45,7 @@ class CliModelResolutionTests(unittest.TestCase):
                 "CTRL+ALT+D",
                 "--overlay",
                 "gtk",
+                "--final-commit-only",
             ]
         )
 
@@ -52,6 +53,20 @@ class CliModelResolutionTests(unittest.TestCase):
         self.assertEqual(args.model_profile, "compact")
         self.assertEqual(args.shortcut, "CTRL+ALT+D")
         self.assertEqual(args.overlay, "gtk")
+        self.assertTrue(args.final_commit_only)
+
+    def test_daemon_parser_accepts_insert_partials(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "daemon",
+                "--model-dir",
+                "/models/parakeet",
+                "--insert-partials",
+            ]
+        )
+
+        self.assertEqual(args.command, "daemon")
+        self.assertTrue(args.insert_partials)
 
     def test_voice_keyboard_toggle_sends_sigusr1_to_pid_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

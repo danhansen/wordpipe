@@ -323,6 +323,7 @@ def _daemon_config_from_args(
     file_config: WordpipeConfig,
     *,
     log_metrics_default: bool = False,
+    insert_partial_default: bool = False,
 ):
     from .daemon import DaemonConfig
 
@@ -372,6 +373,12 @@ def _daemon_config_from_args(
         log_metrics=getattr(args, "log_metrics", False)
         or file_config.log_metrics
         or log_metrics_default,
+        insert_partial_text=(
+            file_config.insert_partial_text
+            or insert_partial_default
+            or getattr(args, "insert_partials", False)
+        )
+        and not getattr(args, "final_commit_only", False),
     )
 
 
@@ -411,7 +418,12 @@ def _cmd_voice_keyboard(args: argparse.Namespace) -> int:
     from .transcript import make_transcript_sink
 
     file_config = _load_cli_config(args)
-    config = _daemon_config_from_args(args, file_config, log_metrics_default=True)
+    config = _daemon_config_from_args(
+        args,
+        file_config,
+        log_metrics_default=True,
+        insert_partial_default=True,
+    )
     overlay = args.overlay or file_config.overlay or "gtk"
     if args.signal_hotkey:
         return run_signal_hotkey_daemon(
@@ -518,6 +530,21 @@ def _add_model_selection_args(parser: argparse.ArgumentParser) -> None:
         "--model-root",
         help="Directory containing built Wordpipe model profiles.",
     )
+
+
+def _add_insertion_mode_args(parser: argparse.ArgumentParser, *, partials_default: bool) -> None:
+    if partials_default:
+        parser.add_argument(
+            "--final-commit-only",
+            action="store_true",
+            help="Wait until dictation stops before inserting recognized text.",
+        )
+    else:
+        parser.add_argument(
+            "--insert-partials",
+            action="store_true",
+            help="Insert appended partial text as ASR produces it instead of waiting for stop.",
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -788,6 +815,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Insert raw ASR text instead of converting spoken punctuation commands.",
     )
+    _add_insertion_mode_args(app, partials_default=False)
     app.add_argument(
         "--endpoint",
         action="store_true",
@@ -845,6 +873,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Insert raw ASR text instead of converting spoken punctuation commands.",
     )
+    _add_insertion_mode_args(voice_keyboard, partials_default=True)
     voice_keyboard.add_argument(
         "--endpoint",
         action="store_true",
@@ -894,6 +923,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Insert raw ASR text instead of converting spoken punctuation commands.",
     )
+    _add_insertion_mode_args(daemon, partials_default=False)
     daemon.add_argument(
         "--endpoint",
         action="store_true",
@@ -947,6 +977,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Insert raw ASR text instead of converting spoken punctuation commands.",
     )
+    _add_insertion_mode_args(hotkey_daemon, partials_default=False)
     hotkey_daemon.add_argument(
         "--endpoint",
         action="store_true",

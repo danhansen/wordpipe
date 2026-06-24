@@ -88,6 +88,7 @@ class DaemonConfig:
     endpoint_rule3_min_utterance_length: float = 20.0
     spoken_punctuation: bool = True
     log_metrics: bool = False
+    insert_partial_text: bool = False
 
 
 def format_committed_text(text: str) -> str:
@@ -249,6 +250,7 @@ class DictationController:
         self._lock = threading.Lock()
         self._opened = False
         self._listening = False
+        self._inserted_partial_text = ""
         self._exit_code = 0
 
     @property
@@ -274,6 +276,7 @@ class DictationController:
             if self._listening:
                 return
             self._listening = True
+            self._inserted_partial_text = ""
         self._transcript.status("starting dictation")
         self._asr.send("start")
 
@@ -324,21 +327,21 @@ class DictationController:
         elif kind == "listening":
             self._transcript.status("listening")
         elif kind == "partial":
-            self._transcript.partial(str(item.get("text", "")))
+            raw_text = str(item.get("text", ""))
+            self._transcript.partial(raw_text)
+            if self._config.insert_partial_text:
+                self._insert_streaming_text(_normalize_text(raw_text, self._config.spoken_punctuation))
         elif kind == "commit":
             raw_text = str(item.get("text", ""))
-            if self._config.spoken_punctuation:
-                raw_text = normalize_spoken_punctuation(raw_text)
-            text = format_committed_text(raw_text)
+            text = format_committed_text(_normalize_text(raw_text, self._config.spoken_punctuation))
             if text:
                 self._transcript.commit(text)
                 if self._config.log_metrics:
                     self._transcript.status(_format_metrics(item.get("data")))
-                self._keyboard.insert_text(text)
-                if isinstance(self._keyboard, DryRunKeyboardBackend):
-                    for rendered in self._keyboard.events:
-                        print(f"key: {rendered}", file=sys.stderr)
-                    self._keyboard.events.clear()
+                if self._config.insert_partial_text:
+                    self._insert_streaming_text(text)
+                else:
+                    self._insert_text(text)
         elif kind == "stats":
             if self._config.log_metrics:
                 self._transcript.status(_format_metrics(item.get("data")))
@@ -350,6 +353,35 @@ class DictationController:
             with self._lock:
                 self._listening = False
             self._transcript.status("idle")
+
+    def _insert_streaming_text(self, text: str) -> None:
+        current = text.strip(" \t")
+        if text.endswith(" ") and current:
+            current = f"{current} "
+        if not current:
+            return
+        with self._lock:
+            previous = self._inserted_partial_text
+            if not current.startswith(previous):
+                self._transcript.status("partial changed before already-inserted text; waiting for append")
+                return
+            suffix = current[len(previous) :]
+            self._inserted_partial_text = current
+        if suffix:
+            self._insert_text(suffix)
+
+    def _insert_text(self, text: str) -> None:
+        self._keyboard.insert_text(text)
+        if isinstance(self._keyboard, DryRunKeyboardBackend):
+            for rendered in self._keyboard.events:
+                print(f"key: {rendered}", file=sys.stderr)
+            self._keyboard.events.clear()
+
+
+def _normalize_text(text: str, spoken_punctuation: bool) -> str:
+    if spoken_punctuation:
+        return normalize_spoken_punctuation(text)
+    return text
 
 
 def _format_metrics(data: object) -> str:

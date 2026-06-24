@@ -268,15 +268,25 @@ PYTHONPATH=src python3 -m wordpipe voice-keyboard \
 ```
 
 Then focus any text field, press `Ctrl+Alt+Space`, speak, and press
-`Ctrl+Alt+Space` again. In the default toggle mode, the second press sends the
-final recognized text through the RemoteDesktop portal into the focused text
-field.
+`Ctrl+Alt+Space` again. In the default toggle mode, Wordpipe inserts appended
+partial text as ASR produces it; the second press stops dictation and inserts
+any remaining final suffix.
 
 The current development path uses a GNOME custom shortcut that runs
 `wordpipe voice-keyboard-toggle` against the resident daemon above. This avoids
 the GlobalShortcuts portal's stricter app-id requirements while the app is still
 running from a source checkout. Keep the daemon running in a terminal or tmux
 session while dictating.
+
+To restore the older behavior where nothing is typed until dictation stops:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe voice-keyboard \
+  --model-profile compact \
+  --signal-hotkey \
+  --overlay stderr \
+  --final-commit-only
+```
 
 There is also an experimental desktop launcher:
 

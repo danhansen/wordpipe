@@ -20,6 +20,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.nemo_source, DEFAULT_NEMO_SOURCE_REPO)
         self.assertEqual(config.overlay, "gtk")
         self.assertEqual(config.mode, "toggle")
+        self.assertFalse(config.insert_partial_text)
         self.assertEqual(config.num_threads, 2)
         self.assertEqual(config.queue_seconds, 10.0)
 
@@ -42,6 +43,7 @@ class ConfigTests(unittest.TestCase):
                         'shortcut = "CTRL+ALT+D"',
                         "spoken_punctuation = false",
                         "dry_run_insertion = true",
+                        "insert_partial_text = true",
                     ]
                 ),
                 encoding="utf-8",
@@ -61,6 +63,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.shortcut, "CTRL+ALT+D")
         self.assertFalse(config.spoken_punctuation)
         self.assertTrue(config.dry_run_insertion)
+        self.assertTrue(config.insert_partial_text)
 
 
 if __name__ == "__main__":

@@ -36,6 +36,7 @@ shortcut = "CTRL+ALT+space"
 spoken_punctuation = true
 dry_run_insertion = false
 log_metrics = false
+insert_partial_text = false
 """
 
 
@@ -65,6 +66,7 @@ class WordpipeConfig:
     spoken_punctuation: bool = True
     dry_run_insertion: bool = False
     log_metrics: bool = False
+    insert_partial_text: bool = False
 
 
 def default_config_path() -> Path:
@@ -114,6 +116,7 @@ def load_config(path: Path | None = None) -> WordpipeConfig:
         spoken_punctuation=_boolean(data, "spoken_punctuation", True),
         dry_run_insertion=_boolean(data, "dry_run_insertion", False),
         log_metrics=_boolean(data, "log_metrics", False),
+        insert_partial_text=_boolean(data, "insert_partial_text", False),
     )
 
 
