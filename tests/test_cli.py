@@ -171,8 +171,8 @@ class CliModelResolutionTests(unittest.TestCase):
 
         run.assert_called_once()
         self.assertIn("Input devices (Parakeet/CPAL):", rendered)
-        self.assertIn("*   0 Built-in", rendered)
-        self.assertIn("    1 USB Mic", rendered)
+        self.assertIn("*   cpal:0 Built-in", rendered)
+        self.assertIn("    cpal:1 USB Mic", rendered)
 
     def test_render_parakeet_input_devices_reports_worker_failure(self) -> None:
         with (

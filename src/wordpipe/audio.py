@@ -33,6 +33,11 @@ def cpal_input_device_arg(device: AudioDevice | None) -> str | None:
         return None
     if isinstance(device, int):
         return sounddevice_input_device_name(device)
+    if device.startswith("cpal:"):
+        index = device.removeprefix("cpal:")
+        if not index.isdecimal():
+            raise ValueError(f"invalid CPAL input device selector: {device}")
+        return index
     return device
 
 

@@ -278,7 +278,8 @@ def _render_parakeet_input_devices(configured_worker: str | None = None) -> str:
         return "\n".join(lines)
     for row in rows:
         marker = "*" if row.get("is_default") else " "
-        lines.append(f"{marker} {row.get('index', '?'):>3} {row.get('name', '')}")
+        selector = f"cpal:{row.get('index', '?')}"
+        lines.append(f"{marker} {selector:>8} {row.get('name', '')}")
     return "\n".join(lines)
 
 
@@ -833,7 +834,7 @@ def build_parser() -> argparse.ArgumentParser:
     asr.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
     asr.add_argument("--num-threads", type=_positive_int_arg, default=2)
     asr.add_argument("--sample-rate", type=_positive_int_arg, default=16000)
-    asr.add_argument("--input-device", help="sounddevice input device index or name.")
+    asr.add_argument("--input-device", help="Input device selector; Parakeet also accepts cpal:N.")
     asr.add_argument(
         "--endpoint",
         action="store_true",
@@ -900,7 +901,7 @@ def build_parser() -> argparse.ArgumentParser:
     listen_test.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
     listen_test.add_argument("--num-threads", type=_positive_int_arg, default=2)
     listen_test.add_argument("--sample-rate", type=_positive_int_arg, default=16000)
-    listen_test.add_argument("--input-device", help="sounddevice input device index or name.")
+    listen_test.add_argument("--input-device", help="Input device selector; Parakeet also accepts cpal:N.")
     listen_test.add_argument(
         "--endpoint",
         action="store_true",
@@ -1090,7 +1091,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_runtime_args(app, default=None)
     app.add_argument("--num-threads", type=_positive_int_arg)
     app.add_argument("--sample-rate", type=_positive_int_arg)
-    app.add_argument("--input-device", help="sounddevice input device index or name.")
+    app.add_argument("--input-device", help="Input device selector; Parakeet also accepts cpal:N.")
     _add_asr_tuning_args(app, worker_defaults=False)
     app.add_argument(
         "--no-spoken-punctuation",
@@ -1148,7 +1149,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_runtime_args(voice_keyboard, default=None)
     voice_keyboard.add_argument("--num-threads", type=_positive_int_arg)
     voice_keyboard.add_argument("--sample-rate", type=_positive_int_arg)
-    voice_keyboard.add_argument("--input-device", help="sounddevice input device index or name.")
+    voice_keyboard.add_argument("--input-device", help="Input device selector; Parakeet also accepts cpal:N.")
     _add_asr_tuning_args(voice_keyboard, worker_defaults=False)
     voice_keyboard.add_argument(
         "--no-spoken-punctuation",
@@ -1217,7 +1218,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_runtime_args(daemon, default=None)
     daemon.add_argument("--num-threads", type=_positive_int_arg)
     daemon.add_argument("--sample-rate", type=_positive_int_arg)
-    daemon.add_argument("--input-device", help="sounddevice input device index or name.")
+    daemon.add_argument("--input-device", help="Input device selector; Parakeet also accepts cpal:N.")
     _add_asr_tuning_args(daemon, worker_defaults=False)
     daemon.add_argument(
         "--no-spoken-punctuation",
@@ -1271,7 +1272,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_runtime_args(hotkey_daemon, default=None)
     hotkey_daemon.add_argument("--num-threads", type=_positive_int_arg)
     hotkey_daemon.add_argument("--sample-rate", type=_positive_int_arg)
-    hotkey_daemon.add_argument("--input-device", help="sounddevice input device index or name.")
+    hotkey_daemon.add_argument("--input-device", help="Input device selector; Parakeet also accepts cpal:N.")
     _add_asr_tuning_args(hotkey_daemon, worker_defaults=False)
     hotkey_daemon.add_argument(
         "--no-spoken-punctuation",

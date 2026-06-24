@@ -45,6 +45,13 @@ class AudioTests(unittest.TestCase):
     def test_cpal_input_device_arg_preserves_name(self) -> None:
         self.assertEqual(cpal_input_device_arg("Built-in"), "Built-in")
 
+    def test_cpal_input_device_arg_accepts_explicit_cpal_index(self) -> None:
+        self.assertEqual(cpal_input_device_arg("cpal:2"), "2")
+
+    def test_cpal_input_device_arg_rejects_invalid_explicit_cpal_index(self) -> None:
+        with self.assertRaisesRegex(ValueError, "invalid CPAL input device selector"):
+            cpal_input_device_arg("cpal:mic")
+
     def test_cpal_input_device_arg_rejects_unknown_index(self) -> None:
         sounddevice = types.SimpleNamespace(
             default=types.SimpleNamespace(device=(None, None)),

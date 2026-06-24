@@ -173,15 +173,16 @@ scripts/wordpipe-dev audio-devices
 scripts/wordpipe-dev audio-devices --backend parakeet
 ```
 
-Try a specific input device. Numeric values are the indices shown by
-`audio-devices`; for the Parakeet runtime, prefer the `--backend parakeet`
-listing because it comes from the same Rust/CPAL worker that records audio.
+Try a specific input device. Numeric values are sounddevice indices from the
+default `audio-devices` listing. For the Parakeet runtime, prefer the
+`--backend parakeet` listing because it comes from the same Rust/CPAL worker
+that records audio; pass its `cpal:N` selector or a device-name substring.
 When a sounddevice index is passed to Parakeet, Wordpipe resolves it to a device
 name before handing it to CPAL.
 
 ```sh
 scripts/wordpipe-dev listen-test \
-  --input-device 12 \
+  --input-device cpal:0 \
   --model-dir /path/to/parakeet-nemotron-streaming-model
 ```
 
