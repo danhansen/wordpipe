@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+import sys
+import threading
 from typing import Callable
 
 from .daemon import DaemonConfig, DictationController
 from .insertion import DryRunKeyboardBackend, PortalKeyboardBackend
+from .models import MODEL_PROFILES, profile_installed, profile_runtime_dir
 
 
 @dataclass(frozen=True)
@@ -14,6 +18,21 @@ class UiEvent:
 
 
 UiEventCallback = Callable[[UiEvent], None]
+ControllerConfigFactory = Callable[[str], DaemonConfig]
+
+
+@dataclass(frozen=True)
+class AppModelSetup:
+    model_root: Path
+    model_profile: str
+    nemo_source: str
+    python: Path = Path(sys.executable)
+
+
+def profile_status_text(model_root: Path, profile: str) -> str:
+    runtime_dir = profile_runtime_dir(model_root, profile)
+    state = "installed" if profile_installed(model_root, profile) else "not installed"
+    return f"{MODEL_PROFILES[profile].title}: {state} ({runtime_dir})"
 
 
 class UiTranscriptSink:
@@ -43,9 +62,18 @@ class UiTranscriptSink:
 
 
 class WordpipeApp:
-    def __init__(self, config: DaemonConfig | None, setup_error: str | None = None) -> None:
+    def __init__(
+        self,
+        config: DaemonConfig | None,
+        setup_error: str | None = None,
+        *,
+        model_setup: AppModelSetup | None = None,
+        controller_config_factory: ControllerConfigFactory | None = None,
+    ) -> None:
         self._config = config
         self._setup_error = setup_error
+        self._model_setup = model_setup
+        self._controller_config_factory = controller_config_factory
         self._controller: DictationController | None = None
         self._glib = None
         self._gtk = None
@@ -59,6 +87,11 @@ class WordpipeApp:
         self._toggle_button = None
         self._button_image = None
         self._button_label = None
+        self._profile_dropdown = None
+        self._profile_status_label = None
+        self._install_button = None
+        self._install_thread: threading.Thread | None = None
+        self._selected_profile = model_setup.model_profile if model_setup else "fast"
         self._updating_button = False
 
     def run(self) -> int:
@@ -150,6 +183,7 @@ class WordpipeApp:
         status_row.append(self._toggle_button)
         root.append(status_row)
 
+        self._build_profile_row(root, Gtk)
         self._partial_label = self._section(root, Gtk, "Live transcript", "No speech yet")
         self._commit_label = self._section(root, Gtk, "Last committed", "Nothing committed")
         self._error_label = Gtk.Label(label="")
@@ -158,6 +192,33 @@ class WordpipeApp:
         self._error_label.add_css_class("error")
         root.append(self._error_label)
         return root
+
+    def _build_profile_row(self, root, Gtk) -> None:  # type: ignore[no-untyped-def]
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        row.set_valign(Gtk.Align.CENTER)
+
+        names = tuple(MODEL_PROFILES)
+        selected = names.index(self._selected_profile) if self._selected_profile in names else 0
+        self._profile_dropdown = Gtk.DropDown.new_from_strings(
+            [MODEL_PROFILES[name].title for name in names]
+        )
+        self._profile_dropdown.set_selected(selected)
+        self._profile_dropdown.connect("notify::selected", self._profile_changed)
+        row.append(self._profile_dropdown)
+
+        self._profile_status_label = Gtk.Label(label="")
+        self._profile_status_label.set_xalign(0)
+        self._profile_status_label.set_hexpand(True)
+        self._profile_status_label.set_wrap(True)
+        self._profile_status_label.add_css_class("dim-label")
+        row.append(self._profile_status_label)
+
+        self._install_button = Gtk.Button(label="Install")
+        self._install_button.set_tooltip_text("Download and build the selected model profile")
+        self._install_button.connect("clicked", self._install_selected_profile)
+        row.append(self._install_button)
+        root.append(row)
+        self._refresh_profile_state()
 
     def _section(self, root, Gtk, title: str, body: str):  # type: ignore[no-untyped-def]
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -185,6 +246,12 @@ class WordpipeApp:
         return box
 
     def _open_controller(self) -> bool:
+        if self._config is None and self._controller_config_factory is not None:
+            try:
+                self._config = self._controller_config_factory(self._selected_profile)
+                self._setup_error = None
+            except SystemExit as exc:
+                self._setup_error = str(exc)
         if self._config is None:
             self._post_event(UiEvent("status", "Setup required"))
             if self._setup_error:
@@ -201,6 +268,60 @@ class WordpipeApp:
             self._post_event(UiEvent("error", f"{type(exc).__name__}: {exc}"))
             self._set_button_sensitive(False)
         return False
+
+    def _profile_changed(self, dropdown, _param) -> None:  # type: ignore[no-untyped-def]
+        names = tuple(MODEL_PROFILES)
+        selected = int(dropdown.get_selected())
+        if selected >= len(names):
+            return
+        self._selected_profile = names[selected]
+        if self._controller is not None:
+            self._controller.close()
+            self._controller = None
+            self._config = None
+            self._set_button_state(False)
+            self._set_button_sensitive(False)
+        self._setup_error = None
+        self._refresh_profile_state()
+        if self._selected_profile_installed():
+            self._open_controller()
+
+    def _install_selected_profile(self, _button) -> None:  # type: ignore[no-untyped-def]
+        if self._model_setup is None or self._install_thread is not None:
+            return
+        profile = self._selected_profile
+        self._set_install_sensitive(False)
+        self._post_event(UiEvent("status", f"Installing {MODEL_PROFILES[profile].title} model"))
+        thread = threading.Thread(
+            target=self._install_profile_thread,
+            args=(profile,),
+            name="wordpipe-model-install",
+            daemon=True,
+        )
+        self._install_thread = thread
+        thread.start()
+
+    def _install_profile_thread(self, profile: str) -> None:
+        assert self._model_setup is not None
+        try:
+            from .models import build_model_profile, default_nemo_source_path, download_nemo_source
+
+            setup = self._model_setup
+            self._post_event(UiEvent("status", "Downloading source model"))
+            source_path = download_nemo_source(
+                setup.nemo_source,
+                default_nemo_source_path(setup.model_root),
+            )
+            self._post_event(UiEvent("status", f"Building {MODEL_PROFILES[profile].title} model"))
+            runtime_dir = build_model_profile(
+                source=source_path,
+                model_root=setup.model_root,
+                profile=profile,
+                python=setup.python,
+            )
+            self._post_event(UiEvent("install-complete", f"{profile}:{runtime_dir}"))
+        except Exception as exc:  # noqa: BLE001 - surface setup failures in the UI.
+            self._post_event(UiEvent("install-error", f"{type(exc).__name__}: {exc}"))
 
     def _toggle_dictation(self, button) -> None:  # type: ignore[no-untyped-def]
         if self._updating_button or self._controller is None:
@@ -236,6 +357,18 @@ class WordpipeApp:
             self._set_label(self._error_label, event.text)
             self._set_button_sensitive(False)
             self._set_button_state(False)
+        elif event.kind == "install-complete":
+            self._install_thread = None
+            self._set_label(self._error_label, "")
+            self._refresh_profile_state()
+            self._post_event(UiEvent("status", "Ready"))
+            if self._selected_profile_installed():
+                self._open_controller()
+        elif event.kind == "install-error":
+            self._install_thread = None
+            self._refresh_profile_state()
+            self._set_label(self._error_label, event.text)
+            self._post_event(UiEvent("status", "Setup required"))
         return False
 
     def _set_label(self, label, text: str) -> None:  # type: ignore[no-untyped-def]
@@ -245,6 +378,27 @@ class WordpipeApp:
     def _set_button_sensitive(self, sensitive: bool) -> None:
         if self._toggle_button is not None:
             self._toggle_button.set_sensitive(sensitive)
+
+    def _set_install_sensitive(self, sensitive: bool) -> None:
+        if self._install_button is not None:
+            self._install_button.set_sensitive(sensitive)
+
+    def _refresh_profile_state(self) -> None:
+        if self._model_setup is None:
+            self._set_label(self._profile_status_label, "Model profiles unavailable")
+            self._set_install_sensitive(False)
+            return
+        installed = profile_installed(self._model_setup.model_root, self._selected_profile)
+        self._set_label(
+            self._profile_status_label,
+            profile_status_text(self._model_setup.model_root, self._selected_profile),
+        )
+        self._set_install_sensitive(not installed and self._install_thread is None)
+
+    def _selected_profile_installed(self) -> bool:
+        if self._model_setup is None:
+            return False
+        return profile_installed(self._model_setup.model_root, self._selected_profile)
 
     def _set_button_state(self, listening: bool) -> None:
         if self._toggle_button is None:
@@ -270,5 +424,16 @@ class WordpipeApp:
         return False
 
 
-def run_app(config: DaemonConfig | None, setup_error: str | None = None) -> int:
-    return WordpipeApp(config, setup_error).run()
+def run_app(
+    config: DaemonConfig | None,
+    setup_error: str | None = None,
+    *,
+    model_setup: AppModelSetup | None = None,
+    controller_config_factory: ControllerConfigFactory | None = None,
+) -> int:
+    return WordpipeApp(
+        config,
+        setup_error,
+        model_setup=model_setup,
+        controller_config_factory=controller_config_factory,
+    ).run()

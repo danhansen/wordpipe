@@ -350,6 +350,11 @@ The app uses the same config and portal insertion path as `daemon` and
 `hotkey-daemon`. Endpoint detection remains disabled unless `--endpoint` or
 `enable_endpoint_detection = true` is set.
 
+If the selected `fast` or `compact` model profile is missing, the app opens in
+setup mode. Choose the profile in the dropdown and press `Install` to download
+the source NeMo checkpoint and build the selected runtime profile under the
+canonical `model_root`.
+
 ## Runtime Dependencies
 
 Install Python ASR dependencies only when using the legacy sherpa worker:
@@ -420,6 +425,9 @@ List profile status:
 ```sh
 PYTHONPATH=src python3 -m wordpipe model-profiles
 ```
+
+The app window can install these profiles interactively. The CLI command below
+performs the same download/export pipeline for unattended setup or debugging.
 
 Download the source `.nemo` checkpoint if needed and build a profile:
 

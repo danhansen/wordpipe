@@ -69,7 +69,15 @@ state instead of exiting before GTK starts. The app Flatpak includes the NeMo,
 PyTorch, Hugging Face, ONNX, and ONNX Runtime tooling needed to download and
 convert a selected profile into the canonical Flatpak app-data model directory.
 
-Build the compact profile inside the Flatpak:
+Open the app, choose `Fast` or `Compact`, and press `Install` to download the
+source NeMo checkpoint and build that profile in the background:
+
+```sh
+flatpak run dev.wordpipe.Wordpipe
+```
+
+The same operation can be run from the command line, which is useful for
+unattended setup or export debugging:
 
 ```sh
 flatpak run dev.wordpipe.Wordpipe model-install --profile compact

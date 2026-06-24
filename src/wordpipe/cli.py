@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import os
 import subprocess
@@ -407,14 +408,41 @@ def _daemon_config_from_args(
 
 
 def _cmd_app(args: argparse.Namespace) -> int:
-    from .app import run_app
+    from .app import AppModelSetup, run_app
 
     file_config = _load_cli_config(args)
+    selected_profile = args.model_profile or file_config.model_profile
+    raw_model_root = getattr(args, "model_root", None)
+    model_root = Path(raw_model_root).expanduser() if raw_model_root else file_config.model_root
+    model_setup = (
+        AppModelSetup(
+            model_root=model_root,
+            model_profile=selected_profile,
+            nemo_source=file_config.nemo_source,
+        )
+        if model_root is not None
+        else None
+    )
+
+    def config_for_profile(profile: str) -> DaemonConfig:
+        profile_args = copy.copy(args)
+        profile_args.model_profile = profile
+        return _daemon_config_from_args(profile_args, file_config, log_metrics_default=True)
+
     try:
         config = _daemon_config_from_args(args, file_config, log_metrics_default=True)
     except SystemExit as exc:
-        return run_app(None, setup_error=str(exc))
-    return run_app(config)
+        return run_app(
+            None,
+            setup_error=str(exc),
+            model_setup=model_setup,
+            controller_config_factory=config_for_profile,
+        )
+    return run_app(
+        config,
+        model_setup=model_setup,
+        controller_config_factory=config_for_profile,
+    )
 
 
 def _cmd_daemon(args: argparse.Namespace) -> int:

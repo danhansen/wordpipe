@@ -171,6 +171,9 @@ class CliModelResolutionTests(unittest.TestCase):
         config, setup_error = run_app.call_args.args[0], run_app.call_args.kwargs["setup_error"]
         self.assertIsNone(config)
         self.assertIn("wordpipe model-install --profile compact", setup_error)
+        self.assertEqual(run_app.call_args.kwargs["model_setup"].model_profile, "compact")
+        self.assertEqual(run_app.call_args.kwargs["model_setup"].model_root, Path(tmp))
+        self.assertIsNotNone(run_app.call_args.kwargs["controller_config_factory"])
 
     def test_model_install_download_cache_follows_model_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
