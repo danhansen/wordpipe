@@ -232,9 +232,11 @@ Packaging templates live under `packaging/`:
 
 - `packaging/applications/dev.wordpipe.Wordpipe.desktop`
 - `packaging/systemd/wordpipe.service`
+- `packaging/flatpak/dev.wordpipe.Wordpipe.yml`
 
 They assume `wordpipe` is installed on `PATH` and configuration exists at
 `~/.config/wordpipe/config.toml`.
+See [docs/flatpak.md](docs/flatpak.md) for the Flatpak packaging path.
 
 Run the hotkey-controlled daemon:
 

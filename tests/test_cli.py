@@ -8,7 +8,14 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from wordpipe.cli import _cmd_model_install, _cmd_voice_keyboard_toggle, _resolve_model_dir, build_parser, main
+from wordpipe.cli import (
+    _cmd_app,
+    _cmd_model_install,
+    _cmd_voice_keyboard_toggle,
+    _resolve_model_dir,
+    build_parser,
+    main,
+)
 from wordpipe.config import WordpipeConfig
 from wordpipe.models import DEFAULT_NEMO_SOURCE_FILENAME, profile_runtime_dir
 
@@ -128,6 +135,41 @@ class CliModelResolutionTests(unittest.TestCase):
                 _resolve_model_dir(_args(model_profile="compact"), config)
 
         self.assertIn("wordpipe model-install --profile compact", str(raised.exception))
+
+    def test_app_opens_setup_ui_when_selected_profile_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            args = argparse.Namespace(
+                config=None,
+                model_dir=None,
+                model_profile="compact",
+                model_root=tmp,
+                asr_runtime=None,
+                asr_worker_path=None,
+                dry_run_insertion=False,
+                provider=None,
+                num_threads=None,
+                sample_rate=None,
+                input_device=None,
+                partial_interval_seconds=None,
+                audio_chunk_seconds=None,
+                queue_seconds=None,
+                stats_interval_seconds=None,
+                endpoint=False,
+                endpoint_rule1_min_trailing_silence=None,
+                endpoint_rule2_min_trailing_silence=None,
+                endpoint_rule3_min_utterance_length=None,
+                no_spoken_punctuation=False,
+                log_metrics=False,
+                insert_partials=False,
+                final_commit_only=False,
+            )
+
+            with mock.patch("wordpipe.app.run_app", return_value=0) as run_app:
+                self.assertEqual(_cmd_app(args), 0)
+
+        config, setup_error = run_app.call_args.args[0], run_app.call_args.kwargs["setup_error"]
+        self.assertIsNone(config)
+        self.assertIn("wordpipe model-install --profile compact", setup_error)
 
     def test_model_install_download_cache_follows_model_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

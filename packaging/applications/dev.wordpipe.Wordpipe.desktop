@@ -2,8 +2,10 @@
 Type=Application
 Name=Wordpipe
 Comment=Wayland GNOME dictation with streaming ASR
-Exec=wordpipe voice-keyboard
+Exec=wordpipe app
+Icon=dev.wordpipe.Wordpipe
 Terminal=false
 Categories=Utility;Accessibility;
 StartupNotify=false
 X-GNOME-UsesNotifications=true
+Keywords=dictation;speech;voice;keyboard;accessibility;

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>dev.wordpipe.Wordpipe</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Wordpipe</name>
+  <developer id="dev.wordpipe">
+    <name>Wordpipe contributors</name>
+  </developer>
+  <summary>Wayland GNOME dictation with streaming ASR</summary>
+  <description>
+    <p>
+      Wordpipe is a GNOME-oriented dictation app that streams speech recognition
+      into the focused text field through desktop portals.
+    </p>
+    <p>
+      It uses local Parakeet/Nemotron ONNX models and supports selectable model
+      profiles for faster or smaller local inference.
+    </p>
+  </description>
+  <launchable type="desktop-id">dev.wordpipe.Wordpipe.desktop</launchable>
+  <categories>
+    <category>Utility</category>
+    <category>Accessibility</category>
+  </categories>
+  <url type="homepage">https://github.com/danhansen/wordpipe</url>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2026-06-23">
+      <description>
+        <p>Initial local Flatpak packaging metadata for the Wordpipe MVP.</p>
+      </description>
+    </release>
+  </releases>
+</component>

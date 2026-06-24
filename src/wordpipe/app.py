@@ -43,8 +43,9 @@ class UiTranscriptSink:
 
 
 class WordpipeApp:
-    def __init__(self, config: DaemonConfig) -> None:
+    def __init__(self, config: DaemonConfig | None, setup_error: str | None = None) -> None:
         self._config = config
+        self._setup_error = setup_error
         self._controller: DictationController | None = None
         self._glib = None
         self._gtk = None
@@ -184,6 +185,12 @@ class WordpipeApp:
         return box
 
     def _open_controller(self) -> bool:
+        if self._config is None:
+            self._post_event(UiEvent("status", "Setup required"))
+            if self._setup_error:
+                self._post_event(UiEvent("error", self._setup_error))
+            self._set_button_sensitive(False)
+            return False
         keyboard = DryRunKeyboardBackend() if self._config.dry_run_insertion else PortalKeyboardBackend()
         sink = UiTranscriptSink(self._post_event)
         self._controller = DictationController(self._config, keyboard, sink)
@@ -263,5 +270,5 @@ class WordpipeApp:
         return False
 
 
-def run_app(config: DaemonConfig) -> int:
-    return WordpipeApp(config).run()
+def run_app(config: DaemonConfig | None, setup_error: str | None = None) -> int:
+    return WordpipeApp(config, setup_error).run()

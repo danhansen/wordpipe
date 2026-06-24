@@ -386,7 +386,11 @@ def _cmd_app(args: argparse.Namespace) -> int:
     from .app import run_app
 
     file_config = _load_cli_config(args)
-    return run_app(_daemon_config_from_args(args, file_config, log_metrics_default=True))
+    try:
+        config = _daemon_config_from_args(args, file_config, log_metrics_default=True)
+    except SystemExit as exc:
+        return run_app(None, setup_error=str(exc))
+    return run_app(config)
 
 
 def _cmd_daemon(args: argparse.Namespace) -> int:

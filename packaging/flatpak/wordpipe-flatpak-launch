@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+if [ -z "${ORT_DYLIB_PATH:-}" ]; then
+  for candidate in /app/lib/libonnxruntime.so* /app/lib/onnxruntime/libonnxruntime.so* /app/lib/python*/site-packages/onnxruntime/capi/libonnxruntime.so*; do
+    if [ -e "$candidate" ]; then
+      export ORT_DYLIB_PATH="$candidate"
+      break
+    fi
+  done
+fi
+
+if [ "$#" -eq 0 ]; then
+  set -- app
+fi
+
+exec /app/bin/wordpipe "$@"

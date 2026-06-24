@@ -48,12 +48,18 @@ def _resolve_parakeet_worker(configured_path: Path | None = None) -> Path | str:
 def _default_ort_dylib_path() -> Path | None:
     repo_root = Path(__file__).resolve().parents[2]
     patterns = (
+        "/app/lib/libonnxruntime.so*",
+        "/app/lib/onnxruntime/libonnxruntime.so*",
+        "/app/lib/python*/site-packages/onnxruntime/capi/libonnxruntime.so*",
         ".venv/lib/python*/site-packages/onnxruntime/capi/libonnxruntime.so*",
         ".venv-nemo-export/lib/python*/site-packages/onnxruntime/capi/libonnxruntime.so*",
         ".venv/lib/python*/site-packages/sherpa_onnx/lib/libonnxruntime.so*",
     )
     for pattern in patterns:
-        matches = sorted(repo_root.glob(pattern))
+        if pattern.startswith("/"):
+            matches = sorted(Path("/").glob(pattern.lstrip("/")))
+        else:
+            matches = sorted(repo_root.glob(pattern))
         if matches:
             return matches[0]
     return None

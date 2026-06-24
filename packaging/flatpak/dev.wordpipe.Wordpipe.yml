@@ -1,0 +1,70 @@
+app-id: dev.wordpipe.Wordpipe
+runtime: org.gnome.Platform
+runtime-version: "50"
+sdk: org.gnome.Sdk
+command: wordpipe-flatpak-launch
+
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=pulseaudio
+  - --share=network
+  - --talk-name=org.freedesktop.portal.Desktop
+
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /share/man
+  - "*.a"
+  - "*.la"
+
+modules:
+  # Generate and include vendored dependency source manifests before using this
+  # for distribution:
+  #   flatpak-cargo-generator Cargo.lock -o packaging/flatpak/cargo-sources.json
+  #   flatpak-pip-generator --runtime=org.gnome.Sdk//50 \
+  #     --requirements-file=packaging/flatpak/requirements-runtime.txt \
+  #     -o packaging/flatpak/python3-runtime-deps
+  # Add python3-runtime-deps.json here as a module before wordpipe-python.
+  - name: wordpipe-rust-worker
+    buildsystem: simple
+    build-options:
+      env:
+        CARGO_HOME: /run/build/wordpipe-rust-worker/cargo
+    build-commands:
+      - cargo build --release -p wordpipe-parakeet-worker --offline
+      - install -Dm755 target/release/wordpipe-parakeet-worker /app/bin/wordpipe-parakeet-worker
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - .git
+          - .wordpipe.git
+          - .venv
+          - .venv-*
+          - build
+          - target
+          - models
+      # - packaging/flatpak/cargo-sources.json
+
+  # - packaging/flatpak/python3-runtime-deps.json
+
+  - name: wordpipe-python
+    buildsystem: simple
+    build-commands:
+      - python3 -m pip install --no-build-isolation --prefix=/app .
+      - install -Dm755 packaging/flatpak/wordpipe-flatpak-launch /app/bin/wordpipe-flatpak-launch
+      - install -Dm644 packaging/applications/dev.wordpipe.Wordpipe.desktop /app/share/applications/dev.wordpipe.Wordpipe.desktop
+      - install -Dm644 packaging/metainfo/dev.wordpipe.Wordpipe.metainfo.xml /app/share/metainfo/dev.wordpipe.Wordpipe.metainfo.xml
+      - install -Dm644 packaging/icons/hicolor/scalable/apps/dev.wordpipe.Wordpipe.svg /app/share/icons/hicolor/scalable/apps/dev.wordpipe.Wordpipe.svg
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - .git
+          - .wordpipe.git
+          - .venv
+          - .venv-*
+          - build
+          - target
+          - models
