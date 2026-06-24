@@ -43,7 +43,14 @@ class ProbeResult:
     def usable(self) -> bool:
         remote = self.portals.get(REMOTE_DESKTOP_IFACE)
         shortcuts = self.portals.get(GLOBAL_SHORTCUTS_IFACE)
-        return bool(remote and remote.available and shortcuts and shortcuts.available)
+        return bool(
+            self.session_type == "wayland"
+            and self.python_modules.get("gi", False)
+            and remote
+            and remote.available
+            and shortcuts
+            and shortcuts.available
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -210,10 +217,17 @@ def run_probe() -> ProbeResult:
         REMOTE_DESKTOP_IFACE: _introspect_portal(REMOTE_DESKTOP_IFACE),
         GLOBAL_SHORTCUTS_IFACE: _introspect_portal(GLOBAL_SHORTCUTS_IFACE),
     }
+    session_type = os.environ.get("XDG_SESSION_TYPE")
+    errors: list[str] = []
+    if session_type != "wayland":
+        errors.append("Wordpipe requires a Wayland session for GNOME portal text insertion.")
+    if not modules["gi"]:
+        errors.append("PyGObject gi is required for GTK and desktop portal D-Bus access.")
     return ProbeResult(
-        session_type=os.environ.get("XDG_SESSION_TYPE"),
+        session_type=session_type,
         gnome_shell=_gnome_shell_version(),
         commands=commands,
         python_modules=modules,
         portals=portals,
+        errors=tuple(errors),
     )
