@@ -186,6 +186,7 @@ class CliModelResolutionTests(unittest.TestCase):
                 force=False,
                 force_source=False,
                 dry_run=False,
+                keep_build_dir=False,
             )
 
             with (
@@ -203,6 +204,34 @@ class CliModelResolutionTests(unittest.TestCase):
             expected_source,
             force=False,
         )
+
+    def test_model_install_dry_run_does_not_download_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            args = argparse.Namespace(
+                config=None,
+                profile="compact",
+                model_root=str(root),
+                source="nvidia/example",
+                source_output=None,
+                python="/venv/bin/python",
+                force=False,
+                force_source=False,
+                dry_run=True,
+                keep_build_dir=False,
+            )
+
+            with (
+                mock.patch("wordpipe.models.download_nemo_source") as download,
+                mock.patch("wordpipe.models.build_model_profile", return_value=Path("/models/runtime")) as build,
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(_cmd_model_install(args), 0)
+
+        download.assert_not_called()
+        build.assert_called_once()
+        self.assertTrue(build.call_args.kwargs["dry_run"])
+        self.assertEqual(build.call_args.kwargs["source"], root / "sources" / DEFAULT_NEMO_SOURCE_FILENAME)
 
     def test_model_install_imports_built_profile_source_without_huggingface_download(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -222,6 +251,7 @@ class CliModelResolutionTests(unittest.TestCase):
                 force=False,
                 force_source=False,
                 dry_run=False,
+                keep_build_dir=False,
             )
 
             with (
@@ -253,6 +283,7 @@ class CliModelResolutionTests(unittest.TestCase):
                 force=True,
                 force_source=False,
                 dry_run=False,
+                keep_build_dir=True,
             )
 
             with (
@@ -266,6 +297,7 @@ class CliModelResolutionTests(unittest.TestCase):
         install.assert_not_called()
         download.assert_called_once()
         build.assert_called_once()
+        self.assertTrue(build.call_args.kwargs["keep_build_dir"])
 
 
 if __name__ == "__main__":

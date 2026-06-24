@@ -83,6 +83,10 @@ do not need model paths:
 flatpak run dev.wordpipe.Wordpipe app --model-profile compact
 ```
 
+Successful builds remove intermediate export files under
+`~/.var/app/dev.wordpipe.Wordpipe/data/wordpipe/models/build/` by default. Pass
+`--keep-build-dir` to `model-install` when debugging the export pipeline.
+
 `model-install --source` also accepts a `.tar`, `.tar.gz`, `.tgz`, or `.zip`
 archive containing a built Wordpipe profile directory with `tokenizer.model`,
 `encoder.onnx` or `encoder.ort`, and `decoder_joint.onnx` or

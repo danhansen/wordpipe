@@ -293,7 +293,7 @@ def build_profile_command(
 ) -> list[str]:
     spec = profile_spec(profile)
     output_dir = spec.output_dir(model_root)
-    work_dir = model_root.expanduser() / "build" / spec.name
+    work_dir = profile_build_dir(model_root, profile)
     return [
         str(python),
         str(wordpipe_scripts_dir() / "build_nemotron_wordpipe_model.py"),
@@ -306,6 +306,11 @@ def build_profile_command(
         *(["--emit-ort-format"] if spec.emit_ort_format else []),
         *(["--force"] if force else []),
     ]
+
+
+def profile_build_dir(model_root: Path, profile: str) -> Path:
+    spec = profile_spec(profile)
+    return model_root.expanduser() / "build" / spec.name
 
 
 def wordpipe_scripts_dir() -> Path:
@@ -336,6 +341,7 @@ def build_model_profile(
     python: Path = Path(sys.executable),
     force: bool = False,
     dry_run: bool = False,
+    keep_build_dir: bool = False,
 ) -> Path:
     command = build_profile_command(
         source=source,
@@ -345,6 +351,9 @@ def build_model_profile(
         force=force,
     )
     print(" ".join(command), file=sys.stderr)
+    build_dir = profile_build_dir(model_root, profile)
     if not dry_run:
         subprocess.run(command, check=True)
+        if not keep_build_dir and build_dir.exists():
+            shutil.rmtree(build_dir)
     return profile_runtime_dir(model_root, profile)

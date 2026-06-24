@@ -4,15 +4,18 @@ import contextlib
 import io
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from wordpipe.models import (
     DEFAULT_MODEL_REPO,
     _progress_reporter,
+    build_model_profile,
     build_profile_command,
     install_built_profile,
     make_download_plan,
     model_file_url,
+    profile_build_dir,
     profile_runtime_dir,
     source_may_be_built_profile_archive,
 )
@@ -103,6 +106,42 @@ class ModelDownloadTests(unittest.TestCase):
     def test_nemo_source_is_not_built_profile_archive(self) -> None:
         self.assertFalse(source_may_be_built_profile_archive(Path("source.nemo")))
         self.assertTrue(source_may_be_built_profile_archive(Path("profile.tar.gz")))
+
+    def test_build_model_profile_removes_build_dir_after_success_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            build_dir = profile_build_dir(root, "compact")
+            build_dir.mkdir(parents=True)
+            (build_dir / "intermediate.onnx").write_text("temporary", encoding="utf-8")
+
+            with mock.patch("subprocess.run") as run:
+                runtime_dir = build_model_profile(
+                    source=root / "source.nemo",
+                    model_root=root,
+                    profile="compact",
+                    python=Path("/usr/bin/python3"),
+                )
+
+            run.assert_called_once()
+            self.assertFalse(build_dir.exists())
+            self.assertEqual(runtime_dir, profile_runtime_dir(root, "compact"))
+
+    def test_build_model_profile_can_keep_build_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            build_dir = profile_build_dir(root, "compact")
+            build_dir.mkdir(parents=True)
+
+            with mock.patch("subprocess.run"):
+                build_model_profile(
+                    source=root / "source.nemo",
+                    model_root=root,
+                    profile="compact",
+                    python=Path("/usr/bin/python3"),
+                    keep_build_dir=True,
+                )
+
+            self.assertTrue(build_dir.exists())
 
 
 if __name__ == "__main__":

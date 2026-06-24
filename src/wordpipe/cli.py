@@ -266,6 +266,7 @@ def _cmd_model_install(args: argparse.Namespace) -> int:
         python=Path(args.python).expanduser(),
         force=args.force,
         dry_run=args.dry_run,
+        keep_build_dir=args.keep_build_dir,
     )
     print(runtime_dir)
     return 0
@@ -798,6 +799,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Print the build command without running the export pipeline.",
+    )
+    model_install.add_argument(
+        "--keep-build-dir",
+        action="store_true",
+        help="Keep intermediate files under model_root/build after a successful export.",
     )
     model_install.set_defaults(func=_cmd_model_install)
 

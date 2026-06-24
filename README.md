@@ -435,7 +435,9 @@ Wordpipe uses `huggingface_hub` and enables `HF_HUB_ENABLE_HF_TRANSFER=1` for
 the download. Building `compact` emits the ORT-format runtime directory
 automatically. Building `fast` emits the FP32 projected-cache runtime directory.
 Run `model-install` again with the other profile when you want to try it; both
-artifacts can coexist under `model_root`.
+artifacts can coexist under `model_root`. After a successful source build,
+Wordpipe removes `model_root/build/<profile>` intermediates by default; pass
+`--keep-build-dir` when you need to inspect or reuse those files.
 
 `model-install --source` can also import an already-built Wordpipe profile
 directory or archive. The app Flatpak can run the same download/export pipeline
