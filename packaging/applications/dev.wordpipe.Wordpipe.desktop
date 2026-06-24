@@ -2,7 +2,7 @@
 Type=Application
 Name=Wordpipe
 Comment=Wayland GNOME dictation with streaming ASR
-Exec=wordpipe app
+Exec=wordpipe-flatpak-launch app
 Icon=dev.wordpipe.Wordpipe
 Terminal=false
 Categories=Utility;Accessibility;
