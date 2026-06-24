@@ -48,6 +48,15 @@ flatpak-builder --user --install --force-clean \
   packaging/flatpak/dev.wordpipe.Wordpipe.yml
 ```
 
+If the build fails with `rofiles-fuse` or `/dev/fuse` errors, use the same
+command with `--disable-rofiles-fuse`:
+
+```sh
+flatpak-builder --disable-rofiles-fuse --user --install --force-clean \
+  build/flatpak-dev \
+  packaging/flatpak/dev.wordpipe.Wordpipe.yml
+```
+
 Run the app:
 
 ```sh
