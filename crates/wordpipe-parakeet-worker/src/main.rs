@@ -120,6 +120,7 @@ struct RunningSession {
 
 fn main() -> Result<()> {
     let args = Arc::new(Args::parse());
+    validate_args(&args)?;
     let emitter = Arc::new(JsonEmitter::new());
 
     if args.wav.is_some() {
@@ -203,6 +204,27 @@ fn main() -> Result<()> {
                 );
             }
         }
+    }
+    Ok(())
+}
+
+fn validate_args(args: &Args) -> Result<()> {
+    if args.num_threads == 0 {
+        return Err(anyhow!("--num-threads must be at least 1"));
+    }
+    if args.sample_rate == 0 {
+        return Err(anyhow!("--sample-rate must be at least 1"));
+    }
+    if args.chunk_samples == 0 {
+        return Err(anyhow!("--chunk-samples must be at least 1"));
+    }
+    if !args.queue_seconds.is_finite() || args.queue_seconds <= 0.0 {
+        return Err(anyhow!("--queue-seconds must be a positive finite number"));
+    }
+    if !args.stats_interval_seconds.is_finite() || args.stats_interval_seconds <= 0.0 {
+        return Err(anyhow!(
+            "--stats-interval-seconds must be a positive finite number"
+        ));
     }
     Ok(())
 }
@@ -750,4 +772,64 @@ fn round3(value: f64) -> f64 {
 
 fn round5(value: f64) -> f64 {
     (value * 100000.0).round() / 100000.0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_args() -> Args {
+        Args {
+            model_dir: PathBuf::from("/models/nemotron"),
+            num_threads: 2,
+            sample_rate: 16_000,
+            input_device: None,
+            queue_seconds: 10.0,
+            stats_interval_seconds: 1.0,
+            chunk_samples: NEMOTRON_CHUNK_SAMPLES,
+            flush_chunks: 3,
+            wav: None,
+            graph_optimization: CliGraphOptimization::All,
+            ort_memory_pattern: CliBoolOverride::Auto,
+            ort_parallel_execution: false,
+            ort_cpu_arena: CliBoolOverride::Auto,
+            ort_optimized_model_cache_dir: None,
+            trace_token_decisions: false,
+        }
+    }
+
+    #[test]
+    fn validate_args_accepts_defaults() {
+        validate_args(&default_args()).unwrap();
+    }
+
+    #[test]
+    fn validate_args_rejects_zero_chunk_samples() {
+        let mut args = default_args();
+        args.chunk_samples = 0;
+
+        let error = validate_args(&args).unwrap_err().to_string();
+
+        assert!(error.contains("--chunk-samples"));
+    }
+
+    #[test]
+    fn validate_args_rejects_zero_sample_rate() {
+        let mut args = default_args();
+        args.sample_rate = 0;
+
+        let error = validate_args(&args).unwrap_err().to_string();
+
+        assert!(error.contains("--sample-rate"));
+    }
+
+    #[test]
+    fn validate_args_rejects_non_positive_queue_seconds() {
+        let mut args = default_args();
+        args.queue_seconds = 0.0;
+
+        let error = validate_args(&args).unwrap_err().to_string();
+
+        assert!(error.contains("--queue-seconds"));
+    }
 }
