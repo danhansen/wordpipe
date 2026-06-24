@@ -50,6 +50,18 @@ ROOT = SCRIPT_DIR.parent
 DEFAULT_WORK_DIR = Path.cwd() / "build" / "nemotron-wordpipe-pipeline"
 PHASES = ("export", "transform", "fixed-shape", "ffn-fp32")
 PROFILES = ("fp32-projected", "compact-fixed-shape", "ffn-fp32")
+POSITIVE_INT_ARGS = (
+    "left_context",
+    "right_context",
+    "sample_rate",
+    "input_frames",
+    "output_frames",
+    "num_layers",
+    "cache_len",
+    "hidden_dim",
+    "conv_context",
+    "ort_optimize_threads",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -180,6 +192,26 @@ def active_phases(args: argparse.Namespace) -> tuple[str, ...]:
     raise ValueError(args.profile)
 
 
+def validate_args(args: argparse.Namespace) -> None:
+    for name in POSITIVE_INT_ARGS:
+        if getattr(args, name) <= 0:
+            option = name.replace("_", "-")
+            raise SystemExit(f"--{option} must be positive")
+    if args.stop_after is None:
+        args.stop_after = active_phases(args)[-1]
+    phases = active_phases(args)
+    if args.stop_after not in phases:
+        raise SystemExit(f"--stop-after {args.stop_after!r} is not part of profile {args.profile!r}")
+    if args.start_at not in phases:
+        raise SystemExit(f"--start-at {args.start_at!r} is not part of profile {args.profile!r}")
+    if PHASES.index(args.start_at) > PHASES.index(args.stop_after):
+        raise SystemExit(f"--start-at {args.start_at!r} comes after --stop-after {args.stop_after!r}")
+    if args.profile != "ffn-fp32" and args.fp32_decoder:
+        raise SystemExit("--fp32-decoder only applies to --profile ffn-fp32")
+    if args.profile == "fp32-projected" and args.quantize_per_channel:
+        raise SystemExit("--quantize-per-channel only applies to quantized profiles")
+
+
 def phase_output(args: argparse.Namespace, phase: str) -> Path:
     if phase in {"export", "transform"}:
         return args.work_dir / "01-fp32-export"
@@ -225,17 +257,8 @@ def script(name: str) -> str:
 
 def main() -> None:
     args = parse_args()
+    validate_args(args)
     phases = active_phases(args)
-    if args.stop_after is None:
-        args.stop_after = phases[-1]
-    if args.stop_after not in phases:
-        raise SystemExit(f"--stop-after {args.stop_after!r} is not part of profile {args.profile!r}")
-    if args.start_at not in phases:
-        raise SystemExit(f"--start-at {args.start_at!r} is not part of profile {args.profile!r}")
-    if args.profile != "ffn-fp32" and args.fp32_decoder:
-        raise SystemExit("--fp32-decoder only applies to --profile ffn-fp32")
-    if args.profile == "fp32-projected" and args.quantize_per_channel:
-        raise SystemExit("--quantize-per-channel only applies to quantized profiles")
 
     python = str(args.python)
     export_dir = phase_output(args, "export")
