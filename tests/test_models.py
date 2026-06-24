@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import stat
 import tempfile
 import tarfile
 import unittest
@@ -174,6 +175,34 @@ class ModelDownloadTests(unittest.TestCase):
                 )
 
             self.assertFalse(outside.exists())
+            self.assertFalse(extract_dir.exists())
+
+    def test_install_built_profile_rejects_zip_symlink_member(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive_path = root / "profile.zip"
+            extract_dir = root / "extract"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                link = zipfile.ZipInfo("profile/encoder.ort")
+                link.external_attr = (stat.S_IFLNK | 0o777) << 16
+                archive.writestr(link, "/tmp/encoder.ort")
+                archive.writestr("profile/tokenizer.model", "tokenizer")
+                archive.writestr("profile/decoder_joint.ort", "decoder")
+
+            def make_tempdir(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+                extract_dir.mkdir()
+                return str(extract_dir)
+
+            with (
+                mock.patch("tempfile.mkdtemp", side_effect=make_tempdir),
+                self.assertRaisesRegex(RuntimeError, "unsupported zip member"),
+            ):
+                install_built_profile(
+                    source=archive_path,
+                    model_root=root / "installed",
+                    profile="compact",
+                )
+
             self.assertFalse(extract_dir.exists())
 
     def test_install_built_profile_imports_tar_archive(self) -> None:

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -244,6 +245,9 @@ def _extract_zip_safely(archive: zipfile.ZipFile, destination: Path) -> None:
         target = (destination / info.filename).resolve()
         if target != root and root not in target.parents:
             raise RuntimeError(f"Refusing unsafe zip member: {info.filename}")
+        mode = (info.external_attr >> 16) & 0o170000
+        if mode == stat.S_IFLNK:
+            raise RuntimeError(f"Refusing unsupported zip member: {info.filename}")
         archive.extract(info, destination)
 
 
