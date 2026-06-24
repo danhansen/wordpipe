@@ -130,14 +130,15 @@ def save_model_profile(profile: str, path: Path | None = None) -> Path:
     existing = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
     line = f'model_profile = "{selected}"'
     lines = existing.splitlines()
+    root_end = _first_table_header_index(lines)
     replaced = False
-    for index, current in enumerate(lines):
+    for index, current in enumerate(lines[:root_end]):
         if current.lstrip().split("=", 1)[0].strip() == "model_profile":
             lines[index] = line
             replaced = True
             break
     if not replaced:
-        lines.append(line)
+        lines.insert(root_end, line)
     text = "\n".join(lines) + "\n"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
@@ -152,6 +153,14 @@ def save_model_profile(profile: str, path: Path | None = None) -> Path:
         temporary = Path(handle.name)
     temporary.replace(config_path)
     return config_path
+
+
+def _first_table_header_index(lines: list[str]) -> int:
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("["):
+            return index
+    return len(lines)
 
 
 def _optional_path(value: object, key: str) -> Path | None:

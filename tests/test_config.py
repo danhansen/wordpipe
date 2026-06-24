@@ -148,6 +148,22 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.model_profile, "compact")
         self.assertEqual(config.num_threads, 4)
 
+    def test_save_model_profile_inserts_missing_key_before_toml_tables(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text(
+                "num_threads = 4\n[ui]\nmodel_profile = \"fast\"\n",
+                encoding="utf-8",
+            )
+
+            save_model_profile("compact", path)
+            text = path.read_text(encoding="utf-8")
+            config = load_config(path)
+
+        self.assertLess(text.index('model_profile = "compact"'), text.index("[ui]"))
+        self.assertEqual(config.model_profile, "compact")
+        self.assertEqual(config.num_threads, 4)
+
 
 if __name__ == "__main__":
     unittest.main()
