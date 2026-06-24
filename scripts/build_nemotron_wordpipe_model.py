@@ -45,8 +45,9 @@ import sys
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_WORK_DIR = ROOT / "build" / "nemotron-wordpipe-pipeline"
+SCRIPT_DIR = Path(__file__).resolve().parent
+ROOT = SCRIPT_DIR.parent
+DEFAULT_WORK_DIR = Path.cwd() / "build" / "nemotron-wordpipe-pipeline"
 PHASES = ("export", "transform", "fixed-shape", "ffn-fp32")
 PROFILES = ("fp32-projected", "compact-fixed-shape", "ffn-fp32")
 
@@ -200,14 +201,26 @@ def prepare_output(path: Path, *, force: bool, dry_run: bool) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
 
 
-def run(command: list[str], *, dry_run: bool) -> None:
+def run(command: list[str], *, dry_run: bool, temp_dir: Path | None = None) -> None:
     printable = " ".join(command)
     print(f"[pipeline] {printable}", flush=True)
     if dry_run:
         return
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(ROOT / "src") + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    if temp_dir is not None:
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        temp_path = str(temp_dir)
+        env["TMPDIR"] = temp_path
+        env["TEMP"] = temp_path
+        env["TMP"] = temp_path
+    source_tree = ROOT / "src"
+    if source_tree.exists():
+        env["PYTHONPATH"] = str(source_tree) + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
     subprocess.run(command, cwd=ROOT, env=env, check=True)
+
+
+def script(name: str) -> str:
+    return str(SCRIPT_DIR / name)
 
 
 def main() -> None:
@@ -227,13 +240,14 @@ def main() -> None:
     python = str(args.python)
     export_dir = phase_output(args, "export")
     fixed_dir = phase_output(args, "fixed-shape")
+    temp_dir = args.work_dir / "tmp"
 
     if phase_enabled(args, "export"):
         prepare_output(export_dir, force=args.force, dry_run=args.dry_run)
         run(
             [
                 python,
-                "scripts/export_nemotron_parakeet_optimized.py",
+                script("export_nemotron_parakeet_optimized.py"),
                 args.input,
                 str(export_dir),
                 "--left-context",
@@ -247,13 +261,14 @@ def main() -> None:
                 "--export-only",
             ],
             dry_run=args.dry_run,
+            temp_dir=temp_dir,
         )
 
     if phase_enabled(args, "transform"):
         run(
             [
                 python,
-                "scripts/transform_nemotron_parakeet_export.py",
+                script("transform_nemotron_parakeet_export.py"),
                 str(export_dir),
                 "--no-quantize" if args.profile == "fp32-projected" else "--quantize",
                 "--projected-cache",
@@ -264,6 +279,7 @@ def main() -> None:
                 *(["--keep-fp32"] if args.keep_fp32 else []),
             ],
             dry_run=args.dry_run,
+            temp_dir=temp_dir,
         )
 
     if phase_enabled(args, "fixed-shape"):
@@ -271,7 +287,7 @@ def main() -> None:
         run(
             [
                 python,
-                "scripts/build_nemotron_fixed_shape_model.py",
+                script("build_nemotron_fixed_shape_model.py"),
                 "--source-dir",
                 str(export_dir),
                 "--output-dir",
@@ -295,6 +311,7 @@ def main() -> None:
                 str(args.ort_optimize_threads),
             ],
             dry_run=args.dry_run,
+            temp_dir=temp_dir,
         )
 
     if phase_enabled(args, "ffn-fp32"):
@@ -302,7 +319,7 @@ def main() -> None:
         run(
             [
                 python,
-                "scripts/dequantize_nemotron_matmul_blocks.py",
+                script("dequantize_nemotron_matmul_blocks.py"),
                 "--source-dir",
                 str(fixed_dir),
                 "--output-dir",
@@ -315,6 +332,7 @@ def main() -> None:
                 str(args.ort_optimize_threads),
             ],
             dry_run=args.dry_run,
+            temp_dir=temp_dir,
         )
 
     if args.emit_ort_format and args.stop_after == phases[-1]:
@@ -324,7 +342,7 @@ def main() -> None:
         run(
             [
                 python,
-                "scripts/convert_nemotron_to_ort_format.py",
+                script("convert_nemotron_to_ort_format.py"),
                 str(args.output_dir),
                 str(ort_format_dir),
                 "--optimization-level",
@@ -332,6 +350,7 @@ def main() -> None:
                 *(["--force"] if args.force else []),
             ],
             dry_run=args.dry_run,
+            temp_dir=temp_dir,
         )
 
     if args.stop_after == phases[-1]:

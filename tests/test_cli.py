@@ -238,6 +238,35 @@ class CliModelResolutionTests(unittest.TestCase):
         download.assert_not_called()
         build.assert_not_called()
 
+    def test_model_install_treats_nemo_source_as_checkpoint_not_profile_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source.nemo"
+            source.write_bytes(b"not a built profile archive")
+            args = argparse.Namespace(
+                config=None,
+                profile="compact",
+                model_root=str(root / "models"),
+                source=str(source),
+                source_output=None,
+                python="/venv/bin/python",
+                force=True,
+                force_source=False,
+                dry_run=False,
+            )
+
+            with (
+                mock.patch("wordpipe.models.install_built_profile") as install,
+                mock.patch("wordpipe.models.download_nemo_source", return_value=source) as download,
+                mock.patch("wordpipe.models.build_model_profile", return_value=Path("/models/runtime")) as build,
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(_cmd_model_install(args), 0)
+
+        install.assert_not_called()
+        download.assert_called_once()
+        build.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

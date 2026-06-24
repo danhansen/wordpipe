@@ -19,15 +19,17 @@ portal-based text insertion. A GNOME Shell extension can remain optional later.
 ## Current Status
 
 The manifest is currently a network-enabled local development build. It fetches
-Cargo crates during the Rust worker build and downloads ONNX Runtime from the
-official release archive. Before a reproducible/distributable Flatpak build,
-generate and add:
+Cargo crates during the Rust worker build, downloads ONNX Runtime from the
+official release archive, and installs the Python model export stack with pip.
+Before a reproducible/distributable Flatpak build, generate and add:
 
 - `packaging/flatpak/cargo-sources.json` from `Cargo.lock`
+- Flatpak source manifests for `packaging/flatpak/requirements-model-tools.txt`
 
 The Python app uses PyGObject/GIO from the GNOME runtime for portal D-Bus access,
-so `dbus-python` is not required. ONNX Runtime is installed from the official
-Linux x64 archive as `/app/lib/libonnxruntime.so`.
+so `dbus-python` is not required. Runtime ONNX Runtime is installed from the
+official Linux x64 archive as `/app/lib/libonnxruntime.so`; the Python
+`onnxruntime` package is also installed for quantization/export tooling.
 
 ## Target Local Build
 
@@ -63,24 +65,19 @@ flatpak run dev.wordpipe.Wordpipe voice-keyboard --model-profile compact
 ## First-Run Model Flow
 
 The GUI now opens even when the selected model profile is missing, showing setup
-state instead of exiting before GTK starts. The app Flatpak intentionally does
-not ship the full NeMo/PyTorch export stack. Instead, install a model profile by
-importing a built Wordpipe runtime directory or archive into the Flatpak app data
-directory.
+state instead of exiting before GTK starts. The app Flatpak includes the NeMo,
+PyTorch, Hugging Face, ONNX, and ONNX Runtime tooling needed to download and
+convert a selected profile into the canonical Flatpak app-data model directory.
 
-For example, import a host-built compact profile:
+Build the compact profile inside the Flatpak:
 
 ```sh
-flatpak run \
-  --filesystem=/home/dhansen/.local/share/wordpipe/models:ro \
-  dev.wordpipe.Wordpipe model-install \
-  --profile compact \
-  --source /home/dhansen/.local/share/wordpipe/models/nemotron-wordpipe-compact-fixed-shape-ort-format
+flatpak run dev.wordpipe.Wordpipe model-install --profile compact
 ```
 
-After that copy, the model lives under
-`~/.var/app/dev.wordpipe.Wordpipe/data/wordpipe/models/` and the runtime command
-does not need the extra host filesystem grant:
+After that build, the model lives under
+`~/.var/app/dev.wordpipe.Wordpipe/data/wordpipe/models/`, and runtime commands
+do not need model paths:
 
 ```sh
 flatpak run dev.wordpipe.Wordpipe app --model-profile compact
@@ -92,6 +89,4 @@ archive containing a built Wordpipe profile directory with `tokenizer.model`,
 `decoder_joint.ort`.
 
 The non-Flatpak development environment can still build profiles directly from a
-local `.nemo` file or Hugging Face NeMo repo id. Packaging that export toolchain
-inside the app Flatpak is deferred because it requires NeMo, PyTorch, ONNX
-tooling, and substantially more memory than the runtime.
+local `.nemo` file or Hugging Face NeMo repo id.

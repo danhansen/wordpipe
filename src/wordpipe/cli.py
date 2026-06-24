@@ -223,6 +223,7 @@ def _cmd_model_install(args: argparse.Namespace) -> int:
         default_nemo_source_path,
         download_nemo_source,
         install_built_profile,
+        source_may_be_built_profile_archive,
         source_is_built_profile,
     )
 
@@ -233,7 +234,9 @@ def _cmd_model_install(args: argparse.Namespace) -> int:
         raise SystemExit("model_root is required")
     source_value = args.source or file_config.nemo_source
     source_candidate = Path(source_value).expanduser()
-    if source_candidate.exists() and (source_is_built_profile(source_candidate) or source_candidate.is_file()):
+    if source_candidate.exists() and (
+        source_is_built_profile(source_candidate) or source_may_be_built_profile_archive(source_candidate)
+    ):
         try:
             runtime_dir = install_built_profile(
                 source=source_candidate,
@@ -242,7 +245,7 @@ def _cmd_model_install(args: argparse.Namespace) -> int:
                 force=args.force,
             )
         except RuntimeError:
-            if source_is_built_profile(source_candidate) or source_candidate.suffix.lower() in {".zip", ".tar", ".tgz", ".gz"}:
+            if source_is_built_profile(source_candidate) or source_may_be_built_profile_archive(source_candidate):
                 raise
         else:
             print(runtime_dir)

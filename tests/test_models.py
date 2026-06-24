@@ -14,6 +14,7 @@ from wordpipe.models import (
     make_download_plan,
     model_file_url,
     profile_runtime_dir,
+    source_may_be_built_profile_archive,
 )
 
 
@@ -98,6 +99,10 @@ class ModelDownloadTests(unittest.TestCase):
             self.assertEqual((runtime_dir / "tokenizer.model").read_text(encoding="utf-8"), "tokenizer")
             self.assertTrue((runtime_dir / "encoder.ort").exists())
             self.assertTrue((runtime_dir / "decoder_joint.ort").exists())
+
+    def test_nemo_source_is_not_built_profile_archive(self) -> None:
+        self.assertFalse(source_may_be_built_profile_archive(Path("source.nemo")))
+        self.assertTrue(source_may_be_built_profile_archive(Path("profile.tar.gz")))
 
 
 if __name__ == "__main__":

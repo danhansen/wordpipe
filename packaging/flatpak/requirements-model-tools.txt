@@ -1,0 +1,16 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.12.1+cpu
+torchaudio==2.11.0+cpu
+nemo-toolkit[asr] @ git+https://github.com/NVIDIA/NeMo.git@9a4f54185a1cb22a4b3171157831367e157cbad7
+huggingface_hub==0.36.2
+hf_transfer==0.1.9
+numpy==2.4.6
+onnx==1.22.0
+onnx-ir==0.2.1
+onnxoptimizer==0.4.2
+onnxruntime==1.27.0
+onnxscript==0.7.0
+onnxslim==0.1.94
+soundfile==0.14.0
+sentencepiece==0.2.1
+omegaconf==2.3.0

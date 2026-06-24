@@ -69,6 +69,17 @@ modules:
           - pyproject.toml
       # - packaging/flatpak/cargo-sources.json
 
+  - name: wordpipe-model-tools
+    buildsystem: simple
+    build-options:
+      build-args:
+        - --share=network
+    build-commands:
+      - python3 -m pip install --prefix=/app --ignore-installed -r requirements-model-tools.txt
+    sources:
+      - type: file
+        path: requirements-model-tools.txt
+
   - name: wordpipe-python
     buildsystem: simple
     build-options:
@@ -76,6 +87,9 @@ modules:
         - --share=network
     build-commands:
       - python3 -m pip install --no-build-isolation --prefix=/app .
+      - install -dm755 /app/share/wordpipe/scripts
+      - cp scripts/*.py /app/share/wordpipe/scripts/
+      - chmod 755 /app/share/wordpipe/scripts/*.py
       - install -Dm755 packaging/flatpak/wordpipe-flatpak-launch /app/bin/wordpipe-flatpak-launch
       - install -Dm644 packaging/applications/dev.wordpipe.Wordpipe.desktop /app/share/applications/dev.wordpipe.Wordpipe.desktop
       - install -Dm644 packaging/metainfo/dev.wordpipe.Wordpipe.metainfo.xml /app/share/metainfo/dev.wordpipe.Wordpipe.metainfo.xml

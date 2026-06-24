@@ -168,6 +168,13 @@ def source_is_built_profile(source: Path) -> bool:
     return source.is_dir() and model_runtime_dir_valid(source)
 
 
+def source_may_be_built_profile_archive(source: Path) -> bool:
+    name = source.name.lower()
+    if name.endswith(".nemo"):
+        return False
+    return name.endswith((".zip", ".tar", ".tar.gz", ".tgz"))
+
+
 def install_built_profile(
     *,
     source: Path,
@@ -190,14 +197,16 @@ def _prepare_built_profile_source(source: Path) -> Path:
     source = source.expanduser()
     if source_is_built_profile(source):
         return source
-    if source.is_file() and tarfile.is_tarfile(source):
+    if source.is_file() and source.name.lower().endswith(".nemo"):
+        raise RuntimeError(f"{source} is a NeMo source model, not a built Wordpipe model profile.")
+    if source.is_file() and source_may_be_built_profile_archive(source) and tarfile.is_tarfile(source):
         import tempfile
 
         tempdir = Path(tempfile.mkdtemp(prefix="wordpipe-profile-"))
         with tarfile.open(source, "r:*") as archive:
             archive.extractall(tempdir, filter="data")
         return _find_built_profile_dir(tempdir)
-    if source.is_file() and zipfile.is_zipfile(source):
+    if source.is_file() and source_may_be_built_profile_archive(source) and zipfile.is_zipfile(source):
         import tempfile
 
         tempdir = Path(tempfile.mkdtemp(prefix="wordpipe-profile-"))
@@ -287,7 +296,7 @@ def build_profile_command(
     work_dir = model_root.expanduser() / "build" / spec.name
     return [
         str(python),
-        str(Path(__file__).resolve().parents[2] / "scripts" / "build_nemotron_wordpipe_model.py"),
+        str(wordpipe_scripts_dir() / "build_nemotron_wordpipe_model.py"),
         str(source.expanduser()),
         str(output_dir),
         "--work-dir",
@@ -297,6 +306,26 @@ def build_profile_command(
         *(["--emit-ort-format"] if spec.emit_ort_format else []),
         *(["--force"] if force else []),
     ]
+
+
+def wordpipe_scripts_dir() -> Path:
+    override = os.environ.get("WORDPIPE_SCRIPTS_DIR")
+    if override:
+        return Path(override).expanduser()
+
+    repo_scripts = Path(__file__).resolve().parents[2] / "scripts"
+    if (repo_scripts / "build_nemotron_wordpipe_model.py").exists():
+        return repo_scripts
+
+    installed_scripts = Path(sys.prefix) / "share" / "wordpipe" / "scripts"
+    if (installed_scripts / "build_nemotron_wordpipe_model.py").exists():
+        return installed_scripts
+
+    app_scripts = Path("/app/share/wordpipe/scripts")
+    if (app_scripts / "build_nemotron_wordpipe_model.py").exists():
+        return app_scripts
+
+    return repo_scripts
 
 
 def build_model_profile(
