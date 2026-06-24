@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import shutil
 import stat
 import tempfile
 import tarfile
@@ -106,6 +107,43 @@ class ModelDownloadTests(unittest.TestCase):
             self.assertEqual((runtime_dir / "tokenizer.model").read_text(encoding="utf-8"), "tokenizer")
             self.assertTrue((runtime_dir / "encoder.ort").exists())
             self.assertTrue((runtime_dir / "decoder_joint.ort").exists())
+
+    def test_install_built_profile_preserves_existing_profile_when_force_copy_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            source.mkdir()
+            (source / "tokenizer.model").write_text("new-tokenizer", encoding="utf-8")
+            (source / "encoder.ort").write_text("new-encoder", encoding="utf-8")
+            (source / "decoder_joint.ort").write_text("new-decoder", encoding="utf-8")
+            destination = profile_runtime_dir(root / "installed", "compact")
+            destination.mkdir(parents=True)
+            (destination / "tokenizer.model").write_text("old-tokenizer", encoding="utf-8")
+            (destination / "encoder.ort").write_text("old-encoder", encoding="utf-8")
+            (destination / "decoder_joint.ort").write_text("old-decoder", encoding="utf-8")
+
+            original_copytree = shutil.copytree
+
+            def failing_copytree(src, dst, *args, **kwargs):  # type: ignore[no-untyped-def]
+                original_copytree(src, dst, *args, **kwargs)
+                raise RuntimeError("copy failed")
+
+            with (
+                mock.patch("wordpipe.models.shutil.copytree", side_effect=failing_copytree),
+                self.assertRaisesRegex(RuntimeError, "copy failed"),
+            ):
+                install_built_profile(
+                    source=source,
+                    model_root=root / "installed",
+                    profile="compact",
+                    force=True,
+                )
+
+            self.assertEqual(
+                (destination / "tokenizer.model").read_text(encoding="utf-8"),
+                "old-tokenizer",
+            )
+            self.assertFalse(any(destination.parent.glob(f".{destination.name}.tmp-*")))
 
     def test_install_built_profile_imports_zip_archive(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

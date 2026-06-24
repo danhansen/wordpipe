@@ -195,11 +195,17 @@ def install_built_profile(
     if destination.exists():
         if not force:
             raise RuntimeError(f"profile {profile!r} is already installed at {destination}; pass --force to overwrite it")
-        shutil.rmtree(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.tmp-{os.getpid()}")
+    if temporary.exists():
+        shutil.rmtree(temporary)
     try:
-        shutil.copytree(prepared_source.path, destination)
+        shutil.copytree(prepared_source.path, temporary)
+        if destination.exists():
+            shutil.rmtree(destination)
+        temporary.replace(destination)
     finally:
+        shutil.rmtree(temporary, ignore_errors=True)
         if prepared_source.cleanup_dir is not None:
             shutil.rmtree(prepared_source.cleanup_dir, ignore_errors=True)
     return destination
