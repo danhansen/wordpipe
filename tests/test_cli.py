@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from wordpipe.cli import _cmd_model_install, _resolve_model_dir
+from wordpipe.cli import _cmd_model_install, _resolve_model_dir, build_parser
 from wordpipe.config import WordpipeConfig
 from wordpipe.models import DEFAULT_NEMO_SOURCE_FILENAME, profile_runtime_dir
 
@@ -35,6 +35,24 @@ def _install_marker(model_root: Path, profile: str) -> Path:
 
 
 class CliModelResolutionTests(unittest.TestCase):
+    def test_voice_keyboard_parser_accepts_profile_and_shortcut(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "voice-keyboard",
+                "--model-profile",
+                "compact",
+                "--shortcut",
+                "CTRL+ALT+D",
+                "--overlay",
+                "gtk",
+            ]
+        )
+
+        self.assertEqual(args.command, "voice-keyboard")
+        self.assertEqual(args.model_profile, "compact")
+        self.assertEqual(args.shortcut, "CTRL+ALT+D")
+        self.assertEqual(args.overlay, "gtk")
+
     def test_explicit_model_dir_wins(self) -> None:
         config = WordpipeConfig(model_dir=None, model_profile="fast")
 

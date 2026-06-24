@@ -29,6 +29,7 @@ The current implementation provides:
 - `wordpipe type-text` keyboard insertion through the RemoteDesktop portal.
 - `wordpipe daemon` MVP loop that connects the ASR worker to text insertion.
 - `wordpipe hotkey-daemon` manual or GlobalShortcuts-controlled dictation.
+- `wordpipe voice-keyboard` global-hotkey dictation into the focused text box.
 - `wordpipe app` GTK/libadwaita control window for local app-style use.
 - Optional libadwaita/GTK live transcript overlay.
 
@@ -256,11 +257,42 @@ PYTHONPATH=src python3 -m wordpipe hotkey-daemon \
 
 Manual commands are `down`, `up`, `toggle`, and `quit`.
 
+Run Wordpipe as a voice keyboard:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe voice-keyboard --model-profile compact
+```
+
+Then focus any text field, press `Ctrl+Alt+Space`, speak, and release the
+shortcut. In `hold` mode the release sends the final recognized text through
+the RemoteDesktop portal into the focused text field. Use toggle mode if you
+prefer one press to start and one press to stop:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe voice-keyboard \
+  --model-profile compact \
+  --mode toggle \
+  --shortcut 'CTRL+ALT+space'
+```
+
+For a non-inserting test of the same flow:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe voice-keyboard \
+  --model-profile compact \
+  --manual-hotkey \
+  --dry-run-insertion
+```
+
 Run the app control window:
 
 ```sh
 PYTHONPATH=src python3 -m wordpipe app
 ```
+
+The control window is useful for local status testing, but it is not the main
+voice-keyboard path because clicking the window moves focus away from the target
+text field.
 
 To try the other built profile without editing config:
 

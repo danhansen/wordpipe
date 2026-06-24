@@ -59,7 +59,7 @@ class WordpipeConfig:
     endpoint_rule1_min_trailing_silence: float = 0.55
     endpoint_rule2_min_trailing_silence: float = 0.35
     endpoint_rule3_min_utterance_length: float = 20.0
-    overlay: str = "stderr"
+    overlay: str = "gtk"
     mode: HotkeyMode = "hold"
     shortcut: str = "CTRL+ALT+space"
     spoken_punctuation: bool = True
@@ -108,7 +108,7 @@ def load_config(path: Path | None = None) -> WordpipeConfig:
         endpoint_rule3_min_utterance_length=_number(
             data, "endpoint_rule3_min_utterance_length", 20.0
         ),
-        overlay=_string(data, "overlay", "stderr"),
+        overlay=_string(data, "overlay", "gtk"),
         mode=_mode(data.get("mode", "hold")),
         shortcut=_string(data, "shortcut", "CTRL+ALT+space"),
         spoken_punctuation=_boolean(data, "spoken_punctuation", True),

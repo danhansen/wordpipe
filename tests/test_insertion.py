@@ -7,6 +7,7 @@ from wordpipe.insertion import (
     KEY_RELEASED,
     XK_RETURN,
     DryRunKeyboardBackend,
+    sanitize_text_for_keysyms,
     text_to_key_events,
 )
 
@@ -30,9 +31,10 @@ class InsertionTests(unittest.TestCase):
 
         self.assertEqual(events[0].keysym, XK_RETURN)
 
-    def test_rejects_non_ascii_for_v1(self) -> None:
-        with self.assertRaises(ValueError):
-            text_to_key_events("cafe\u0301")
+    def test_sanitizes_non_ascii_for_keysyms(self) -> None:
+        self.assertEqual(sanitize_text_for_keysyms("caf\u00e9 \u2014 yes\u2026"), "cafe - yes...")
+        events = text_to_key_events("caf\u00e9")
+        self.assertEqual(events[-2].keysym, ord("e"))
 
     def test_dry_run_backend_records_events(self) -> None:
         backend = DryRunKeyboardBackend()

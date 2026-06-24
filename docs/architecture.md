@@ -40,6 +40,12 @@ wordpipe-daemon
   - receives partial/final transcript events
   - inserts committed text through the keyboard injection backend
 
+wordpipe-voice-keyboard
+  - app-facing global-hotkey mode
+  - keeps focus in the target application
+  - uses the GTK overlay for visible partial/status text
+  - commits recognized text into the focused text field on stop
+
 wordpipe-app
   - GTK/libadwaita control surface
   - shows ASR load/listening/error state
@@ -114,6 +120,7 @@ choose one default and keep the state machine compatible with both.
 
 Recommended initial UI:
 
+- global-hotkey voice-keyboard launcher for actual focused-app text input
 - GTK/libadwaita app window for profile/status/control
 - top-bar status indicator for idle/listening/permission/error states
 - small live transcript overlay for partial text
@@ -121,8 +128,10 @@ Recommended initial UI:
 
 Partial text is never typed into the target app in v1.
 
-The current app window and overlay backend use libadwaita when available, with
-a GTK 4 fallback. A GNOME Shell top-bar indicator remains future work.
+The current `voice-keyboard` command is the primary insertion path because it
+does not steal focus from the target text field. The app window and overlay
+backend use libadwaita when available, with a GTK 4 fallback. A GNOME Shell
+top-bar indicator remains future work.
 
 ## Configuration
 

@@ -405,6 +405,22 @@ def _cmd_hotkey_daemon(args: argparse.Namespace) -> int:
     )
 
 
+def _cmd_voice_keyboard(args: argparse.Namespace) -> int:
+    from .daemon import run_hotkey_daemon
+    from .transcript import make_transcript_sink
+
+    file_config = _load_cli_config(args)
+    config = _daemon_config_from_args(args, file_config, log_metrics_default=True)
+    overlay = args.overlay or file_config.overlay or "gtk"
+    return run_hotkey_daemon(
+        config,
+        mode=args.mode or file_config.mode,
+        shortcut=args.shortcut or file_config.shortcut,
+        manual_hotkey=args.manual_hotkey,
+        transcript=make_transcript_sink(overlay),
+    )
+
+
 def _cmd_config_example(_args: argparse.Namespace) -> int:
     print(DEFAULT_CONFIG, end="")
     return 0
@@ -755,6 +771,59 @@ def build_parser() -> argparse.ArgumentParser:
     )
     app.add_argument("--log-metrics", action="store_true", help="Show ASR timing metrics.")
     app.set_defaults(func=_cmd_app)
+
+    voice_keyboard = subparsers.add_parser(
+        "voice-keyboard",
+        help="Run Wordpipe as a global-hotkey voice keyboard for the focused text field.",
+    )
+    voice_keyboard.add_argument(
+        "--model-dir",
+        help="Path to Parakeet/Nemotron model directory, or legacy sherpa model when --asr-runtime sherpa.",
+    )
+    _add_model_selection_args(voice_keyboard)
+    voice_keyboard.add_argument("--config", help="Path to config.toml.")
+    voice_keyboard.add_argument(
+        "--mode",
+        choices=("hold", "toggle"),
+        help="Shortcut behavior. Hold starts on activation and stops on deactivation.",
+    )
+    voice_keyboard.add_argument(
+        "--shortcut",
+        help="Preferred GlobalShortcuts trigger string.",
+    )
+    voice_keyboard.add_argument(
+        "--manual-hotkey",
+        action="store_true",
+        help="Read manual commands from stdin instead of opening GlobalShortcuts.",
+    )
+    voice_keyboard.add_argument(
+        "--dry-run-insertion",
+        action="store_true",
+        help="Print keyboard events instead of opening a portal keyboard session.",
+    )
+    voice_keyboard.add_argument("--provider", help="ONNX Runtime provider.")
+    _add_runtime_args(voice_keyboard, default=None)
+    voice_keyboard.add_argument("--num-threads", type=int)
+    voice_keyboard.add_argument("--sample-rate", type=int)
+    voice_keyboard.add_argument("--input-device", help="sounddevice input device index or name.")
+    _add_asr_tuning_args(voice_keyboard, worker_defaults=False)
+    voice_keyboard.add_argument(
+        "--no-spoken-punctuation",
+        action="store_true",
+        help="Insert raw ASR text instead of converting spoken punctuation commands.",
+    )
+    voice_keyboard.add_argument(
+        "--endpoint",
+        action="store_true",
+        help="Enable endpoint detection/reset. Disabled by default for raw ASR streaming.",
+    )
+    voice_keyboard.add_argument("--log-metrics", action="store_true", help="Show ASR timing metrics.")
+    voice_keyboard.add_argument(
+        "--overlay",
+        choices=("stderr", "gtk"),
+        help="Where partial transcript/status text is shown. Defaults to config overlay.",
+    )
+    voice_keyboard.set_defaults(func=_cmd_voice_keyboard)
 
     daemon = subparsers.add_parser(
         "daemon",

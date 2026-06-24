@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import itertools
 import re
+import unicodedata
 from typing import Protocol
 
 from .probe import PORTAL_BUS_NAME, PORTAL_OBJECT_PATH, REMOTE_DESKTOP_IFACE
@@ -38,11 +39,35 @@ class KeyEvent:
 
 def text_to_key_events(text: str) -> list[KeyEvent]:
     events: list[KeyEvent] = []
-    for char in text:
+    for char in sanitize_text_for_keysyms(text):
         keysym = _char_to_keysym(char)
         events.append(KeyEvent(keysym, KEY_PRESSED))
         events.append(KeyEvent(keysym, KEY_RELEASED))
     return events
+
+
+def sanitize_text_for_keysyms(text: str) -> str:
+    replacements = {
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2026": "...",
+        "\u00a0": " ",
+    }
+    normalized = unicodedata.normalize("NFKD", text)
+    output: list[str] = []
+    for char in normalized:
+        char = replacements.get(char, char)
+        if char in {"\n", "\t"} or 0x20 <= ord(char) <= 0x7E:
+            output.append(char)
+        elif unicodedata.category(char).startswith("M"):
+            continue
+        else:
+            output.append(" ")
+    return re.sub(r"[ \t]{2,}", " ", "".join(output))
 
 
 def _char_to_keysym(char: str) -> int:
