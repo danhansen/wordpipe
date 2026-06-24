@@ -174,6 +174,51 @@ class CliModelResolutionTests(unittest.TestCase):
             self.assertIn("daemon output", log_file.read_text(encoding="utf-8"))
             self.assertEqual(popen_mock.call_args.kwargs["stderr"], subprocess.STDOUT)
 
+    def test_start_voice_keyboard_daemon_terminates_child_on_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pid_file = root / "voice-keyboard.pid"
+            log_file = root / "voice-keyboard.log"
+            args = _toggle_args(
+                pid_file,
+                start_if_needed=True,
+                start_timeout=0,
+                daemon_log_file=str(log_file),
+            )
+            process = mock.Mock()
+            process.poll.return_value = None
+
+            with mock.patch("wordpipe.cli.subprocess.Popen", return_value=process):
+                with self.assertRaisesRegex(RuntimeError, "did not become ready"):
+                    _start_voice_keyboard_daemon(pid_file, args)
+
+        process.terminate.assert_called_once_with()
+        process.kill.assert_not_called()
+        process.wait.assert_called_once_with(timeout=2)
+
+    def test_start_voice_keyboard_daemon_kills_child_if_terminate_times_out(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pid_file = root / "voice-keyboard.pid"
+            log_file = root / "voice-keyboard.log"
+            args = _toggle_args(
+                pid_file,
+                start_if_needed=True,
+                start_timeout=0,
+                daemon_log_file=str(log_file),
+            )
+            process = mock.Mock()
+            process.poll.return_value = None
+            process.wait.side_effect = [subprocess.TimeoutExpired("wordpipe", 2), None]
+
+            with mock.patch("wordpipe.cli.subprocess.Popen", return_value=process):
+                with self.assertRaisesRegex(RuntimeError, "did not become ready"):
+                    _start_voice_keyboard_daemon(pid_file, args)
+
+        process.terminate.assert_called_once_with()
+        process.kill.assert_called_once_with()
+        self.assertEqual(process.wait.call_count, 2)
+
     def test_voice_keyboard_toggle_removes_stale_pid_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             pid_file = Path(tmp) / "voice-keyboard.pid"

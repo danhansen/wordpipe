@@ -574,10 +574,22 @@ def _start_voice_keyboard_daemon(pid_file: Path, args: argparse.Namespace) -> No
                 f"command: {' '.join(command)}; log: {log_file}"
             )
         time.sleep(0.05)
+    _terminate_starting_daemon(process)
     raise RuntimeError(
         f"voice keyboard daemon did not become ready within {args.start_timeout}s; "
         f"pid file: {pid_file}; log: {log_file}"
     )
+
+
+def _terminate_starting_daemon(process: subprocess.Popen[object]) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=2)
 
 
 def _pid_file_points_to_live_process(pid_file: Path) -> bool:
