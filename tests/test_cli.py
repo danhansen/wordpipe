@@ -140,7 +140,7 @@ class CliModelResolutionTests(unittest.TestCase):
     def test_app_opens_setup_ui_when_selected_profile_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             args = argparse.Namespace(
-                config=None,
+                config=str(Path(tmp) / "config.toml"),
                 model_dir=None,
                 model_profile="compact",
                 model_root=tmp,
@@ -173,6 +173,10 @@ class CliModelResolutionTests(unittest.TestCase):
         self.assertIn("wordpipe model-install --profile compact", setup_error)
         self.assertEqual(run_app.call_args.kwargs["model_setup"].model_profile, "compact")
         self.assertEqual(run_app.call_args.kwargs["model_setup"].model_root, Path(tmp))
+        self.assertEqual(
+            run_app.call_args.kwargs["model_setup"].config_path,
+            Path(tmp) / "config.toml",
+        )
         self.assertIsNotNone(run_app.call_args.kwargs["controller_config_factory"])
 
     def test_model_install_download_cache_follows_model_root(self) -> None:

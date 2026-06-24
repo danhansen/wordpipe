@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .config import DEFAULT_CONFIG, WordpipeConfig, load_config
+from .config import DEFAULT_CONFIG, WordpipeConfig, default_config_path, load_config
 from .probe import ProbeResult, run_probe
 from .audio import parse_audio_device
 
@@ -412,6 +412,7 @@ def _cmd_app(args: argparse.Namespace) -> int:
 
     file_config = _load_cli_config(args)
     selected_profile = args.model_profile or file_config.model_profile
+    config_path = Path(args.config).expanduser() if getattr(args, "config", None) else default_config_path()
     raw_model_root = getattr(args, "model_root", None)
     model_root = Path(raw_model_root).expanduser() if raw_model_root else file_config.model_root
     model_setup = (
@@ -419,6 +420,7 @@ def _cmd_app(args: argparse.Namespace) -> int:
             model_root=model_root,
             model_profile=selected_profile,
             nemo_source=file_config.nemo_source,
+            config_path=config_path,
         )
         if model_root is not None
         else None

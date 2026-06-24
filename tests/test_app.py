@@ -5,7 +5,15 @@ from pathlib import Path
 import tempfile
 from unittest import mock
 
-from wordpipe.app import UiEvent, UiTranscriptSink, WordpipeApp, _summarize_progress, profile_status_text
+from wordpipe.app import (
+    AppModelSetup,
+    UiEvent,
+    UiTranscriptSink,
+    WordpipeApp,
+    _summarize_progress,
+    profile_status_text,
+)
+from wordpipe.config import load_config
 from wordpipe.daemon import DaemonConfig
 from wordpipe.models import profile_runtime_dir
 
@@ -77,6 +85,14 @@ class FakeButton:
         self.sensitive_values.append(sensitive)
 
 
+class FakeDropdown:
+    def __init__(self, selected: int) -> None:
+        self._selected = selected
+
+    def get_selected(self) -> int:
+        return self._selected
+
+
 class AppControllerStateTests(unittest.TestCase):
     def test_open_controller_reenables_dictate_button_after_setup_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -94,6 +110,29 @@ class AppControllerStateTests(unittest.TestCase):
 
         self.assertEqual(button.sensitive_values, [True])
         controller_cls.return_value.open.assert_called_once_with()
+
+    def test_profile_change_persists_selected_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "config.toml"
+            config_path.write_text('model_profile = "fast"\n', encoding="utf-8")
+            app = WordpipeApp(
+                None,
+                model_setup=AppModelSetup(
+                    model_root=root / "models",
+                    model_profile="fast",
+                    nemo_source="nvidia/example",
+                    config_path=config_path,
+                ),
+            )
+            app._glib = FakeGLib()
+
+            app._profile_changed(FakeDropdown(1), None)
+
+            config = load_config(config_path)
+
+        self.assertEqual(config.model_profile, "compact")
+        self.assertEqual(app._selected_profile, "compact")
 
 
 if __name__ == "__main__":

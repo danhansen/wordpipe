@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from wordpipe.config import load_config
+from wordpipe.config import load_config, save_model_profile
 from wordpipe.models import DEFAULT_NEMO_SOURCE_REPO, default_model_root
 
 
@@ -64,6 +64,34 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(config.spoken_punctuation)
         self.assertTrue(config.dry_run_insertion)
         self.assertTrue(config.insert_partial_text)
+
+    def test_save_model_profile_updates_existing_config_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text(
+                'model_profile = "fast"\nnum_threads = 4\n',
+                encoding="utf-8",
+            )
+
+            saved = save_model_profile("compact", path)
+            config = load_config(path)
+
+        self.assertEqual(saved, path)
+        self.assertEqual(config.model_profile, "compact")
+        self.assertEqual(config.num_threads, 4)
+
+    def test_save_model_profile_appends_missing_config_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text("num_threads = 4", encoding="utf-8")
+
+            save_model_profile("compact", path)
+            text = path.read_text(encoding="utf-8")
+            config = load_config(path)
+
+        self.assertIn('model_profile = "compact"', text)
+        self.assertEqual(config.model_profile, "compact")
+        self.assertEqual(config.num_threads, 4)
 
 
 if __name__ == "__main__":

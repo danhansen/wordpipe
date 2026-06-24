@@ -376,7 +376,9 @@ The app uses the same config and portal insertion path as `daemon` and
 If the selected `fast` or `compact` model profile is missing, the app opens in
 setup mode. Choose the profile in the dropdown and press `Install` to download
 the source NeMo checkpoint and build the selected runtime profile under the
-canonical `model_root`.
+canonical `model_root`. Changing the dropdown also saves `model_profile` to the
+normal Wordpipe config file, so later commands such as `voice-keyboard
+--signal-hotkey` use the same profile unless explicitly overridden.
 
 ## Runtime Dependencies
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
+import tempfile
 import tomllib
 from typing import Any
 
@@ -118,6 +119,36 @@ def load_config(path: Path | None = None) -> WordpipeConfig:
         log_metrics=_boolean(data, "log_metrics", False),
         insert_partial_text=_boolean(data, "insert_partial_text", False),
     )
+
+
+def save_model_profile(profile: str, path: Path | None = None) -> Path:
+    selected = _model_profile(profile)
+    config_path = path if path is not None else default_config_path()
+    existing = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+    line = f'model_profile = "{selected}"'
+    lines = existing.splitlines()
+    replaced = False
+    for index, current in enumerate(lines):
+        if current.lstrip().split("=", 1)[0].strip() == "model_profile":
+            lines[index] = line
+            replaced = True
+            break
+    if not replaced:
+        lines.append(line)
+    text = "\n".join(lines) + "\n"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=config_path.parent,
+        prefix=f"{config_path.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as handle:
+        handle.write(text)
+        temporary = Path(handle.name)
+    temporary.replace(config_path)
+    return config_path
 
 
 def _optional_path(value: object) -> Path | None:

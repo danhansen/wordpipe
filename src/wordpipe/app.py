@@ -27,6 +27,7 @@ class AppModelSetup:
     model_root: Path
     model_profile: str
     nemo_source: str
+    config_path: Path | None = None
     python: Path = Path(sys.executable)
 
 
@@ -278,6 +279,7 @@ class WordpipeApp:
         if selected >= len(names):
             return
         self._selected_profile = names[selected]
+        self._persist_selected_profile()
         if self._controller is not None:
             self._controller.close()
             self._controller = None
@@ -288,6 +290,16 @@ class WordpipeApp:
         self._refresh_profile_state()
         if self._selected_profile_installed():
             self._open_controller()
+
+    def _persist_selected_profile(self) -> None:
+        if self._model_setup is None or self._model_setup.config_path is None:
+            return
+        try:
+            from .config import save_model_profile
+
+            save_model_profile(self._selected_profile, self._model_setup.config_path)
+        except Exception as exc:  # noqa: BLE001 - profile selection should remain usable.
+            self._post_event(UiEvent("error", f"Could not save model profile: {exc}"))
 
     def _install_selected_profile(self, _button) -> None:  # type: ignore[no-untyped-def]
         if self._model_setup is None or self._install_thread is not None:
