@@ -85,6 +85,7 @@ class GlobalShortcutsPortalLoop:
 
         self._open_session()
         loop = GLib.MainLoop()
+        subscriptions: list[int] = []
 
         def activated(parameters: tuple[object, ...], _object_path: str) -> None:
             session_handle, shortcut_id, _timestamp, _options = parameters
@@ -96,11 +97,13 @@ class GlobalShortcutsPortalLoop:
             if str(session_handle) == self._session_handle and str(shortcut_id) == self._config.shortcut_id:
                 on_deactivate()
 
-        subscriptions = [
-            self._shortcuts.subscribe_signal(GLOBAL_SHORTCUTS_IFACE, "Activated", activated),
-            self._shortcuts.subscribe_signal(GLOBAL_SHORTCUTS_IFACE, "Deactivated", deactivated),
-        ]
         try:
+            subscriptions.append(
+                self._shortcuts.subscribe_signal(GLOBAL_SHORTCUTS_IFACE, "Activated", activated)
+            )
+            subscriptions.append(
+                self._shortcuts.subscribe_signal(GLOBAL_SHORTCUTS_IFACE, "Deactivated", deactivated)
+            )
             loop.run()
         finally:
             for subscription in subscriptions:
@@ -116,23 +119,27 @@ class GlobalShortcutsPortalLoop:
             self._session_handle = None
 
     def _open_session(self) -> None:
-        create = self._request(
-            "CreateSession",
-            "(a{sv})",
-            {
-                "handle_token": self._token("create"),
-                "session_handle_token": self._token("session"),
-            },
-        )
-        self._session_handle = str(create["session_handle"])
-        self._request(
-            "BindShortcuts",
-            "(oa(sa{sv})sa{sv})",
-            self._session_handle,
-            self._shortcut_array(),
-            "",
-            {"handle_token": self._token("bind")},
-        )
+        try:
+            create = self._request(
+                "CreateSession",
+                "(a{sv})",
+                {
+                    "handle_token": self._token("create"),
+                    "session_handle_token": self._token("session"),
+                },
+            )
+            self._session_handle = str(create["session_handle"])
+            self._request(
+                "BindShortcuts",
+                "(oa(sa{sv})sa{sv})",
+                self._session_handle,
+                self._shortcut_array(),
+                "",
+                {"handle_token": self._token("bind")},
+            )
+        except Exception:
+            self.close()
+            raise
 
     def _shortcut_array(self) -> list[tuple[str, dict[str, object]]]:
         return [
