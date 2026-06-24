@@ -255,8 +255,11 @@ installed on `PATH`; they are not a complete distro package.
 - Default hotkey mode: hold-to-dictate, toggle-to-dictate, or both.
 - Whether the first GNOME integration should use portals only or include a Shell
   extension immediately.
-- Model installation: managed `model-install` path builds source NeMo into the
-  selected `fast` or `compact` profile; graphical install controls remain a
-  UI follow-up.
+- Model installation: managed `model-install` and the GTK/libadwaita app both
+  build source NeMo into the selected `fast` or `compact` profile under the
+  canonical model root.
+- App ergonomics: the control window can test dictation directly, but the
+  focus-preserving voice-keyboard path is still the resident
+  `voice-keyboard --signal-hotkey` daemon plus a GNOME shortcut.
 - Whether spoken punctuation should remain always-on by default after live
   testing.

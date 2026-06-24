@@ -3,8 +3,10 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 import tempfile
+from unittest import mock
 
-from wordpipe.app import UiEvent, UiTranscriptSink, _summarize_progress, profile_status_text
+from wordpipe.app import UiEvent, UiTranscriptSink, WordpipeApp, _summarize_progress, profile_status_text
+from wordpipe.daemon import DaemonConfig
 from wordpipe.models import profile_runtime_dir
 
 
@@ -58,6 +60,40 @@ class AppModelSetupTests(unittest.TestCase):
         self.assertEqual(len(summary), 120)
         self.assertTrue(summary.startswith("..."))
         self.assertTrue(summary.endswith("x" * 20))
+
+
+class FakeGLib:
+    @staticmethod
+    def idle_add(callback, *args):  # type: ignore[no-untyped-def]
+        callback(*args)
+        return 1
+
+
+class FakeButton:
+    def __init__(self) -> None:
+        self.sensitive_values: list[bool] = []
+
+    def set_sensitive(self, sensitive: bool) -> None:
+        self.sensitive_values.append(sensitive)
+
+
+class AppControllerStateTests(unittest.TestCase):
+    def test_open_controller_reenables_dictate_button_after_setup_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            model_dir = Path(tmp)
+            config = DaemonConfig(model_dir=model_dir, dry_run_insertion=True)
+            app = WordpipeApp(config)
+            button = FakeButton()
+            app._glib = FakeGLib()
+            app._toggle_button = button
+
+            with mock.patch("wordpipe.app.DictationController") as controller_cls:
+                controller_cls.return_value.open.return_value = None
+
+                self.assertFalse(app._open_controller())
+
+        self.assertEqual(button.sensitive_values, [True])
+        controller_cls.return_value.open.assert_called_once_with()
 
 
 if __name__ == "__main__":

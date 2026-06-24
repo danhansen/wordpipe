@@ -266,6 +266,7 @@ class WordpipeApp:
         try:
             self._controller.open()
             self._post_event(UiEvent("status", "Ready"))
+            self._set_button_sensitive(True)
         except Exception as exc:  # noqa: BLE001 - UI must show setup failures.
             self._post_event(UiEvent("error", f"{type(exc).__name__}: {exc}"))
             self._set_button_sensitive(False)
