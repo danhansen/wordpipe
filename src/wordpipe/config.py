@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 import os
 from pathlib import Path
 import tempfile
@@ -218,7 +219,7 @@ def _number(data: dict[str, Any], key: str, default: float) -> float:
 
 def _positive_number(data: dict[str, Any], key: str, default: float) -> float:
     value = _number(data, key, default)
-    if value <= 0.0:
+    if not math.isfinite(value) or value <= 0.0:
         raise ValueError(f"{key} must be positive")
     return value
 
