@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import subprocess
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -153,6 +154,25 @@ class DaemonTests(unittest.TestCase):
         self.assertIn("wordpipe", command)
         self.assertIn("asr-worker", command)
         self.assertIn("--provider", command)
+
+    def test_asr_process_close_waits_after_kill(self) -> None:
+        process = AsrProcess(DaemonConfig(model_dir=Path("/models/parakeet")))
+        child = mock.Mock()
+        child.stdin = mock.Mock()
+        child.poll.return_value = None
+        child.wait.side_effect = [
+            subprocess.TimeoutExpired("asr", 5),
+            subprocess.TimeoutExpired("asr", 2),
+            None,
+        ]
+        process._proc = child  # type: ignore[assignment]
+
+        process.close()
+
+        child.terminate.assert_called_once_with()
+        child.kill.assert_called_once_with()
+        self.assertEqual(child.wait.call_args_list[-1].kwargs, {"timeout": 2})
+        self.assertIsNone(process._proc)
 
     def test_stderr_reader_surfaces_worker_stderr(self) -> None:
         transcript = FakeTranscript()

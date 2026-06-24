@@ -226,6 +226,7 @@ class AsrProcess:
                 self._proc.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 self._proc.kill()
+                self._proc.wait(timeout=2)
         finally:
             self._proc = None
 
