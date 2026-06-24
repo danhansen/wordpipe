@@ -212,12 +212,21 @@ def _prepare_built_profile_source(source: Path) -> Path:
 
         tempdir = Path(tempfile.mkdtemp(prefix="wordpipe-profile-"))
         with zipfile.ZipFile(source) as archive:
-            archive.extractall(tempdir)
+            _extract_zip_safely(archive, tempdir)
         return _find_built_profile_dir(tempdir)
     raise RuntimeError(
         f"{source} is not a built Wordpipe model profile. Expected a directory or archive "
         "containing tokenizer.model plus encoder/decoder_joint ONNX or ORT files."
     )
+
+
+def _extract_zip_safely(archive: zipfile.ZipFile, destination: Path) -> None:
+    root = destination.resolve()
+    for info in archive.infolist():
+        target = (destination / info.filename).resolve()
+        if target != root and root not in target.parents:
+            raise RuntimeError(f"Refusing unsafe zip member: {info.filename}")
+        archive.extract(info, destination)
 
 
 def _find_built_profile_dir(root: Path) -> Path:

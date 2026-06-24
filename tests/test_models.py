@@ -4,6 +4,7 @@ import contextlib
 import io
 import tempfile
 import unittest
+import zipfile
 from unittest import mock
 from pathlib import Path
 
@@ -103,6 +104,44 @@ class ModelDownloadTests(unittest.TestCase):
             self.assertEqual((runtime_dir / "tokenizer.model").read_text(encoding="utf-8"), "tokenizer")
             self.assertTrue((runtime_dir / "encoder.ort").exists())
             self.assertTrue((runtime_dir / "decoder_joint.ort").exists())
+
+    def test_install_built_profile_imports_zip_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive_path = root / "profile.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("profile/tokenizer.model", "tokenizer")
+                archive.writestr("profile/encoder.ort", "encoder")
+                archive.writestr("profile/decoder_joint.ort", "decoder")
+
+            runtime_dir = install_built_profile(
+                source=archive_path,
+                model_root=root / "installed",
+                profile="compact",
+            )
+
+            self.assertEqual(runtime_dir, profile_runtime_dir(root / "installed", "compact"))
+            self.assertEqual((runtime_dir / "tokenizer.model").read_text(encoding="utf-8"), "tokenizer")
+
+    def test_install_built_profile_rejects_unsafe_zip_member(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive_path = root / "profile.zip"
+            outside = root / "evil.txt"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("../evil.txt", "bad")
+                archive.writestr("profile/tokenizer.model", "tokenizer")
+                archive.writestr("profile/encoder.ort", "encoder")
+                archive.writestr("profile/decoder_joint.ort", "decoder")
+
+            with self.assertRaisesRegex(RuntimeError, "unsafe zip member"):
+                install_built_profile(
+                    source=archive_path,
+                    model_root=root / "installed",
+                    profile="compact",
+                )
+
+            self.assertFalse(outside.exists())
 
     def test_nemo_source_is_not_built_profile_archive(self) -> None:
         self.assertFalse(source_may_be_built_profile_archive(Path("source.nemo")))
