@@ -42,21 +42,27 @@ class AsrWorkerConfig:
 class ModelLayout:
     kind: str
     model_dir: Path
-    tokens: Path
+    tokens: Path | None = None
     model: Path | None = None
     encoder: Path | None = None
     decoder: Path | None = None
     joiner: Path | None = None
+    decoder_joint: Path | None = None
+    tokenizer: Path | None = None
+    config: Path | None = None
 
     def to_dict(self) -> dict[str, str | None]:
         return {
             "kind": self.kind,
             "model_dir": str(self.model_dir),
-            "tokens": str(self.tokens),
+            "tokens": str(self.tokens) if self.tokens else None,
             "model": str(self.model) if self.model else None,
             "encoder": str(self.encoder) if self.encoder else None,
             "decoder": str(self.decoder) if self.decoder else None,
             "joiner": str(self.joiner) if self.joiner else None,
+            "decoder_joint": str(self.decoder_joint) if self.decoder_joint else None,
+            "tokenizer": str(self.tokenizer) if self.tokenizer else None,
+            "config": str(self.config) if self.config else None,
         }
 
 
@@ -272,6 +278,13 @@ def _create_recognizer(config: AsrWorkerConfig) -> object:
         ) from exc
 
     layout = discover_model_layout(config.model_dir)
+    if layout.kind == "parakeet_nemotron":
+        raise RuntimeError(
+            "Parakeet/Nemotron model layouts are supported by the Rust parakeet runtime, "
+            "not the legacy sherpa-onnx worker"
+        )
+    if layout.tokens is None:
+        raise RuntimeError(f"discovered sherpa-onnx layout {layout.kind!r} has no tokens file")
 
     common = {
         "tokens": str(layout.tokens),
@@ -312,6 +325,21 @@ def _create_recognizer(config: AsrWorkerConfig) -> object:
 
 def discover_model_layout(model_dir: Path) -> ModelLayout:
     resolved = model_dir.expanduser().resolve()
+
+    tokenizer = resolved / "tokenizer.model"
+    encoder = _prefer_ort(resolved / "encoder")
+    decoder_joint = _prefer_ort(resolved / "decoder_joint")
+    if tokenizer.exists() and encoder and decoder_joint:
+        config = resolved / "config.json"
+        return ModelLayout(
+            kind="parakeet_nemotron",
+            model_dir=resolved,
+            encoder=encoder,
+            decoder_joint=decoder_joint,
+            tokenizer=tokenizer,
+            config=config if config.exists() else None,
+        )
+
     tokens = resolved / "tokens.txt"
     if not tokens.exists():
         raise FileNotFoundError(f"missing tokens file: {tokens}")
@@ -580,6 +608,16 @@ def read_wav_mono_float32(path: Path):
 def _find_one(directory: Path, pattern: str) -> Path | None:
     matches = sorted(directory.glob(pattern))
     return matches[0] if matches else None
+
+
+def _prefer_ort(stem: Path) -> Path | None:
+    ort = stem.with_suffix(".ort")
+    if ort.exists():
+        return ort
+    onnx = stem.with_suffix(".onnx")
+    if onnx.exists():
+        return onnx
+    return None
 
 
 def _call_factory(factory: Callable[..., object], kwargs: dict[str, object]) -> object:

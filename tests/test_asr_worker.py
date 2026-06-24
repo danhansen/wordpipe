@@ -6,7 +6,12 @@ import types
 import unittest
 from pathlib import Path
 
-from wordpipe.asr_worker import AsrWorkerConfig, _create_recognizer, discover_model_layout
+from wordpipe.asr_worker import (
+    AsrWorkerConfig,
+    _create_recognizer,
+    discover_model_layout,
+    render_model_info,
+)
 
 
 class _OnlineRecognizer:
@@ -84,6 +89,35 @@ class ModelDiscoveryTests(unittest.TestCase):
         self.assertEqual(kwargs["encoder"], str(model_dir / "encoder.onnx"))
         self.assertEqual(kwargs["decoder"], str(model_dir / "decoder.onnx"))
         self.assertEqual(kwargs["joiner"], str(model_dir / "joiner.onnx"))
+
+    def test_parakeet_nemotron_layout_does_not_require_sherpa_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            model_dir = Path(tmp)
+            (model_dir / "tokenizer.model").write_text("", encoding="utf-8")
+            (model_dir / "encoder.ort").write_text("", encoding="utf-8")
+            (model_dir / "decoder_joint.ort").write_text("", encoding="utf-8")
+            (model_dir / "config.json").write_text("{}", encoding="utf-8")
+
+            layout = discover_model_layout(model_dir)
+            rendered = render_model_info(model_dir)
+
+        self.assertEqual(layout.kind, "parakeet_nemotron")
+        self.assertIsNone(layout.tokens)
+        self.assertEqual(layout.encoder, model_dir / "encoder.ort")
+        self.assertEqual(layout.decoder_joint, model_dir / "decoder_joint.ort")
+        self.assertEqual(layout.tokenizer, model_dir / "tokenizer.model")
+        self.assertIn('"kind": "parakeet_nemotron"', rendered)
+        self.assertIn('"tokens": null', rendered)
+
+    def test_parakeet_nemotron_layout_is_rejected_by_sherpa_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            model_dir = Path(tmp)
+            (model_dir / "tokenizer.model").write_text("", encoding="utf-8")
+            (model_dir / "encoder.onnx").write_text("", encoding="utf-8")
+            (model_dir / "decoder_joint.onnx").write_text("", encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, "Rust parakeet runtime"):
+                _create_recognizer(AsrWorkerConfig(model_dir=model_dir))
 
 
 if __name__ == "__main__":
