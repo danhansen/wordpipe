@@ -92,7 +92,7 @@ class DaemonTests(unittest.TestCase):
         controller._handle_event({"event": "partial", "text": "hello world"})
         controller._handle_event({"event": "commit", "text": "hello world"})
 
-        self.assertEqual(keyboard.inserted, ["hello", " world", " "])
+        self.assertEqual(keyboard.inserted, ["hello", " world"])
         self.assertEqual(transcript.events[-1], ("commit", "hello world "))
 
     def test_streaming_partials_do_not_duplicate_rewritten_text(self) -> None:

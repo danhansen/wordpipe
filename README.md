@@ -270,7 +270,8 @@ PYTHONPATH=src python3 -m wordpipe voice-keyboard \
 Then focus any text field, press `Ctrl+Alt+Space`, speak, and press
 `Ctrl+Alt+Space` again. In the default toggle mode, Wordpipe inserts appended
 partial text as ASR produces it; the second press stops dictation and inserts
-any remaining final suffix.
+no additional final text. The final ASR commit is still logged, but realtime
+typing comes from append-only partials.
 
 The current development path uses a GNOME custom shortcut that runs
 `wordpipe voice-keyboard-toggle` against the resident daemon above. This avoids

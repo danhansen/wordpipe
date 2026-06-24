@@ -339,7 +339,7 @@ class DictationController:
                 if self._config.log_metrics:
                     self._transcript.status(_format_metrics(item.get("data")))
                 if self._config.insert_partial_text:
-                    self._insert_streaming_text(text)
+                    return
                 else:
                     self._insert_text(text)
         elif kind == "stats":
