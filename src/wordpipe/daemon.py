@@ -462,6 +462,7 @@ def run_signal_hotkey_daemon(
 ) -> int:
     keyboard: KeyboardBackend
     keyboard = DryRunKeyboardBackend() if config.dry_run_insertion else PortalKeyboardBackend()
+    transcript = transcript if transcript is not None else StderrTranscriptSink()
     controller = DictationController(config, keyboard, transcript)
     done = threading.Event()
     target_pid_file = pid_file or default_voice_keyboard_pid_file()
@@ -485,7 +486,6 @@ def run_signal_hotkey_daemon(
     target_pid_file.parent.mkdir(parents=True, exist_ok=True)
     target_pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
     try:
-        transcript = transcript if transcript is not None else StderrTranscriptSink()
         transcript.status(f"voice keyboard ready pid={os.getpid()}")
         done.wait()
         return 0

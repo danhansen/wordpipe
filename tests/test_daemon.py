@@ -133,6 +133,7 @@ class DaemonTests(unittest.TestCase):
                 )
 
             self.assertEqual(order, ["open", "ready"])
+            self.assertIs(controller_cls.call_args.args[2], transcript)
             controller_cls.return_value.close.assert_called_once_with()
             self.assertFalse(pid_file.exists())
 
