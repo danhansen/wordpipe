@@ -44,6 +44,15 @@ class PackagingTests(unittest.TestCase):
         )
         self.assertNotIn("path: ../../packaging/flatpak\n", manifest)
 
+    def test_flatpak_dir_sources_skip_python_cache_files(self) -> None:
+        manifest = (ROOT / "packaging/flatpak/dev.wordpipe.Wordpipe.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertGreaterEqual(manifest.count("- __pycache__"), 2)
+        self.assertGreaterEqual(manifest.count('- "*.pyc"'), 2)
+        self.assertGreaterEqual(manifest.count('- "*/*.pyc"'), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

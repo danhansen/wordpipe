@@ -95,9 +95,21 @@ modules:
       - type: dir
         path: ../../src
         dest: src
+        skip:
+          - __pycache__
+          - __pycache__/*
+          - "*/__pycache__"
+          - "*/__pycache__/*"
+          - "*.pyc"
+          - "*/*.pyc"
       - type: dir
         path: ../../scripts
         dest: scripts
+        skip:
+          - __pycache__
+          - __pycache__/*
+          - "*.pyc"
+          - "*/*.pyc"
       - type: file
         path: ../../packaging/flatpak/wordpipe-flatpak-launch
         dest: packaging/flatpak
