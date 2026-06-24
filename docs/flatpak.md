@@ -85,6 +85,7 @@ Command-line diagnostics remain available through the same Flatpak command:
 ```sh
 flatpak run dev.wordpipe.Wordpipe probe
 flatpak run dev.wordpipe.Wordpipe model-profiles
+flatpak run dev.wordpipe.Wordpipe audio-devices --backend parakeet
 flatpak run dev.wordpipe.Wordpipe voice-keyboard --model-profile compact
 ```
 
@@ -132,6 +133,15 @@ shortcut:
 
 ```sh
 flatpak run dev.wordpipe.Wordpipe voice-keyboard --signal-hotkey
+```
+
+If you need to select a non-default microphone, use the Parakeet device list
+because it comes from the same Rust/CPAL worker that records audio. Pass the
+listed `cpal:N` selector to `voice-keyboard`, `listen-test`, or the app:
+
+```sh
+flatpak run dev.wordpipe.Wordpipe audio-devices --backend parakeet
+flatpak run dev.wordpipe.Wordpipe voice-keyboard --signal-hotkey --input-device cpal:0
 ```
 
 If the shortcut starts the daemon itself, startup logs are written inside the

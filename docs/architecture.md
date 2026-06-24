@@ -182,7 +182,9 @@ partial results, and reports realtime factor (RTF) without inserting text.
 Endpoint detection is disabled by default across live paths so raw continuous
 ASR behavior is visible without phrase-boundary resets.
 `audio-devices` and `record-test` are diagnostic commands for validating the
-capture device independently from ASR.
+capture device independently from ASR. `audio-devices --backend parakeet`
+queries the Rust/CPAL worker and prints `cpal:N` selectors that can be passed
+back to Parakeet runtime commands.
 `stream-file-test` feeds a known WAV through the streaming recognizer and is the
 primary check for whether the model emits partial hypotheses before finalization.
 

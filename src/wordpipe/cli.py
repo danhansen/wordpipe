@@ -834,7 +834,7 @@ def build_parser() -> argparse.ArgumentParser:
     asr.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
     asr.add_argument("--num-threads", type=_positive_int_arg, default=2)
     asr.add_argument("--sample-rate", type=_positive_int_arg, default=16000)
-    asr.add_argument("--input-device", help="Input device selector; Parakeet also accepts cpal:N.")
+    asr.add_argument("--input-device", help="sounddevice input device index or name.")
     asr.add_argument(
         "--endpoint",
         action="store_true",
