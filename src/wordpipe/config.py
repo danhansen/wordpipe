@@ -39,6 +39,7 @@ spoken_punctuation = true
 dry_run_insertion = false
 log_metrics = false
 insert_partial_text = false
+stream_insert_delay_seconds = 0.0
 """
 
 
@@ -69,6 +70,7 @@ class WordpipeConfig:
     dry_run_insertion: bool = False
     log_metrics: bool = False
     insert_partial_text: bool = False
+    stream_insert_delay_seconds: float = 0.0
 
 
 def default_config_path() -> Path:
@@ -120,6 +122,9 @@ def load_config(path: Path | None = None) -> WordpipeConfig:
             dry_run_insertion=_boolean(data, "dry_run_insertion", False),
             log_metrics=_boolean(data, "log_metrics", False),
             insert_partial_text=_boolean(data, "insert_partial_text", False),
+            stream_insert_delay_seconds=_non_negative_number(
+                data, "stream_insert_delay_seconds", 0.0
+            ),
         )
     except (tomllib.TOMLDecodeError, ValueError) as exc:
         raise RuntimeError(f"invalid config {config_path}: {exc}") from exc
@@ -221,6 +226,13 @@ def _positive_number(data: dict[str, Any], key: str, default: float) -> float:
     value = _number(data, key, default)
     if not math.isfinite(value) or value <= 0.0:
         raise ValueError(f"{key} must be positive")
+    return value
+
+
+def _non_negative_number(data: dict[str, Any], key: str, default: float) -> float:
+    value = _number(data, key, default)
+    if not math.isfinite(value) or value < 0.0:
+        raise ValueError(f"{key} must be non-negative")
     return value
 
 

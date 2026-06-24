@@ -92,11 +92,14 @@ class CliModelResolutionTests(unittest.TestCase):
                 "--model-dir",
                 "/models/parakeet",
                 "--insert-partials",
+                "--stream-insert-delay-seconds",
+                "0.03",
             ]
         )
 
         self.assertEqual(args.command, "daemon")
         self.assertTrue(args.insert_partials)
+        self.assertEqual(args.stream_insert_delay_seconds, 0.03)
 
     def test_voice_keyboard_toggle_parser_accepts_start_if_needed(self) -> None:
         args = build_parser().parse_args(
@@ -196,6 +199,8 @@ class CliModelResolutionTests(unittest.TestCase):
             ["voice-keyboard", "--num-threads", "0"],
             ["voice-keyboard", "--sample-rate", "0"],
             ["voice-keyboard", "--queue-seconds", "0"],
+            ["voice-keyboard", "--stream-insert-delay-seconds", "-0.1"],
+            ["voice-keyboard", "--stream-insert-delay-seconds", "nan"],
             ["voice-keyboard", "--endpoint-rule1-min-trailing-silence", "0"],
             ["daemon", "--endpoint-rule2-min-trailing-silence", "-1"],
             ["listen-test", "--model-dir", "/models/parakeet", "--duration", "0"],

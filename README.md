@@ -329,6 +329,22 @@ PYTHONPATH=src python3 -m wordpipe voice-keyboard \
   --overlay stderr
 ```
 
+The Nemotron streaming model emits text on a 560 ms cadence, so several words
+can arrive in one partial. To make those bursts feel less abrupt, pace the
+already-emitted suffix into the target field:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe voice-keyboard \
+  --model-profile compact \
+  --signal-hotkey \
+  --overlay stderr \
+  --stream-insert-delay-seconds 0.03
+```
+
+This does not reduce ASR latency. It inserts the first word-like piece from each
+burst immediately and then waits the configured delay between the rest. Omit the
+flag, or set `stream_insert_delay_seconds = 0.0`, for fastest raw insertion.
+
 When `voice-keyboard-toggle --start-if-needed` starts the daemon for a GNOME
 shortcut, daemon stdout/stderr is written to
 `$XDG_CACHE_HOME/wordpipe/voice-keyboard.log`, or

@@ -10,6 +10,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from typing import Iterator
 
 from .hotkeys import (
@@ -96,6 +97,7 @@ class DaemonConfig:
     spoken_punctuation: bool = True
     log_metrics: bool = False
     insert_partial_text: bool = False
+    stream_insert_delay_seconds: float = 0.0
 
     def __post_init__(self) -> None:
         if self.num_threads <= 0:
@@ -118,11 +120,20 @@ class DaemonConfig:
             self.endpoint_rule3_min_utterance_length,
             "endpoint_rule3_min_utterance_length",
         )
+        _require_non_negative_finite(
+            self.stream_insert_delay_seconds,
+            "stream_insert_delay_seconds",
+        )
 
 
 def _require_positive_finite(value: float, name: str) -> None:
     if not math.isfinite(value) or value <= 0.0:
         raise ValueError(f"{name} must be positive")
+
+
+def _require_non_negative_finite(value: float, name: str) -> None:
+    if not math.isfinite(value) or value < 0.0:
+        raise ValueError(f"{name} must be non-negative")
 
 
 def format_committed_text(text: str) -> str:
@@ -515,7 +526,7 @@ class DictationController:
                 return
             suffix = current[len(previous) :]
         if suffix:
-            self._insert_text(suffix)
+            self._insert_streaming_suffix(suffix)
             with self._lock:
                 self._streaming_inserted_any = True
         with self._lock:
@@ -528,11 +539,40 @@ class DictationController:
                 print(f"key: {rendered}", file=sys.stderr)
             self._keyboard.events.clear()
 
+    def _insert_streaming_suffix(self, text: str) -> None:
+        delay = self._config.stream_insert_delay_seconds
+        if delay <= 0.0:
+            self._insert_text(text)
+            return
+        segments = streaming_text_segments(text)
+        for index, segment in enumerate(segments):
+            self._insert_text(segment)
+            if index + 1 < len(segments):
+                time.sleep(delay)
+
 
 def _normalize_text(text: str, spoken_punctuation: bool) -> str:
     if spoken_punctuation:
         return normalize_spoken_punctuation(text)
     return text
+
+
+def streaming_text_segments(text: str) -> list[str]:
+    segments: list[str] = []
+    start = 0
+    while start < len(text):
+        end = start
+        while end < len(text) and text[end].isspace():
+            end += 1
+        while end < len(text) and not text[end].isspace():
+            end += 1
+        while end < len(text) and text[end].isspace():
+            end += 1
+        if end == start:
+            end += 1
+        segments.append(text[start:end])
+        start = end
+    return segments
 
 
 def _format_metrics(data: object) -> str:

@@ -23,6 +23,7 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(config.insert_partial_text)
         self.assertEqual(config.num_threads, 2)
         self.assertEqual(config.queue_seconds, 10.0)
+        self.assertEqual(config.stream_insert_delay_seconds, 0.0)
 
     def test_loads_config_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -44,6 +45,7 @@ class ConfigTests(unittest.TestCase):
                         "spoken_punctuation = false",
                         "dry_run_insertion = true",
                         "insert_partial_text = true",
+                        "stream_insert_delay_seconds = 0.03",
                     ]
                 ),
                 encoding="utf-8",
@@ -64,6 +66,7 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(config.spoken_punctuation)
         self.assertTrue(config.dry_run_insertion)
         self.assertTrue(config.insert_partial_text)
+        self.assertEqual(config.stream_insert_delay_seconds, 0.03)
 
     def test_invalid_config_value_reports_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -137,6 +140,14 @@ class ConfigTests(unittest.TestCase):
             (
                 "endpoint_rule3_min_utterance_length = nan\n",
                 "endpoint_rule3_min_utterance_length must be positive",
+            ),
+            (
+                "stream_insert_delay_seconds = -0.1\n",
+                "stream_insert_delay_seconds must be non-negative",
+            ),
+            (
+                "stream_insert_delay_seconds = nan\n",
+                "stream_insert_delay_seconds must be non-negative",
             ),
         ]
         for text, message in cases:

@@ -50,6 +50,16 @@ def _positive_float_arg(value: str) -> float:
     return parsed
 
 
+def _non_negative_float_arg(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a number") from exc
+    if not math.isfinite(parsed) or parsed < 0.0:
+        raise argparse.ArgumentTypeError("must be a non-negative finite number")
+    return parsed
+
+
 def _cmd_probe(args: argparse.Namespace) -> int:
     result = run_probe()
     if args.json:
@@ -495,6 +505,9 @@ def _daemon_config_from_args(
             or getattr(args, "insert_partials", False)
         )
         and not getattr(args, "final_commit_only", False),
+        stream_insert_delay_seconds=args.stream_insert_delay_seconds
+        if getattr(args, "stream_insert_delay_seconds", None) is not None
+        else file_config.stream_insert_delay_seconds,
     )
 
 
@@ -806,6 +819,11 @@ def _add_insertion_mode_args(parser: argparse.ArgumentParser, *, partials_defaul
             action="store_true",
             help="Insert appended partial text as ASR produces it instead of waiting for stop.",
         )
+    parser.add_argument(
+        "--stream-insert-delay-seconds",
+        type=_non_negative_float_arg,
+        help="Optional delay between word-like pieces inside one streamed partial burst.",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

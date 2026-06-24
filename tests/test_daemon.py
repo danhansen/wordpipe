@@ -14,6 +14,7 @@ from wordpipe.daemon import (
     DictationController,
     format_committed_text,
     run_signal_hotkey_daemon,
+    streaming_text_segments,
 )
 
 
@@ -218,6 +219,10 @@ class DaemonTests(unittest.TestCase):
             ({"audio_chunk_seconds": 0.0}, "audio_chunk_seconds must be positive"),
             ({"queue_seconds": 0.0}, "queue_seconds must be positive"),
             ({"stats_interval_seconds": math.inf}, "stats_interval_seconds must be positive"),
+            (
+                {"stream_insert_delay_seconds": -0.01},
+                "stream_insert_delay_seconds must be non-negative",
+            ),
             (
                 {"endpoint_rule1_min_trailing_silence": 0.0},
                 "endpoint_rule1_min_trailing_silence must be positive",
@@ -446,6 +451,31 @@ class DaemonTests(unittest.TestCase):
 
         self.assertEqual(keyboard.inserted, ["hello", " world"])
         self.assertEqual(transcript.events[-1], ("commit", "hello world "))
+
+    def test_streaming_text_segments_keep_spaces_with_words(self) -> None:
+        self.assertEqual(
+            streaming_text_segments(" hello world today"),
+            [" hello ", "world ", "today"],
+        )
+
+    def test_streaming_partials_can_pace_inserted_suffixes(self) -> None:
+        keyboard = FakeKeyboard()
+        transcript = FakeTranscript()
+        controller = DictationController(
+            DaemonConfig(
+                model_dir=Path("/models/parakeet"),
+                insert_partial_text=True,
+                stream_insert_delay_seconds=0.03,
+            ),
+            keyboard,
+            transcript,
+        )
+
+        with mock.patch("wordpipe.daemon.time.sleep") as sleep:
+            controller._handle_event({"event": "partial", "text": "hello world today"})
+
+        self.assertEqual(keyboard.inserted, ["hello ", "world ", "today"])
+        self.assertEqual(sleep.call_args_list, [mock.call(0.03), mock.call(0.03)])
 
     def test_streaming_final_commit_inserts_when_no_partial_text_was_inserted(self) -> None:
         keyboard = FakeKeyboard()
