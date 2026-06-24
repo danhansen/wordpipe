@@ -59,6 +59,12 @@ class ModelProfileSpec:
         return output
 
 
+@dataclass(frozen=True)
+class _PreparedProfileSource:
+    path: Path
+    cleanup_dir: Path | None = None
+
+
 MODEL_PROFILES: dict[ModelProfile, ModelProfileSpec] = {
     "fast": ModelProfileSpec(
         name="fast",
@@ -190,30 +196,42 @@ def install_built_profile(
             raise RuntimeError(f"profile {profile!r} is already installed at {destination}; pass --force to overwrite it")
         shutil.rmtree(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(prepared_source, destination)
+    try:
+        shutil.copytree(prepared_source.path, destination)
+    finally:
+        if prepared_source.cleanup_dir is not None:
+            shutil.rmtree(prepared_source.cleanup_dir, ignore_errors=True)
     return destination
 
 
-def _prepare_built_profile_source(source: Path) -> Path:
+def _prepare_built_profile_source(source: Path) -> _PreparedProfileSource:
     source = source.expanduser()
     if source_is_built_profile(source):
-        return source
+        return _PreparedProfileSource(source)
     if source.is_file() and source.name.lower().endswith(".nemo"):
         raise RuntimeError(f"{source} is a NeMo source model, not a built Wordpipe model profile.")
     if source.is_file() and source_may_be_built_profile_archive(source) and tarfile.is_tarfile(source):
         import tempfile
 
         tempdir = Path(tempfile.mkdtemp(prefix="wordpipe-profile-"))
-        with tarfile.open(source, "r:*") as archive:
-            _extract_tar_safely(archive, tempdir)
-        return _find_built_profile_dir(tempdir)
+        try:
+            with tarfile.open(source, "r:*") as archive:
+                _extract_tar_safely(archive, tempdir)
+            return _PreparedProfileSource(_find_built_profile_dir(tempdir), tempdir)
+        except Exception:
+            shutil.rmtree(tempdir, ignore_errors=True)
+            raise
     if source.is_file() and source_may_be_built_profile_archive(source) and zipfile.is_zipfile(source):
         import tempfile
 
         tempdir = Path(tempfile.mkdtemp(prefix="wordpipe-profile-"))
-        with zipfile.ZipFile(source) as archive:
-            _extract_zip_safely(archive, tempdir)
-        return _find_built_profile_dir(tempdir)
+        try:
+            with zipfile.ZipFile(source) as archive:
+                _extract_zip_safely(archive, tempdir)
+            return _PreparedProfileSource(_find_built_profile_dir(tempdir), tempdir)
+        except Exception:
+            shutil.rmtree(tempdir, ignore_errors=True)
+            raise
     raise RuntimeError(
         f"{source} is not a built Wordpipe model profile. Expected a directory or archive "
         "containing tokenizer.model plus encoder/decoder_joint ONNX or ORT files."

@@ -124,10 +124,34 @@ class ModelDownloadTests(unittest.TestCase):
             self.assertEqual(runtime_dir, profile_runtime_dir(root / "installed", "compact"))
             self.assertEqual((runtime_dir / "tokenizer.model").read_text(encoding="utf-8"), "tokenizer")
 
+    def test_install_built_profile_removes_zip_extract_tempdir_after_import(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            extract_dir = root / "extract"
+            archive_path = root / "profile.zip"
+            with zipfile.ZipFile(archive_path, "w") as archive:
+                archive.writestr("profile/tokenizer.model", "tokenizer")
+                archive.writestr("profile/encoder.ort", "encoder")
+                archive.writestr("profile/decoder_joint.ort", "decoder")
+
+            def make_tempdir(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+                extract_dir.mkdir()
+                return str(extract_dir)
+
+            with mock.patch("tempfile.mkdtemp", side_effect=make_tempdir):
+                install_built_profile(
+                    source=archive_path,
+                    model_root=root / "installed",
+                    profile="compact",
+                )
+
+            self.assertFalse(extract_dir.exists())
+
     def test_install_built_profile_rejects_unsafe_zip_member(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             archive_path = root / "profile.zip"
+            extract_dir = root / "extract"
             outside = root / "evil.txt"
             with zipfile.ZipFile(archive_path, "w") as archive:
                 archive.writestr("../evil.txt", "bad")
@@ -135,7 +159,14 @@ class ModelDownloadTests(unittest.TestCase):
                 archive.writestr("profile/encoder.ort", "encoder")
                 archive.writestr("profile/decoder_joint.ort", "decoder")
 
-            with self.assertRaisesRegex(RuntimeError, "unsafe zip member"):
+            def make_tempdir(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+                extract_dir.mkdir()
+                return str(extract_dir)
+
+            with (
+                mock.patch("tempfile.mkdtemp", side_effect=make_tempdir),
+                self.assertRaisesRegex(RuntimeError, "unsafe zip member"),
+            ):
                 install_built_profile(
                     source=archive_path,
                     model_root=root / "installed",
@@ -143,6 +174,7 @@ class ModelDownloadTests(unittest.TestCase):
                 )
 
             self.assertFalse(outside.exists())
+            self.assertFalse(extract_dir.exists())
 
     def test_install_built_profile_imports_tar_archive(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
