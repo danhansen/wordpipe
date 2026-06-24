@@ -82,43 +82,46 @@ def load_config(path: Path | None = None) -> WordpipeConfig:
     if not config_path.exists():
         return WordpipeConfig()
 
-    with config_path.open("rb") as handle:
-        data = tomllib.load(handle)
+    try:
+        with config_path.open("rb") as handle:
+            data = tomllib.load(handle)
 
-    return WordpipeConfig(
-        model_dir=_optional_path(data.get("model_dir")),
-        model_profile=_model_profile(data.get("model_profile", "fast")),
-        model_root=_optional_path(data.get("model_root")) or default_model_root(),
-        nemo_source=_string(data, "nemo_source", DEFAULT_NEMO_SOURCE_REPO)
-        or DEFAULT_NEMO_SOURCE_REPO,
-        asr_runtime=_runtime(data.get("asr_runtime", "parakeet")),
-        asr_worker_path=_optional_path(data.get("asr_worker_path")),
-        provider=_string(data, "provider", "cpu"),
-        num_threads=_integer(data, "num_threads", 2),
-        sample_rate=_integer(data, "sample_rate", 16000),
-        input_device=_optional_device(data.get("input_device")),
-        partial_interval_seconds=_number(data, "partial_interval_seconds", 0.10),
-        audio_chunk_seconds=_number(data, "audio_chunk_seconds", 0.03),
-        queue_seconds=_number(data, "queue_seconds", 10.0),
-        stats_interval_seconds=_number(data, "stats_interval_seconds", 1.0),
-        enable_endpoint_detection=_boolean(data, "enable_endpoint_detection", False),
-        endpoint_rule1_min_trailing_silence=_number(
-            data, "endpoint_rule1_min_trailing_silence", 0.55
-        ),
-        endpoint_rule2_min_trailing_silence=_number(
-            data, "endpoint_rule2_min_trailing_silence", 0.35
-        ),
-        endpoint_rule3_min_utterance_length=_number(
-            data, "endpoint_rule3_min_utterance_length", 20.0
-        ),
-        overlay=_string(data, "overlay", "gtk"),
-        mode=_mode(data.get("mode", "toggle")),
-        shortcut=_string(data, "shortcut", "CTRL+ALT+space"),
-        spoken_punctuation=_boolean(data, "spoken_punctuation", True),
-        dry_run_insertion=_boolean(data, "dry_run_insertion", False),
-        log_metrics=_boolean(data, "log_metrics", False),
-        insert_partial_text=_boolean(data, "insert_partial_text", False),
-    )
+        return WordpipeConfig(
+            model_dir=_optional_path(data.get("model_dir")),
+            model_profile=_model_profile(data.get("model_profile", "fast")),
+            model_root=_optional_path(data.get("model_root")) or default_model_root(),
+            nemo_source=_string(data, "nemo_source", DEFAULT_NEMO_SOURCE_REPO)
+            or DEFAULT_NEMO_SOURCE_REPO,
+            asr_runtime=_runtime(data.get("asr_runtime", "parakeet")),
+            asr_worker_path=_optional_path(data.get("asr_worker_path")),
+            provider=_string(data, "provider", "cpu"),
+            num_threads=_integer(data, "num_threads", 2),
+            sample_rate=_integer(data, "sample_rate", 16000),
+            input_device=_optional_device(data.get("input_device")),
+            partial_interval_seconds=_number(data, "partial_interval_seconds", 0.10),
+            audio_chunk_seconds=_number(data, "audio_chunk_seconds", 0.03),
+            queue_seconds=_number(data, "queue_seconds", 10.0),
+            stats_interval_seconds=_number(data, "stats_interval_seconds", 1.0),
+            enable_endpoint_detection=_boolean(data, "enable_endpoint_detection", False),
+            endpoint_rule1_min_trailing_silence=_number(
+                data, "endpoint_rule1_min_trailing_silence", 0.55
+            ),
+            endpoint_rule2_min_trailing_silence=_number(
+                data, "endpoint_rule2_min_trailing_silence", 0.35
+            ),
+            endpoint_rule3_min_utterance_length=_number(
+                data, "endpoint_rule3_min_utterance_length", 20.0
+            ),
+            overlay=_string(data, "overlay", "gtk"),
+            mode=_mode(data.get("mode", "toggle")),
+            shortcut=_string(data, "shortcut", "CTRL+ALT+space"),
+            spoken_punctuation=_boolean(data, "spoken_punctuation", True),
+            dry_run_insertion=_boolean(data, "dry_run_insertion", False),
+            log_metrics=_boolean(data, "log_metrics", False),
+            insert_partial_text=_boolean(data, "insert_partial_text", False),
+        )
+    except (tomllib.TOMLDecodeError, ValueError) as exc:
+        raise RuntimeError(f"invalid config {config_path}: {exc}") from exc
 
 
 def save_model_profile(profile: str, path: Path | None = None) -> Path:

@@ -213,6 +213,18 @@ class CliModelResolutionTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("wordpipe error: setup failed", stderr.getvalue())
 
+    def test_invalid_config_prints_without_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config = Path(tmp) / "config.toml"
+            config.write_text('model_profile = "huge"\n', encoding="utf-8")
+
+            with contextlib.redirect_stderr(io.StringIO()) as stderr:
+                code = main(["model-profiles", "--config", str(config)])
+
+        self.assertEqual(code, 1)
+        self.assertIn(f"wordpipe error: invalid config {config}", stderr.getvalue())
+        self.assertNotIn("Traceback", stderr.getvalue())
+
     def test_explicit_model_dir_wins(self) -> None:
         config = WordpipeConfig(model_dir=None, model_profile="fast")
 

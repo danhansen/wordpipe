@@ -65,6 +65,22 @@ class ConfigTests(unittest.TestCase):
         self.assertTrue(config.dry_run_insertion)
         self.assertTrue(config.insert_partial_text)
 
+    def test_invalid_config_value_reports_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text('model_profile = "huge"\n', encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, f"invalid config {path}"):
+                load_config(path)
+
+    def test_invalid_toml_reports_path(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text("model_profile = [\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, f"invalid config {path}"):
+                load_config(path)
+
     def test_save_model_profile_updates_existing_config_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.toml"
