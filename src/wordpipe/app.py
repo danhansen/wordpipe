@@ -387,9 +387,10 @@ class WordpipeApp:
             self._install_thread = None
             self._set_label(self._error_label, "")
             self._refresh_profile_state()
-            self._post_event(UiEvent("status", "Ready"))
             if self._selected_profile_installed():
                 self._open_controller()
+            else:
+                self._post_event(UiEvent("status", "Setup required"))
         elif event.kind == "install-error":
             self._install_thread = None
             self._refresh_profile_state()

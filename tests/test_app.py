@@ -89,6 +89,14 @@ class FakeButton:
         self.active_values.append(active)
 
 
+class FakeLabel:
+    def __init__(self) -> None:
+        self.text = ""
+
+    def set_text(self, text: str) -> None:
+        self.text = text
+
+
 class FakeDropdown:
     def __init__(self, selected: int) -> None:
         self._selected = selected
@@ -155,6 +163,40 @@ class AppControllerStateTests(unittest.TestCase):
 
         self.assertEqual(config.model_profile, "compact")
         self.assertEqual(app._selected_profile, "compact")
+
+    def test_install_complete_does_not_report_ready_when_controller_open_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            model_root = root / "models"
+            runtime_dir = profile_runtime_dir(model_root, "compact")
+            runtime_dir.mkdir(parents=True)
+            (runtime_dir / "tokenizer.model").write_text("", encoding="utf-8")
+            (runtime_dir / "encoder.ort").write_text("", encoding="utf-8")
+            (runtime_dir / "decoder_joint.ort").write_text("", encoding="utf-8")
+            app = WordpipeApp(
+                DaemonConfig(model_dir=runtime_dir, dry_run_insertion=True),
+                model_setup=AppModelSetup(
+                    model_root=model_root,
+                    model_profile="compact",
+                    nemo_source="nvidia/example",
+                ),
+            )
+            app._glib = FakeGLib()
+            app._status_label = FakeLabel()
+            app._error_label = FakeLabel()
+            app._profile_status_label = FakeLabel()
+            app._toggle_button = FakeButton()
+            app._install_button = FakeButton()
+
+            with mock.patch("wordpipe.app.DictationController") as controller_cls:
+                controller_cls.return_value.open.side_effect = RuntimeError("portal failed")
+
+                self.assertFalse(
+                    app._apply_event(UiEvent("install-complete", f"compact:{runtime_dir}"))
+                )
+
+        self.assertNotEqual(app._status_label.text, "Ready")
+        self.assertIn("portal failed", app._error_label.text)
 
 
 if __name__ == "__main__":
