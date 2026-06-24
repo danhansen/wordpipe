@@ -286,10 +286,6 @@ Run Wordpipe as a voice keyboard:
 
 ```sh
 scripts/install-wordpipe-gnome-shortcut
-PYTHONPATH=src python3 -m wordpipe voice-keyboard \
-  --model-profile compact \
-  --signal-hotkey \
-  --overlay stderr
 ```
 
 Then focus any text field, press `Ctrl+Alt+Space`, speak, and press
@@ -299,16 +295,25 @@ no additional final text. The final ASR commit is still logged, but realtime
 typing comes from append-only partials.
 
 The current development path uses a GNOME custom shortcut that runs
-`wordpipe voice-keyboard-toggle` against the resident daemon above. This avoids
-the GlobalShortcuts portal's stricter app-id requirements while the app is still
-running from a source checkout. Keep the daemon running in a terminal or tmux
-session while dictating.
+`wordpipe voice-keyboard-toggle --start-if-needed`. The first shortcut press
+starts a resident `voice-keyboard --signal-hotkey` daemon if needed, waits for
+it to become ready, and then toggles dictation. This avoids the GlobalShortcuts
+portal's stricter app-id requirements while the app is still running from a
+source checkout.
+
+For visible logs while debugging, start the resident daemon manually instead:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe voice-keyboard \
+  --model-profile compact \
+  --signal-hotkey \
+  --overlay stderr
+```
 
 For the Flatpak build, install the equivalent host shortcut with:
 
 ```sh
 scripts/install-wordpipe-flatpak-gnome-shortcut
-flatpak run dev.wordpipe.Wordpipe voice-keyboard --signal-hotkey
 ```
 
 To restore the older behavior where nothing is typed until dictation stops:

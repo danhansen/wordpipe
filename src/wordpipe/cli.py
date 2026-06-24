@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from .config import DEFAULT_CONFIG, WordpipeConfig, default_config_path, load_config
@@ -504,21 +505,81 @@ def _cmd_voice_keyboard_toggle(args: argparse.Namespace) -> int:
     from .daemon import default_voice_keyboard_pid_file
 
     pid_file = Path(args.pid_file).expanduser() if args.pid_file else default_voice_keyboard_pid_file()
+    if _signal_voice_keyboard(pid_file, signal.SIGUSR1):
+        return 0
+    if not args.start_if_needed:
+        raise _voice_keyboard_not_running_error(pid_file)
+    _start_voice_keyboard_daemon(pid_file, args)
+    if _signal_voice_keyboard(pid_file, signal.SIGUSR1):
+        return 0
+    raise _voice_keyboard_not_running_error(pid_file)
+
+
+def _signal_voice_keyboard(pid_file: Path, signum: int) -> bool:
     try:
         pid = int(pid_file.read_text(encoding="utf-8").strip())
     except FileNotFoundError:
-        raise _voice_keyboard_not_running_error(pid_file) from None
+        return False
     except ValueError:
         _remove_stale_pid_file(pid_file)
-        raise _voice_keyboard_not_running_error(pid_file) from None
+        return False
     try:
-        os.kill(pid, signal.SIGUSR1)
+        os.kill(pid, signum)
     except ProcessLookupError:
         _remove_stale_pid_file(pid_file)
-        raise _voice_keyboard_not_running_error(pid_file) from None
+        return False
     except PermissionError as exc:
         raise RuntimeError(f"voice keyboard pid {pid} exists but cannot be signaled: {exc}") from exc
-    return 0
+    return True
+
+
+def _start_voice_keyboard_daemon(pid_file: Path, args: argparse.Namespace) -> None:
+    command = [
+        sys.executable,
+        "-m",
+        "wordpipe",
+        "voice-keyboard",
+        "--signal-hotkey",
+        "--pid-file",
+        str(pid_file),
+    ]
+    if getattr(args, "config", None):
+        command.extend(["--config", str(Path(args.config).expanduser())])
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    deadline = time.monotonic() + float(args.start_timeout)
+    while time.monotonic() < deadline:
+        if pid_file.exists() and _pid_file_points_to_live_process(pid_file):
+            return
+        if process.poll() is not None:
+            raise RuntimeError(
+                f"voice keyboard daemon exited before becoming ready; command: {' '.join(command)}"
+            )
+        time.sleep(0.05)
+    raise RuntimeError(
+        f"voice keyboard daemon did not become ready within {args.start_timeout}s; "
+        f"pid file: {pid_file}"
+    )
+
+
+def _pid_file_points_to_live_process(pid_file: Path) -> bool:
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+    except (FileNotFoundError, ValueError):
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        _remove_stale_pid_file(pid_file)
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def _voice_keyboard_not_running_error(pid_file: Path) -> RuntimeError:
@@ -980,6 +1041,21 @@ def build_parser() -> argparse.ArgumentParser:
     voice_keyboard_toggle.add_argument(
         "--pid-file",
         help="Pid file written by voice-keyboard --signal-hotkey.",
+    )
+    voice_keyboard_toggle.add_argument(
+        "--config",
+        help="Path to config.toml for --start-if-needed.",
+    )
+    voice_keyboard_toggle.add_argument(
+        "--start-if-needed",
+        action="store_true",
+        help="Start a resident --signal-hotkey daemon when the pid file is missing or stale.",
+    )
+    voice_keyboard_toggle.add_argument(
+        "--start-timeout",
+        type=float,
+        default=30.0,
+        help="Seconds to wait for a newly started daemon to become ready.",
     )
     voice_keyboard_toggle.set_defaults(func=_cmd_voice_keyboard_toggle)
 

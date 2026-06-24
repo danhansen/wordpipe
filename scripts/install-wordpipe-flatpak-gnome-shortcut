@@ -4,7 +4,7 @@ set -eu
 APP_ID="${WORDPIPE_FLATPAK_APP_ID:-dev.wordpipe.Wordpipe}"
 PATH_KEY="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/wordpipe-flatpak/"
 SCHEMA="org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$PATH_KEY"
-COMMAND="flatpak run $APP_ID voice-keyboard-toggle"
+COMMAND="flatpak run $APP_ID voice-keyboard-toggle --start-if-needed"
 BINDING="${1:-<Control><Alt>space}"
 
 current="$(gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings)"

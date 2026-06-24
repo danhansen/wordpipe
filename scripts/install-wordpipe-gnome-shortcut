@@ -4,7 +4,7 @@ set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 PATH_KEY="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/wordpipe/"
 SCHEMA="org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$PATH_KEY"
-COMMAND="$ROOT/scripts/wordpipe-dev voice-keyboard-toggle"
+COMMAND="$ROOT/scripts/wordpipe-dev voice-keyboard-toggle --start-if-needed"
 BINDING="${1:-<Control><Alt>space}"
 
 current="$(gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings)"

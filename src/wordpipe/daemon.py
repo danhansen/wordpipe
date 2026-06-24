@@ -465,8 +465,6 @@ def run_signal_hotkey_daemon(
     controller = DictationController(config, keyboard, transcript)
     done = threading.Event()
     target_pid_file = pid_file or default_voice_keyboard_pid_file()
-    target_pid_file.parent.mkdir(parents=True, exist_ok=True)
-    target_pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
 
     def toggle(_signum, _frame) -> None:  # type: ignore[no-untyped-def]
         if controller.listening:
@@ -484,6 +482,8 @@ def run_signal_hotkey_daemon(
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
     controller.open()
+    target_pid_file.parent.mkdir(parents=True, exist_ok=True)
+    target_pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
     try:
         transcript = transcript if transcript is not None else StderrTranscriptSink()
         transcript.status(f"voice keyboard ready pid={os.getpid()}")

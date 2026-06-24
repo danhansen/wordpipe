@@ -42,6 +42,21 @@ def _install_marker(model_root: Path, profile: str) -> Path:
     return runtime_dir
 
 
+def _toggle_args(
+    pid_file: Path,
+    *,
+    start_if_needed: bool = False,
+    config: str | None = None,
+    start_timeout: float = 30.0,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        pid_file=str(pid_file),
+        start_if_needed=start_if_needed,
+        config=config,
+        start_timeout=start_timeout,
+    )
+
+
 class CliModelResolutionTests(unittest.TestCase):
     def test_voice_keyboard_parser_accepts_profile_and_shortcut(self) -> None:
         args = build_parser().parse_args(
@@ -76,22 +91,56 @@ class CliModelResolutionTests(unittest.TestCase):
         self.assertEqual(args.command, "daemon")
         self.assertTrue(args.insert_partials)
 
+    def test_voice_keyboard_toggle_parser_accepts_start_if_needed(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "voice-keyboard-toggle",
+                "--start-if-needed",
+                "--start-timeout",
+                "12.5",
+                "--config",
+                "/tmp/wordpipe.toml",
+            ]
+        )
+
+        self.assertEqual(args.command, "voice-keyboard-toggle")
+        self.assertTrue(args.start_if_needed)
+        self.assertEqual(args.start_timeout, 12.5)
+        self.assertEqual(args.config, "/tmp/wordpipe.toml")
+
     def test_voice_keyboard_toggle_sends_sigusr1_to_pid_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             pid_file = Path(tmp) / "voice-keyboard.pid"
             pid_file.write_text("12345\n", encoding="utf-8")
-            args = argparse.Namespace(pid_file=str(pid_file))
+            args = _toggle_args(pid_file)
 
             with mock.patch("os.kill") as kill:
                 self.assertEqual(_cmd_voice_keyboard_toggle(args), 0)
 
         self.assertEqual(kill.call_args.args[0], 12345)
 
+    def test_voice_keyboard_toggle_starts_daemon_when_requested(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pid_file = Path(tmp) / "voice-keyboard.pid"
+            args = _toggle_args(pid_file, start_if_needed=True)
+
+            def mark_ready(path: Path, _args: argparse.Namespace) -> None:
+                path.write_text("23456\n", encoding="utf-8")
+
+            with (
+                mock.patch("wordpipe.cli._start_voice_keyboard_daemon", side_effect=mark_ready) as start,
+                mock.patch("os.kill") as kill,
+            ):
+                self.assertEqual(_cmd_voice_keyboard_toggle(args), 0)
+
+        start.assert_called_once()
+        self.assertEqual(kill.call_args.args[0], 23456)
+
     def test_voice_keyboard_toggle_removes_stale_pid_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             pid_file = Path(tmp) / "voice-keyboard.pid"
             pid_file.write_text("12345\n", encoding="utf-8")
-            args = argparse.Namespace(pid_file=str(pid_file))
+            args = _toggle_args(pid_file)
 
             with mock.patch("os.kill", side_effect=ProcessLookupError):
                 with self.assertRaises(RuntimeError) as raised:
@@ -104,7 +153,7 @@ class CliModelResolutionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             pid_file = Path(tmp) / "voice-keyboard.pid"
             pid_file.write_text("not-a-pid\n", encoding="utf-8")
-            args = argparse.Namespace(pid_file=str(pid_file))
+            args = _toggle_args(pid_file)
 
             with self.assertRaises(RuntimeError) as raised:
                 _cmd_voice_keyboard_toggle(args)

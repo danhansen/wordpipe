@@ -101,14 +101,22 @@ flatpak run dev.wordpipe.Wordpipe app --model-profile compact
 ```
 
 For focus-preserving dictation into another app, install a host GNOME custom
-shortcut that toggles the resident Flatpak voice keyboard:
+shortcut that starts and toggles the resident Flatpak voice keyboard:
 
 ```sh
 scripts/install-wordpipe-flatpak-gnome-shortcut
-flatpak run dev.wordpipe.Wordpipe voice-keyboard --signal-hotkey
 ```
 
 Then focus a text field and press `Ctrl+Alt+Space` to start or stop dictation.
+The first press starts `voice-keyboard --signal-hotkey` inside the Flatpak when
+needed, waits for the ready pid file, and then toggles dictation. For visible
+logs while debugging, run the resident daemon manually before pressing the
+shortcut:
+
+```sh
+flatpak run dev.wordpipe.Wordpipe voice-keyboard --signal-hotkey
+```
+
 The app profile selector writes `model_profile` into the Flatpak config, so the
 resident daemon uses the selected profile unless `--model-profile` is passed.
 

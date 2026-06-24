@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from wordpipe.daemon import AsrProcess, DaemonConfig, DictationController, format_committed_text
+from wordpipe.daemon import (
+    AsrProcess,
+    DaemonConfig,
+    DictationController,
+    format_committed_text,
+    run_signal_hotkey_daemon,
+)
 
 
 class FakeKeyboard:
@@ -43,6 +51,17 @@ class FakeTranscript:
         return
 
 
+class FakeEvent:
+    def __init__(self) -> None:
+        self.was_set = False
+
+    def set(self) -> None:
+        self.was_set = True
+
+    def wait(self) -> None:
+        return
+
+
 class DaemonTests(unittest.TestCase):
     def test_commit_formatter_strips_and_adds_space(self) -> None:
         self.assertEqual(format_committed_text(" hello "), "hello ")
@@ -78,6 +97,44 @@ class DaemonTests(unittest.TestCase):
         self.assertIn("wordpipe", command)
         self.assertIn("asr-worker", command)
         self.assertIn("--provider", command)
+
+    def test_signal_hotkey_pid_file_is_written_after_controller_opens(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pid_file = Path(tmp) / "voice-keyboard.pid"
+            order: list[str] = []
+            transcript = mock.Mock()
+
+            def open_controller() -> None:
+                self.assertFalse(pid_file.exists())
+                order.append("open")
+
+            def ready_status(_text: str) -> None:
+                self.assertEqual(pid_file.read_text(encoding="utf-8").strip(), "1234")
+                order.append("ready")
+
+            transcript.status.side_effect = ready_status
+
+            with (
+                mock.patch("wordpipe.daemon.os.getpid", return_value=1234),
+                mock.patch("wordpipe.daemon.threading.Event", return_value=FakeEvent()),
+                mock.patch("wordpipe.daemon.signal.getsignal", return_value=None),
+                mock.patch("wordpipe.daemon.signal.signal"),
+                mock.patch("wordpipe.daemon.DictationController") as controller_cls,
+            ):
+                controller_cls.return_value.open.side_effect = open_controller
+
+                self.assertEqual(
+                    run_signal_hotkey_daemon(
+                        DaemonConfig(model_dir=Path("/models/parakeet"), dry_run_insertion=True),
+                        transcript=transcript,
+                        pid_file=pid_file,
+                    ),
+                    0,
+                )
+
+            self.assertEqual(order, ["open", "ready"])
+            controller_cls.return_value.close.assert_called_once_with()
+            self.assertFalse(pid_file.exists())
 
     def test_streaming_partials_insert_only_appended_suffixes(self) -> None:
         keyboard = FakeKeyboard()
