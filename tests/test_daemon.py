@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import tempfile
 import subprocess
 import unittest
@@ -154,6 +155,20 @@ class DaemonTests(unittest.TestCase):
         self.assertIn("wordpipe", command)
         self.assertIn("asr-worker", command)
         self.assertIn("--provider", command)
+
+    def test_daemon_config_rejects_invalid_runtime_values(self) -> None:
+        cases = [
+            ({"num_threads": 0}, "num_threads must be positive"),
+            ({"sample_rate": 0}, "sample_rate must be positive"),
+            ({"partial_interval_seconds": 0.0}, "partial_interval_seconds must be positive"),
+            ({"audio_chunk_seconds": 0.0}, "audio_chunk_seconds must be positive"),
+            ({"queue_seconds": 0.0}, "queue_seconds must be positive"),
+            ({"stats_interval_seconds": math.inf}, "stats_interval_seconds must be positive"),
+        ]
+        for overrides, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    DaemonConfig(model_dir=Path("/models/parakeet"), **overrides)
 
     def test_asr_process_close_waits_after_kill(self) -> None:
         process = AsrProcess(DaemonConfig(model_dir=Path("/models/parakeet")))

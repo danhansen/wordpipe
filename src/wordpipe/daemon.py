@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import shutil
 import json
+import math
 import os
 from pathlib import Path
 import signal
@@ -95,6 +96,21 @@ class DaemonConfig:
     spoken_punctuation: bool = True
     log_metrics: bool = False
     insert_partial_text: bool = False
+
+    def __post_init__(self) -> None:
+        if self.num_threads <= 0:
+            raise ValueError("num_threads must be positive")
+        if self.sample_rate <= 0:
+            raise ValueError("sample_rate must be positive")
+        _require_positive_finite(self.partial_interval_seconds, "partial_interval_seconds")
+        _require_positive_finite(self.audio_chunk_seconds, "audio_chunk_seconds")
+        _require_positive_finite(self.queue_seconds, "queue_seconds")
+        _require_positive_finite(self.stats_interval_seconds, "stats_interval_seconds")
+
+
+def _require_positive_finite(value: float, name: str) -> None:
+    if not math.isfinite(value) or value <= 0.0:
+        raise ValueError(f"{name} must be positive")
 
 
 def format_committed_text(text: str) -> str:
