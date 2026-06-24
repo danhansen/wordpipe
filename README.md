@@ -104,6 +104,9 @@ The Rust worker defaults to ONNX Runtime's `all` graph optimization level; use
 In interactive daemon mode, the Parakeet worker preloads the model before
 emitting `ready`; subsequent hotkey starts reset the resident model instead of
 reloading ONNX sessions.
+Once a Wordpipe profile is installed under `model_root`, `listen-test` and
+`stream-file-test` can use `--model-profile compact|fast` instead of
+`--model-dir`.
 
 Optimization work is tracked in
 [docs/optimization-experiments.md](docs/optimization-experiments.md). The

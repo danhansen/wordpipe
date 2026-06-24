@@ -114,8 +114,9 @@ def _cmd_transcribe_file(args: argparse.Namespace) -> int:
 def _cmd_listen_test(args: argparse.Namespace) -> int:
     from .listen_test import ListenTestConfig, run_listen_test
 
+    file_config = _load_cli_config(args)
     config = ListenTestConfig(
-        model_dir=Path(args.model_dir),
+        model_dir=_resolve_model_dir(args, file_config),
         asr_runtime=args.asr_runtime,
         asr_worker_path=Path(args.asr_worker_path).expanduser()
         if args.asr_worker_path
@@ -142,6 +143,8 @@ def _cmd_listen_test(args: argparse.Namespace) -> int:
 def _cmd_stream_file_test(args: argparse.Namespace) -> int:
     from .listen_test import _format_event
 
+    file_config = _load_cli_config(args)
+    model_dir = _resolve_model_dir(args, file_config)
     if args.asr_runtime == "parakeet":
         from .daemon import _resolve_parakeet_worker, parakeet_worker_env
 
@@ -154,7 +157,7 @@ def _cmd_stream_file_test(args: argparse.Namespace) -> int:
                 )
             ),
             "--model-dir",
-            str(Path(args.model_dir)),
+            str(model_dir),
             "--num-threads",
             str(args.num_threads),
             "--sample-rate",
@@ -202,7 +205,7 @@ def _cmd_stream_file_test(args: argparse.Namespace) -> int:
     from .asr_worker import AsrWorkerConfig, stream_wav_file_events
 
     config = AsrWorkerConfig(
-        model_dir=Path(args.model_dir),
+        model_dir=model_dir,
         provider=args.provider,
         num_threads=args.num_threads,
         sample_rate=args.sample_rate,
@@ -851,7 +854,9 @@ def build_parser() -> argparse.ArgumentParser:
         "listen-test",
         help="Open the microphone and print live partials/commits with RTF metrics.",
     )
-    listen_test.add_argument("--model-dir", required=True)
+    listen_test.add_argument("--model-dir")
+    _add_model_selection_args(listen_test)
+    listen_test.add_argument("--config", help="Path to config.toml.")
     _add_runtime_args(listen_test, default="parakeet")
     listen_test.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
     listen_test.add_argument("--num-threads", type=_positive_int_arg, default=2)
@@ -880,7 +885,9 @@ def build_parser() -> argparse.ArgumentParser:
         "stream-file-test",
         help="Feed a WAV through the streaming recognizer and print partial/stats events.",
     )
-    stream_file_test.add_argument("--model-dir", required=True)
+    stream_file_test.add_argument("--model-dir")
+    _add_model_selection_args(stream_file_test)
+    stream_file_test.add_argument("--config", help="Path to config.toml.")
     stream_file_test.add_argument("--wav", required=True)
     stream_file_test.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
     stream_file_test.add_argument("--num-threads", type=_positive_int_arg, default=2)

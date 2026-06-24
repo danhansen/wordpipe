@@ -11,6 +11,7 @@ from unittest import mock
 
 from wordpipe.cli import (
     _cmd_app,
+    _cmd_listen_test,
     _cmd_model_install,
     _cmd_stream_file_test,
     _cmd_voice_keyboard_toggle,
@@ -115,6 +116,25 @@ class CliModelResolutionTests(unittest.TestCase):
         self.assertEqual(args.start_timeout, 12.5)
         self.assertEqual(args.config, "/tmp/wordpipe.toml")
         self.assertEqual(args.daemon_log_file, "/tmp/wordpipe.log")
+
+    def test_diagnostic_parsers_accept_model_profiles_without_model_dir(self) -> None:
+        listen_args = build_parser().parse_args(
+            ["listen-test", "--model-profile", "compact", "--duration", "1"]
+        )
+        stream_args = build_parser().parse_args(
+            [
+                "stream-file-test",
+                "--model-profile",
+                "fast",
+                "--wav",
+                "/tmp/input.wav",
+            ]
+        )
+
+        self.assertEqual(listen_args.model_profile, "compact")
+        self.assertIsNone(listen_args.model_dir)
+        self.assertEqual(stream_args.model_profile, "fast")
+        self.assertIsNone(stream_args.model_dir)
 
     def test_parser_rejects_non_positive_runtime_values(self) -> None:
         cases = [
@@ -378,6 +398,39 @@ class CliModelResolutionTests(unittest.TestCase):
                 _resolve_model_dir(_args(model_profile="compact"), config)
 
         self.assertIn("wordpipe model-install --profile compact", str(raised.exception))
+
+    def test_listen_test_resolves_installed_profile_without_model_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            expected = _install_marker(root, "compact")
+            args = argparse.Namespace(
+                config=None,
+                model_dir=None,
+                model_profile="compact",
+                model_root=str(root),
+                asr_runtime="parakeet",
+                asr_worker_path=None,
+                provider="cpu",
+                num_threads=2,
+                sample_rate=16000,
+                input_device=None,
+                partial_interval_seconds=0.1,
+                audio_chunk_seconds=0.03,
+                queue_seconds=10.0,
+                stats_interval_seconds=1.0,
+                endpoint=False,
+                endpoint_rule1_min_trailing_silence=0.55,
+                endpoint_rule2_min_trailing_silence=0.35,
+                endpoint_rule3_min_utterance_length=20.0,
+                duration=None,
+                json=False,
+                full_hypotheses=False,
+            )
+
+            with mock.patch("wordpipe.listen_test.run_listen_test", return_value=0) as run:
+                self.assertEqual(_cmd_listen_test(args), 0)
+
+        self.assertEqual(run.call_args.args[0].model_dir, expected)
 
     def test_app_opens_setup_ui_when_selected_profile_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
