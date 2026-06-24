@@ -7,9 +7,10 @@ consented virtual keyboard driven by streaming ASR, not like a screen scraper or
 X11-style automation tool.
 
 The first usable version prioritizes reliable raw streaming diagnostics and
-committed text insertion over live cursor replacement. Partial results are
-visible in Wordpipe's own UI, and current text is sent to the focused
-application when dictation stops.
+append-only text insertion over live cursor replacement. Partial results are
+visible in Wordpipe's own UI; the `voice-keyboard` path can also insert newly
+appended partial text as it appears, while the lower-level daemon can still run
+in final-commit-only mode.
 
 ## Locked Decisions
 
@@ -126,7 +127,10 @@ Recommended initial UI:
 - small live transcript overlay for partial text
 - committed text feedback after dictation stops
 
-Partial text is never typed into the target app in v1.
+The default `voice-keyboard` path types appended partial text into the target
+app in real time. If a partial hypothesis rewrites already-inserted text,
+Wordpipe does not attempt cursor replacement; it waits for append-only growth
+or falls back to the final commit if nothing was streamed.
 
 The current `voice-keyboard` command is the primary insertion path because it
 does not steal focus from the target text field. The app window and overlay

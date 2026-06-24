@@ -87,6 +87,31 @@ class CliModelResolutionTests(unittest.TestCase):
 
         self.assertEqual(kill.call_args.args[0], 12345)
 
+    def test_voice_keyboard_toggle_removes_stale_pid_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pid_file = Path(tmp) / "voice-keyboard.pid"
+            pid_file.write_text("12345\n", encoding="utf-8")
+            args = argparse.Namespace(pid_file=str(pid_file))
+
+            with mock.patch("os.kill", side_effect=ProcessLookupError):
+                with self.assertRaises(RuntimeError) as raised:
+                    _cmd_voice_keyboard_toggle(args)
+
+            self.assertIn("voice keyboard is not running", str(raised.exception))
+            self.assertFalse(pid_file.exists())
+
+    def test_voice_keyboard_toggle_removes_malformed_pid_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pid_file = Path(tmp) / "voice-keyboard.pid"
+            pid_file.write_text("not-a-pid\n", encoding="utf-8")
+            args = argparse.Namespace(pid_file=str(pid_file))
+
+            with self.assertRaises(RuntimeError) as raised:
+                _cmd_voice_keyboard_toggle(args)
+
+            self.assertIn("voice keyboard is not running", str(raised.exception))
+            self.assertFalse(pid_file.exists())
+
     def test_runtime_error_prints_without_traceback(self) -> None:
         parser = mock.Mock()
         parser.parse_args.return_value = argparse.Namespace(

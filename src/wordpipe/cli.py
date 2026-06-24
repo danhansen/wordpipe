@@ -507,12 +507,32 @@ def _cmd_voice_keyboard_toggle(args: argparse.Namespace) -> int:
     try:
         pid = int(pid_file.read_text(encoding="utf-8").strip())
     except FileNotFoundError:
-        raise RuntimeError(
-            f"voice keyboard is not running; missing pid file {pid_file}. "
-            "Start it with `wordpipe voice-keyboard --signal-hotkey`."
-        ) from None
-    os.kill(pid, signal.SIGUSR1)
+        raise _voice_keyboard_not_running_error(pid_file) from None
+    except ValueError:
+        _remove_stale_pid_file(pid_file)
+        raise _voice_keyboard_not_running_error(pid_file) from None
+    try:
+        os.kill(pid, signal.SIGUSR1)
+    except ProcessLookupError:
+        _remove_stale_pid_file(pid_file)
+        raise _voice_keyboard_not_running_error(pid_file) from None
+    except PermissionError as exc:
+        raise RuntimeError(f"voice keyboard pid {pid} exists but cannot be signaled: {exc}") from exc
     return 0
+
+
+def _voice_keyboard_not_running_error(pid_file: Path) -> RuntimeError:
+    return RuntimeError(
+        f"voice keyboard is not running; missing or stale pid file {pid_file}. "
+        "Start it with `wordpipe voice-keyboard --signal-hotkey`."
+    )
+
+
+def _remove_stale_pid_file(pid_file: Path) -> None:
+    try:
+        pid_file.unlink()
+    except FileNotFoundError:
+        return
 
 
 def _cmd_config_example(_args: argparse.Namespace) -> int:
