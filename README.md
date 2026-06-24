@@ -172,7 +172,9 @@ List input devices:
 scripts/wordpipe-dev audio-devices
 ```
 
-Try a specific input device:
+Try a specific input device. Numeric values are the indices shown by
+`audio-devices`; for the Parakeet runtime Wordpipe resolves the index to a
+device name before handing it to the Rust/CPAL worker.
 
 ```sh
 scripts/wordpipe-dev listen-test \

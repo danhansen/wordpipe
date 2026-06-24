@@ -28,6 +28,21 @@ def parse_audio_device(value: str | None) -> AudioDevice | None:
         return value
 
 
+def cpal_input_device_arg(device: AudioDevice | None) -> str | None:
+    if device is None:
+        return None
+    if isinstance(device, int):
+        return sounddevice_input_device_name(device)
+    return device
+
+
+def sounddevice_input_device_name(index: int) -> str:
+    for device in list_input_devices():
+        if device.index == index:
+            return device.name
+    raise ValueError(f"input device index not found: {index}")
+
+
 def list_input_devices() -> list[InputDeviceInfo]:
     import sounddevice as sd
 

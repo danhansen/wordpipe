@@ -5,7 +5,12 @@ import types
 import unittest
 from unittest import mock
 
-from wordpipe.audio import list_input_devices, parse_audio_device, render_input_devices
+from wordpipe.audio import (
+    cpal_input_device_arg,
+    list_input_devices,
+    parse_audio_device,
+    render_input_devices,
+)
 
 
 class AudioTests(unittest.TestCase):
@@ -18,6 +23,38 @@ class AudioTests(unittest.TestCase):
 
     def test_parse_audio_device_name(self) -> None:
         self.assertEqual(parse_audio_device("pipewire"), "pipewire")
+
+    def test_cpal_input_device_arg_resolves_sounddevice_index_to_name(self) -> None:
+        sounddevice = types.SimpleNamespace(
+            default=types.SimpleNamespace(device=(None, None)),
+            query_devices=lambda: [
+                {"name": "output only", "hostapi": 0, "max_input_channels": 0},
+                {
+                    "name": "Built-in Microphone",
+                    "hostapi": 0,
+                    "max_input_channels": 1,
+                    "default_samplerate": 48000,
+                },
+            ],
+            query_hostapis=lambda: [{"name": "PipeWire"}],
+        )
+
+        with mock.patch.dict(sys.modules, {"sounddevice": sounddevice}):
+            self.assertEqual(cpal_input_device_arg(1), "Built-in Microphone")
+
+    def test_cpal_input_device_arg_preserves_name(self) -> None:
+        self.assertEqual(cpal_input_device_arg("Built-in"), "Built-in")
+
+    def test_cpal_input_device_arg_rejects_unknown_index(self) -> None:
+        sounddevice = types.SimpleNamespace(
+            default=types.SimpleNamespace(device=(None, None)),
+            query_devices=lambda: [],
+            query_hostapis=lambda: [],
+        )
+
+        with mock.patch.dict(sys.modules, {"sounddevice": sounddevice}):
+            with self.assertRaisesRegex(ValueError, "input device index not found: 3"):
+                cpal_input_device_arg(3)
 
     def test_list_input_devices_accepts_integer_default_device(self) -> None:
         sounddevice = types.SimpleNamespace(

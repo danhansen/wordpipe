@@ -183,6 +183,22 @@ class DaemonTests(unittest.TestCase):
         self.assertIn("--num-threads", command)
         self.assertIn("3", command)
 
+    def test_parakeet_runtime_resolves_numeric_input_device_to_name(self) -> None:
+        process = AsrProcess(
+            DaemonConfig(
+                model_dir=Path("/models/parakeet"),
+                asr_runtime="parakeet",
+                asr_worker_path=Path("/tmp/wordpipe-parakeet-worker"),
+                input_device=12,
+            )
+        )
+
+        with mock.patch("wordpipe.daemon.cpal_input_device_arg", return_value="Built-in Mic"):
+            command = process._command()
+
+        device_index = command.index("--input-device")
+        self.assertEqual(command[device_index + 1], "Built-in Mic")
+
     def test_sherpa_runtime_uses_python_worker_command(self) -> None:
         process = AsrProcess(
             DaemonConfig(model_dir=Path("/models/sherpa"), asr_runtime="sherpa")

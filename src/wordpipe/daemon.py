@@ -20,7 +20,7 @@ from .hotkeys import (
     HotkeyStateMachine,
     ManualHotkeyLoop,
 )
-from .audio import AudioDevice
+from .audio import AudioDevice, cpal_input_device_arg
 from .insertion import DryRunKeyboardBackend, KeyboardBackend, PortalKeyboardBackend
 from .normalization import normalize_spoken_punctuation
 from .transcript import StderrTranscriptSink, TranscriptSink
@@ -198,6 +198,7 @@ class AsrProcess:
             ]
 
         if self._config.asr_runtime == "parakeet":
+            input_device = cpal_input_device_arg(self._config.input_device)
             return [
                 str(_resolve_parakeet_worker(self._config.asr_worker_path)),
                 "--model-dir",
@@ -207,8 +208,8 @@ class AsrProcess:
                 "--sample-rate",
                 str(self._config.sample_rate),
                 *(
-                    ["--input-device", str(self._config.input_device)]
-                    if self._config.input_device is not None
+                    ["--input-device", input_device]
+                    if input_device is not None
                     else []
                 ),
                 "--queue-seconds",
