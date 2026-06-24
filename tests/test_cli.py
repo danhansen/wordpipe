@@ -115,6 +115,38 @@ class CliModelResolutionTests(unittest.TestCase):
         self.assertEqual(args.config, "/tmp/wordpipe.toml")
         self.assertEqual(args.daemon_log_file, "/tmp/wordpipe.log")
 
+    def test_parser_rejects_non_positive_runtime_values(self) -> None:
+        cases = [
+            ["voice-keyboard", "--num-threads", "0"],
+            ["voice-keyboard", "--sample-rate", "0"],
+            ["voice-keyboard", "--queue-seconds", "0"],
+            ["listen-test", "--model-dir", "/models/parakeet", "--duration", "0"],
+            [
+                "stream-file-test",
+                "--model-dir",
+                "/models/parakeet",
+                "--wav",
+                "/tmp/in.wav",
+                "--chunk-seconds",
+                "0",
+            ],
+            [
+                "stream-file-test",
+                "--model-dir",
+                "/models/parakeet",
+                "--wav",
+                "/tmp/in.wav",
+                "--flush-chunks",
+                "-1",
+            ],
+            ["voice-keyboard-toggle", "--start-timeout", "0"],
+        ]
+        for argv in cases:
+            with self.subTest(argv=argv):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    with self.assertRaises(SystemExit):
+                        build_parser().parse_args(argv)
+
     def test_voice_keyboard_toggle_sends_sigusr1_to_pid_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             pid_file = Path(tmp) / "voice-keyboard.pid"

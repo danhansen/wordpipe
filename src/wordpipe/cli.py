@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import math
 import os
 import subprocess
 import sys
@@ -16,6 +17,36 @@ from .audio import parse_audio_device
 
 def _print_json(data: object) -> None:
     print(json.dumps(data, indent=2, sort_keys=True))
+
+
+def _positive_int_arg(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be positive")
+    return parsed
+
+
+def _non_negative_int_arg(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be non-negative")
+    return parsed
+
+
+def _positive_float_arg(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a number") from exc
+    if not math.isfinite(parsed) or parsed <= 0.0:
+        raise argparse.ArgumentTypeError("must be a positive finite number")
+    return parsed
 
 
 def _cmd_probe(args: argparse.Namespace) -> int:
@@ -636,25 +667,25 @@ def _cmd_config_example(_args: argparse.Namespace) -> int:
 def _add_asr_tuning_args(parser: argparse.ArgumentParser, *, worker_defaults: bool) -> None:
     parser.add_argument(
         "--partial-interval-seconds",
-        type=float,
+        type=_positive_float_arg,
         default=0.10 if worker_defaults else None,
         help="Minimum time between partial transcript updates.",
     )
     parser.add_argument(
         "--audio-chunk-seconds",
-        type=float,
+        type=_positive_float_arg,
         default=0.03 if worker_defaults else None,
         help="Microphone audio chunk size sent to the streaming recognizer.",
     )
     parser.add_argument(
         "--queue-seconds",
-        type=float,
+        type=_positive_float_arg,
         default=10.0 if worker_defaults else None,
         help="Maximum queued microphone audio before chunks are dropped.",
     )
     parser.add_argument(
         "--stats-interval-seconds",
-        type=float,
+        type=_positive_float_arg,
         default=1.0 if worker_defaults else None,
         help="Interval for diagnostic stats events.",
     )
@@ -742,8 +773,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to legacy sherpa-onnx Nemotron streaming model directory.",
     )
     asr.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
-    asr.add_argument("--num-threads", type=int, default=2)
-    asr.add_argument("--sample-rate", type=int, default=16000)
+    asr.add_argument("--num-threads", type=_positive_int_arg, default=2)
+    asr.add_argument("--sample-rate", type=_positive_int_arg, default=16000)
     asr.add_argument("--input-device", help="sounddevice input device index or name.")
     asr.add_argument(
         "--endpoint",
@@ -771,12 +802,12 @@ def build_parser() -> argparse.ArgumentParser:
     transcribe_file.add_argument("--model-dir", required=True)
     transcribe_file.add_argument("--wav", required=True)
     transcribe_file.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
-    transcribe_file.add_argument("--num-threads", type=int, default=2)
-    transcribe_file.add_argument("--sample-rate", type=int, default=16000)
+    transcribe_file.add_argument("--num-threads", type=_positive_int_arg, default=2)
+    transcribe_file.add_argument("--sample-rate", type=_positive_int_arg, default=16000)
     transcribe_file.add_argument("--metrics", action="store_true", help="Print timing metrics.")
     transcribe_file.add_argument(
         "--flush-chunks",
-        type=int,
+        type=_non_negative_int_arg,
         default=0,
         help="Synthetic silence chunks to feed after the WAV before final result.",
     )
@@ -807,8 +838,8 @@ def build_parser() -> argparse.ArgumentParser:
     listen_test.add_argument("--model-dir", required=True)
     _add_runtime_args(listen_test, default="parakeet")
     listen_test.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
-    listen_test.add_argument("--num-threads", type=int, default=2)
-    listen_test.add_argument("--sample-rate", type=int, default=16000)
+    listen_test.add_argument("--num-threads", type=_positive_int_arg, default=2)
+    listen_test.add_argument("--sample-rate", type=_positive_int_arg, default=16000)
     listen_test.add_argument("--input-device", help="sounddevice input device index or name.")
     listen_test.add_argument(
         "--endpoint",
@@ -817,7 +848,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     listen_test.add_argument(
         "--duration",
-        type=float,
+        type=_positive_float_arg,
         help="Stop after this many seconds. Default is to run until interrupted.",
     )
     listen_test.add_argument("--json", action="store_true", help="Print raw JSON events.")
@@ -836,13 +867,13 @@ def build_parser() -> argparse.ArgumentParser:
     stream_file_test.add_argument("--model-dir", required=True)
     stream_file_test.add_argument("--wav", required=True)
     stream_file_test.add_argument("--provider", default="cpu", help="ONNX Runtime provider.")
-    stream_file_test.add_argument("--num-threads", type=int, default=2)
-    stream_file_test.add_argument("--sample-rate", type=int, default=16000)
+    stream_file_test.add_argument("--num-threads", type=_positive_int_arg, default=2)
+    stream_file_test.add_argument("--sample-rate", type=_positive_int_arg, default=16000)
     _add_runtime_args(stream_file_test, default="parakeet")
-    stream_file_test.add_argument("--chunk-seconds", type=float, default=0.56)
+    stream_file_test.add_argument("--chunk-seconds", type=_positive_float_arg, default=0.56)
     stream_file_test.add_argument(
         "--flush-chunks",
-        type=int,
+        type=_non_negative_int_arg,
         default=3,
         help="Synthetic silence chunks to feed after the WAV before final commit.",
     )
@@ -866,8 +897,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Record raw microphone audio to a 16 kHz mono WAV for diagnostics.",
     )
     record_test.add_argument("--output", default="/tmp/wordpipe-record-test.wav")
-    record_test.add_argument("--duration", type=float, default=5.0)
-    record_test.add_argument("--sample-rate", type=int, default=16000)
+    record_test.add_argument("--duration", type=_positive_float_arg, default=5.0)
+    record_test.add_argument("--sample-rate", type=_positive_int_arg, default=16000)
     record_test.add_argument("--input-device", help="sounddevice input device index or name.")
     record_test.set_defaults(func=_cmd_record_test)
 
@@ -985,8 +1016,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     app.add_argument("--provider", help="ONNX Runtime provider.")
     _add_runtime_args(app, default=None)
-    app.add_argument("--num-threads", type=int)
-    app.add_argument("--sample-rate", type=int)
+    app.add_argument("--num-threads", type=_positive_int_arg)
+    app.add_argument("--sample-rate", type=_positive_int_arg)
     app.add_argument("--input-device", help="sounddevice input device index or name.")
     _add_asr_tuning_args(app, worker_defaults=False)
     app.add_argument(
@@ -1043,8 +1074,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     voice_keyboard.add_argument("--provider", help="ONNX Runtime provider.")
     _add_runtime_args(voice_keyboard, default=None)
-    voice_keyboard.add_argument("--num-threads", type=int)
-    voice_keyboard.add_argument("--sample-rate", type=int)
+    voice_keyboard.add_argument("--num-threads", type=_positive_int_arg)
+    voice_keyboard.add_argument("--sample-rate", type=_positive_int_arg)
     voice_keyboard.add_argument("--input-device", help="sounddevice input device index or name.")
     _add_asr_tuning_args(voice_keyboard, worker_defaults=False)
     voice_keyboard.add_argument(
@@ -1085,7 +1116,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     voice_keyboard_toggle.add_argument(
         "--start-timeout",
-        type=float,
+        type=_positive_float_arg,
         default=30.0,
         help="Seconds to wait for a newly started daemon to become ready.",
     )
@@ -1112,8 +1143,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     daemon.add_argument("--provider", help="ONNX Runtime provider.")
     _add_runtime_args(daemon, default=None)
-    daemon.add_argument("--num-threads", type=int)
-    daemon.add_argument("--sample-rate", type=int)
+    daemon.add_argument("--num-threads", type=_positive_int_arg)
+    daemon.add_argument("--sample-rate", type=_positive_int_arg)
     daemon.add_argument("--input-device", help="sounddevice input device index or name.")
     _add_asr_tuning_args(daemon, worker_defaults=False)
     daemon.add_argument(
@@ -1166,8 +1197,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     hotkey_daemon.add_argument("--provider", help="ONNX Runtime provider.")
     _add_runtime_args(hotkey_daemon, default=None)
-    hotkey_daemon.add_argument("--num-threads", type=int)
-    hotkey_daemon.add_argument("--sample-rate", type=int)
+    hotkey_daemon.add_argument("--num-threads", type=_positive_int_arg)
+    hotkey_daemon.add_argument("--sample-rate", type=_positive_int_arg)
     hotkey_daemon.add_argument("--input-device", help="sounddevice input device index or name.")
     _add_asr_tuning_args(hotkey_daemon, worker_defaults=False)
     hotkey_daemon.add_argument(
