@@ -200,6 +200,20 @@ scripts/wordpipe-dev stream-file-test \
 
 This should print partials if the model emits them in streaming mode.
 
+For the Parakeet/Nemotron app profiles, the smoke wrapper resolves the selected
+profile, feeds a WAV through `stream-file-test`, and fails if no commit text is
+produced:
+
+```sh
+.venv/bin/python scripts/smoke_stream_file.py --model-profile compact
+```
+
+To smoke-test the installed Flatpak against the same profile and a host WAV:
+
+```sh
+.venv/bin/python scripts/smoke_stream_file.py --flatpak --model-profile compact
+```
+
 Dry-run text insertion:
 
 ```sh
