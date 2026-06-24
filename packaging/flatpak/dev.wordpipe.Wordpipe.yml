@@ -50,23 +50,16 @@ modules:
       - cargo build --release -p wordpipe-parakeet-worker
       - install -Dm755 target/release/wordpipe-parakeet-worker /app/bin/wordpipe-parakeet-worker
     sources:
+      - type: file
+        path: ../../Cargo.toml
+      - type: file
+        path: ../../Cargo.lock
       - type: dir
-        path: ../..
-        skip:
-          - .git
-          - .wordpipe.git
-          - .venv
-          - .venv-*
-          - build
-          - target
-          - models
-          - docs
-          - packaging
-          - scripts
-          - src
-          - tests
-          - README.md
-          - pyproject.toml
+        path: ../../crates
+        dest: crates
+      - type: dir
+        path: ../../third_party
+        dest: third_party
       # - packaging/flatpak/cargo-sources.json
 
   - name: wordpipe-model-tools
@@ -95,13 +88,25 @@ modules:
       - install -Dm644 packaging/metainfo/dev.wordpipe.Wordpipe.metainfo.xml /app/share/metainfo/dev.wordpipe.Wordpipe.metainfo.xml
       - install -Dm644 packaging/icons/hicolor/scalable/apps/dev.wordpipe.Wordpipe.svg /app/share/icons/hicolor/scalable/apps/dev.wordpipe.Wordpipe.svg
     sources:
+      - type: file
+        path: ../../pyproject.toml
+      - type: file
+        path: ../../README.md
       - type: dir
-        path: ../..
-        skip:
-          - .git
-          - .wordpipe.git
-          - .venv
-          - .venv-*
-          - build
-          - target
-          - models
+        path: ../../src
+        dest: src
+      - type: dir
+        path: ../../scripts
+        dest: scripts
+      - type: dir
+        path: ../../packaging/flatpak
+        dest: packaging/flatpak
+      - type: dir
+        path: ../../packaging/applications
+        dest: packaging/applications
+      - type: dir
+        path: ../../packaging/metainfo
+        dest: packaging/metainfo
+      - type: dir
+        path: ../../packaging/icons
+        dest: packaging/icons
