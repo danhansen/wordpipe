@@ -19,7 +19,7 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.model_root, default_model_root())
         self.assertEqual(config.nemo_source, DEFAULT_NEMO_SOURCE_REPO)
         self.assertEqual(config.overlay, "gtk")
-        self.assertEqual(config.mode, "hold")
+        self.assertEqual(config.mode, "toggle")
         self.assertEqual(config.num_threads, 2)
         self.assertEqual(config.queue_seconds, 10.0)
 

@@ -263,15 +263,15 @@ Run Wordpipe as a voice keyboard:
 PYTHONPATH=src python3 -m wordpipe voice-keyboard --model-profile compact
 ```
 
-Then focus any text field, press `Ctrl+Alt+Space`, speak, and release the
-shortcut. In `hold` mode the release sends the final recognized text through
-the RemoteDesktop portal into the focused text field. Use toggle mode if you
-prefer one press to start and one press to stop:
+Then focus any text field, press `Ctrl+Alt+Space`, speak, and press
+`Ctrl+Alt+Space` again. In the default toggle mode, the second press sends the
+final recognized text through the RemoteDesktop portal into the focused text
+field. Use hold mode if you prefer press-and-hold dictation:
 
 ```sh
 PYTHONPATH=src python3 -m wordpipe voice-keyboard \
   --model-profile compact \
-  --mode toggle \
+  --mode hold \
   --shortcut 'CTRL+ALT+space'
 ```
 
