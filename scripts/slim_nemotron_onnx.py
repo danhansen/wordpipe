@@ -85,6 +85,13 @@ def copy_graph(source_dir: Path, output_dir: Path, name: str) -> None:
         shutil.copy2(external_data, output_dir / external_data.name)
 
 
+def validate_source_dir(source_dir: Path) -> None:
+    if not source_dir.is_dir():
+        raise SystemExit(f"Source is not a directory: {source_dir}")
+    for name in (*GRAPH_FILES, *SUPPORT_FILES):
+        require_file(source_dir / name)
+
+
 def slim_graph(args: argparse.Namespace, source_dir: Path, output_dir: Path, name: str) -> None:
     source_path = source_dir / name
     output_path = output_dir / name
@@ -130,9 +137,8 @@ def main() -> None:
     args = parse_args()
     source_dir = args.source_dir.resolve()
     output_dir = args.output_dir.resolve()
-    if not source_dir.is_dir():
-        raise SystemExit(f"Source is not a directory: {source_dir}")
 
+    validate_source_dir(source_dir)
     prepare_output(output_dir, force=args.force)
     copy_support_files(source_dir, output_dir)
 

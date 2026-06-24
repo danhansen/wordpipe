@@ -101,6 +101,13 @@ def copy_graph_with_external_data(source_graph: Path, output_graph: Path) -> Non
         shutil.copy2(external, output_graph.with_name(external.name))
 
 
+def validate_source_dir(source_dir: Path) -> None:
+    if not source_dir.is_dir():
+        raise SystemExit(f"Source is not a directory: {source_dir}")
+    for name in (*GRAPH_FILES.values(), *SUPPORT_FILES):
+        require_file(source_dir / name)
+
+
 def pass_class(pass_name: str):
     if pass_name == "peephole":
         from olive.passes.onnx.peephole_optimizer import OnnxPeepholeOptimizer
@@ -199,9 +206,8 @@ def main() -> None:
 
     source_dir = args.source_dir.resolve()
     output_dir = args.output_dir.resolve()
-    if not source_dir.is_dir():
-        raise SystemExit(f"Source is not a directory: {source_dir}")
 
+    validate_source_dir(source_dir)
     prepare_output(output_dir, force=args.force)
     copy_support_files(source_dir, output_dir)
 
