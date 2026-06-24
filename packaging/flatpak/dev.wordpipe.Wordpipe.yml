@@ -98,8 +98,8 @@ modules:
       - type: dir
         path: ../../scripts
         dest: scripts
-      - type: dir
-        path: ../../packaging/flatpak
+      - type: file
+        path: ../../packaging/flatpak/wordpipe-flatpak-launch
         dest: packaging/flatpak
       - type: dir
         path: ../../packaging/applications

@@ -63,6 +63,23 @@ Run the app:
 flatpak run dev.wordpipe.Wordpipe
 ```
 
+For normal Python/UI iteration after one full Flatpak install, do not rebuild
+the Flatpak. Run the installed sandbox with the source checkout mounted
+read-only instead:
+
+```sh
+scripts/wordpipe-flatpak-dev app
+scripts/wordpipe-flatpak-dev model-profiles
+scripts/wordpipe-flatpak-dev voice-keyboard --model-profile compact
+```
+
+That path still uses the Flatpak runtime, app-data model directory, portals,
+and packaged Rust worker, but imports `wordpipe` from `src/`. Rebuild the
+Flatpak only when the manifest, desktop metadata, bundled scripts, Python
+dependencies, Rust worker, or ONNX Runtime packaging changes. Local `type: dir`
+sources are not module-cached by Flatpak Builder, so full local rebuilds can
+still revisit the Rust and model-tools modules.
+
 Command-line diagnostics remain available through the same Flatpak command:
 
 ```sh

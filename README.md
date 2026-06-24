@@ -223,6 +223,16 @@ To smoke-test the installed Flatpak against the same profile and a host WAV:
 .venv/bin/python scripts/smoke_stream_file.py --flatpak --model-profile compact
 ```
 
+After one full Flatpak install, use the source-mounted Flatpak dev runner for
+normal Python/UI iteration without rebuilding the heavy Rust/model-tools
+modules:
+
+```sh
+scripts/wordpipe-flatpak-dev app
+scripts/wordpipe-flatpak-dev model-profiles
+scripts/wordpipe-flatpak-dev voice-keyboard --model-profile compact
+```
+
 Dry-run text insertion:
 
 ```sh

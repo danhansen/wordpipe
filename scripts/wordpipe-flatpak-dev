@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+APP_ID=${WORDPIPE_FLATPAK_APP_ID:-dev.wordpipe.Wordpipe}
+
+if [ "$#" -eq 0 ]; then
+  set -- app
+fi
+
+exec flatpak run \
+  --filesystem="$ROOT:ro" \
+  --env=PYTHONPATH="$ROOT/src" \
+  --env=ORT_DYLIB_PATH=/app/lib/libonnxruntime.so \
+  --command=python3 \
+  "$APP_ID" \
+  -m wordpipe "$@"
