@@ -707,19 +707,19 @@ def _add_asr_tuning_args(parser: argparse.ArgumentParser, *, worker_defaults: bo
     )
     parser.add_argument(
         "--endpoint-rule1-min-trailing-silence",
-        type=float,
+        type=_positive_float_arg,
         default=0.55 if worker_defaults else None,
         help="Trailing silence before committing a phrase with speech.",
     )
     parser.add_argument(
         "--endpoint-rule2-min-trailing-silence",
-        type=float,
+        type=_positive_float_arg,
         default=0.35 if worker_defaults else None,
         help="Trailing silence endpoint rule for empty/no-speech streams.",
     )
     parser.add_argument(
         "--endpoint-rule3-min-utterance-length",
-        type=float,
+        type=_positive_float_arg,
         default=20.0 if worker_defaults else None,
         help="Maximum utterance length before endpointing.",
     )
@@ -829,19 +829,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     transcribe_file.add_argument(
         "--endpoint-rule1-min-trailing-silence",
-        type=float,
+        type=_positive_float_arg,
         default=0.55,
         help="Trailing silence before committing a phrase with speech.",
     )
     transcribe_file.add_argument(
         "--endpoint-rule2-min-trailing-silence",
-        type=float,
+        type=_positive_float_arg,
         default=0.35,
         help="Trailing silence endpoint rule for empty/no-speech streams.",
     )
     transcribe_file.add_argument(
         "--endpoint-rule3-min-utterance-length",
-        type=float,
+        type=_positive_float_arg,
         default=20.0,
         help="Maximum utterance length before endpointing.",
     )

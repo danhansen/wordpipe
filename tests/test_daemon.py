@@ -186,6 +186,18 @@ class DaemonTests(unittest.TestCase):
             ({"audio_chunk_seconds": 0.0}, "audio_chunk_seconds must be positive"),
             ({"queue_seconds": 0.0}, "queue_seconds must be positive"),
             ({"stats_interval_seconds": math.inf}, "stats_interval_seconds must be positive"),
+            (
+                {"endpoint_rule1_min_trailing_silence": 0.0},
+                "endpoint_rule1_min_trailing_silence must be positive",
+            ),
+            (
+                {"endpoint_rule2_min_trailing_silence": -1.0},
+                "endpoint_rule2_min_trailing_silence must be positive",
+            ),
+            (
+                {"endpoint_rule3_min_utterance_length": math.nan},
+                "endpoint_rule3_min_utterance_length must be positive",
+            ),
         ]
         for overrides, message in cases:
             with self.subTest(message=message):

@@ -106,6 +106,18 @@ class DaemonConfig:
         _require_positive_finite(self.audio_chunk_seconds, "audio_chunk_seconds")
         _require_positive_finite(self.queue_seconds, "queue_seconds")
         _require_positive_finite(self.stats_interval_seconds, "stats_interval_seconds")
+        _require_positive_finite(
+            self.endpoint_rule1_min_trailing_silence,
+            "endpoint_rule1_min_trailing_silence",
+        )
+        _require_positive_finite(
+            self.endpoint_rule2_min_trailing_silence,
+            "endpoint_rule2_min_trailing_silence",
+        )
+        _require_positive_finite(
+            self.endpoint_rule3_min_utterance_length,
+            "endpoint_rule3_min_utterance_length",
+        )
 
 
 def _require_positive_finite(value: float, name: str) -> None:

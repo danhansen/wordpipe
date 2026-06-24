@@ -103,13 +103,13 @@ def load_config(path: Path | None = None) -> WordpipeConfig:
             queue_seconds=_positive_number(data, "queue_seconds", 10.0),
             stats_interval_seconds=_positive_number(data, "stats_interval_seconds", 1.0),
             enable_endpoint_detection=_boolean(data, "enable_endpoint_detection", False),
-            endpoint_rule1_min_trailing_silence=_number(
+            endpoint_rule1_min_trailing_silence=_positive_number(
                 data, "endpoint_rule1_min_trailing_silence", 0.55
             ),
-            endpoint_rule2_min_trailing_silence=_number(
+            endpoint_rule2_min_trailing_silence=_positive_number(
                 data, "endpoint_rule2_min_trailing_silence", 0.35
             ),
-            endpoint_rule3_min_utterance_length=_number(
+            endpoint_rule3_min_utterance_length=_positive_number(
                 data, "endpoint_rule3_min_utterance_length", 20.0
             ),
             overlay=_string(data, "overlay", "gtk"),

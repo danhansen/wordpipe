@@ -121,7 +121,16 @@ class CliModelResolutionTests(unittest.TestCase):
             ["voice-keyboard", "--num-threads", "0"],
             ["voice-keyboard", "--sample-rate", "0"],
             ["voice-keyboard", "--queue-seconds", "0"],
+            ["voice-keyboard", "--endpoint-rule1-min-trailing-silence", "0"],
+            ["daemon", "--endpoint-rule2-min-trailing-silence", "-1"],
             ["listen-test", "--model-dir", "/models/parakeet", "--duration", "0"],
+            [
+                "listen-test",
+                "--model-dir",
+                "/models/parakeet",
+                "--endpoint-rule3-min-utterance-length",
+                "nan",
+            ],
             [
                 "stream-file-test",
                 "--model-dir",

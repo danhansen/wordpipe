@@ -113,6 +113,18 @@ class ConfigTests(unittest.TestCase):
             ("audio_chunk_seconds = 0\n", "audio_chunk_seconds must be positive"),
             ("queue_seconds = 0\n", "queue_seconds must be positive"),
             ("stats_interval_seconds = 0\n", "stats_interval_seconds must be positive"),
+            (
+                "endpoint_rule1_min_trailing_silence = 0\n",
+                "endpoint_rule1_min_trailing_silence must be positive",
+            ),
+            (
+                "endpoint_rule2_min_trailing_silence = -1\n",
+                "endpoint_rule2_min_trailing_silence must be positive",
+            ),
+            (
+                "endpoint_rule3_min_utterance_length = 0\n",
+                "endpoint_rule3_min_utterance_length must be positive",
+            ),
         ]
         for text, message in cases:
             with self.subTest(message=message):

@@ -41,6 +41,26 @@ class ModelDiscoveryTests(unittest.TestCase):
         else:
             sys.modules["sherpa_onnx"] = self._previous
 
+    def test_worker_config_rejects_invalid_endpoint_rules(self) -> None:
+        cases = [
+            (
+                {"endpoint_rule1_min_trailing_silence": 0.0},
+                "endpoint_rule1_min_trailing_silence must be positive",
+            ),
+            (
+                {"endpoint_rule2_min_trailing_silence": -1.0},
+                "endpoint_rule2_min_trailing_silence must be positive",
+            ),
+            (
+                {"endpoint_rule3_min_utterance_length": math.inf},
+                "endpoint_rule3_min_utterance_length must be positive",
+            ),
+        ]
+        for overrides, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ValueError, message):
+                    AsrWorkerConfig(model_dir=Path("/models/sherpa"), **overrides)
+
     def test_single_onnx_model_uses_nemo_ctc_factory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             model_dir = Path(tmp)
