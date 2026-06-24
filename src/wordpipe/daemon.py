@@ -318,12 +318,19 @@ class DictationController:
     def close(self) -> None:
         try:
             self._asr.close()
+            self._join_reader_threads()
         finally:
             self._keyboard.close()
             self._transcript.close()
             with self._lock:
                 self._listening = False
             self._done.set()
+
+    def _join_reader_threads(self) -> None:
+        current = threading.current_thread()
+        for reader in (self._reader, self._stderr_reader):
+            if reader is not None and reader is not current and reader.is_alive():
+                reader.join(timeout=1)
 
     def _read_events(self) -> None:
         try:

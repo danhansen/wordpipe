@@ -51,6 +51,35 @@ class FakeTranscript:
         return
 
 
+class OrderedTranscript(FakeTranscript):
+    def __init__(self, order: list[str]) -> None:
+        super().__init__()
+        self._order = order
+
+    def close(self) -> None:
+        self._order.append("transcript-close")
+
+
+class OrderedAsr:
+    def __init__(self, order: list[str]) -> None:
+        self._order = order
+
+    def close(self) -> None:
+        self._order.append("asr-close")
+
+
+class OrderedReader:
+    def __init__(self, order: list[str], name: str) -> None:
+        self._order = order
+        self._name = name
+
+    def is_alive(self) -> bool:
+        return True
+
+    def join(self, timeout: float | None = None) -> None:
+        self._order.append(f"{self._name}-join")
+
+
 class FakeEvent:
     def __init__(self) -> None:
         self.was_set = False
@@ -117,6 +146,24 @@ class DaemonTests(unittest.TestCase):
 
         self.assertIn(("error", "ASR worker stderr: first warning"), transcript.events)
         self.assertIn(("error", "ASR worker stderr: second warning"), transcript.events)
+
+    def test_close_joins_reader_threads_before_closing_transcript(self) -> None:
+        order: list[str] = []
+        controller = DictationController(
+            DaemonConfig(model_dir=Path("/models/parakeet")),
+            FakeKeyboard(),
+            OrderedTranscript(order),
+        )
+        controller._asr = OrderedAsr(order)  # type: ignore[assignment]
+        controller._reader = OrderedReader(order, "stdout")  # type: ignore[assignment]
+        controller._stderr_reader = OrderedReader(order, "stderr")  # type: ignore[assignment]
+
+        controller.close()
+
+        self.assertEqual(
+            order,
+            ["asr-close", "stdout-join", "stderr-join", "transcript-close"],
+        )
 
     def test_signal_hotkey_pid_file_is_written_after_controller_opens(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
