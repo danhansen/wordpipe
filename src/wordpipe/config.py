@@ -87,13 +87,13 @@ def load_config(path: Path | None = None) -> WordpipeConfig:
             data = tomllib.load(handle)
 
         return WordpipeConfig(
-            model_dir=_optional_path(data.get("model_dir")),
+            model_dir=_optional_path(data.get("model_dir"), "model_dir"),
             model_profile=_model_profile(data.get("model_profile", "fast")),
-            model_root=_optional_path(data.get("model_root")) or default_model_root(),
+            model_root=_optional_path(data.get("model_root"), "model_root") or default_model_root(),
             nemo_source=_string(data, "nemo_source", DEFAULT_NEMO_SOURCE_REPO)
             or DEFAULT_NEMO_SOURCE_REPO,
             asr_runtime=_runtime(data.get("asr_runtime", "parakeet")),
-            asr_worker_path=_optional_path(data.get("asr_worker_path")),
+            asr_worker_path=_optional_path(data.get("asr_worker_path"), "asr_worker_path"),
             provider=_string(data, "provider", "cpu"),
             num_threads=_integer(data, "num_threads", 2),
             sample_rate=_integer(data, "sample_rate", 16000),
@@ -154,11 +154,11 @@ def save_model_profile(profile: str, path: Path | None = None) -> Path:
     return config_path
 
 
-def _optional_path(value: object) -> Path | None:
+def _optional_path(value: object, key: str) -> Path | None:
     if value is None or value == "":
         return None
     if not isinstance(value, str):
-        raise ValueError("model_dir must be a string")
+        raise ValueError(f"{key} must be a string")
     return Path(value).expanduser()
 
 
@@ -172,6 +172,8 @@ def _runtime(value: object) -> str:
 def _optional_device(value: object) -> int | str | None:
     if value is None or value == "":
         return None
+    if isinstance(value, bool):
+        raise ValueError("input_device must be an integer index or string name")
     if isinstance(value, int | str):
         return value
     raise ValueError("input_device must be an integer index or string name")
@@ -186,14 +188,14 @@ def _string(data: dict[str, Any], key: str, default: str) -> str:
 
 def _integer(data: dict[str, Any], key: str, default: int) -> int:
     value = data.get(key, default)
-    if not isinstance(value, int):
+    if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"{key} must be an integer")
     return value
 
 
 def _number(data: dict[str, Any], key: str, default: float) -> float:
     value = data.get(key, default)
-    if not isinstance(value, int | float):
+    if isinstance(value, bool) or not isinstance(value, int | float):
         raise ValueError(f"{key} must be a number")
     return float(value)
 

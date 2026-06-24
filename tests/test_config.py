@@ -81,6 +81,45 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, f"invalid config {path}"):
                 load_config(path)
 
+    def test_bool_is_not_accepted_for_integer_or_number_values(self) -> None:
+        cases = [
+            ("num_threads = true\n", "num_threads must be an integer"),
+            ("queue_seconds = true\n", "queue_seconds must be a number"),
+        ]
+        for text, message in cases:
+            with self.subTest(message=message):
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = Path(tmp) / "config.toml"
+                    path.write_text(text, encoding="utf-8")
+
+                    with self.assertRaisesRegex(RuntimeError, message):
+                        load_config(path)
+
+    def test_bool_is_not_accepted_for_input_device(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text("input_device = true\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                RuntimeError, "input_device must be an integer index or string name"
+            ):
+                load_config(path)
+
+    def test_invalid_path_value_reports_config_key_name(self) -> None:
+        cases = [
+            ("model_dir = 1\n", "model_dir must be a string"),
+            ("model_root = 1\n", "model_root must be a string"),
+            ("asr_worker_path = 1\n", "asr_worker_path must be a string"),
+        ]
+        for text, message in cases:
+            with self.subTest(message=message):
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = Path(tmp) / "config.toml"
+                    path.write_text(text, encoding="utf-8")
+
+                    with self.assertRaisesRegex(RuntimeError, message):
+                        load_config(path)
+
     def test_save_model_profile_updates_existing_config_key(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.toml"
