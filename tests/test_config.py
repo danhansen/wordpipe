@@ -73,6 +73,14 @@ class ConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, f"invalid config {path}"):
                 load_config(path)
 
+    def test_invalid_overlay_value_reports_allowed_values(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text('overlay = "popup"\n', encoding="utf-8")
+
+            with self.assertRaisesRegex(RuntimeError, "overlay must be 'stderr' or 'gtk'"):
+                load_config(path)
+
     def test_invalid_toml_reports_path(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.toml"

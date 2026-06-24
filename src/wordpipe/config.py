@@ -113,7 +113,7 @@ def load_config(path: Path | None = None) -> WordpipeConfig:
             endpoint_rule3_min_utterance_length=_positive_number(
                 data, "endpoint_rule3_min_utterance_length", 20.0
             ),
-            overlay=_string(data, "overlay", "gtk"),
+            overlay=_overlay(data.get("overlay", "gtk")),
             mode=_mode(data.get("mode", "toggle")),
             shortcut=_string(data, "shortcut", "CTRL+ALT+space"),
             spoken_punctuation=_boolean(data, "spoken_punctuation", True),
@@ -235,6 +235,13 @@ def _mode(value: object) -> HotkeyMode:
     if value not in {"hold", "toggle"}:
         raise ValueError("mode must be 'hold' or 'toggle'")
     return value  # type: ignore[return-value]
+
+
+def _overlay(value: object) -> str:
+    overlay = _string({"overlay": value}, "overlay", "gtk")
+    if overlay not in {"stderr", "gtk"}:
+        raise ValueError("overlay must be 'stderr' or 'gtk'")
+    return overlay
 
 
 def _model_profile(value: object) -> str:
