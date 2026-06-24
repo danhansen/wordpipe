@@ -105,6 +105,24 @@ class ConfigTests(unittest.TestCase):
             ):
                 load_config(path)
 
+    def test_runtime_numbers_must_be_positive(self) -> None:
+        cases = [
+            ("num_threads = 0\n", "num_threads must be positive"),
+            ("sample_rate = 0\n", "sample_rate must be positive"),
+            ("partial_interval_seconds = 0\n", "partial_interval_seconds must be positive"),
+            ("audio_chunk_seconds = 0\n", "audio_chunk_seconds must be positive"),
+            ("queue_seconds = 0\n", "queue_seconds must be positive"),
+            ("stats_interval_seconds = 0\n", "stats_interval_seconds must be positive"),
+        ]
+        for text, message in cases:
+            with self.subTest(message=message):
+                with tempfile.TemporaryDirectory() as tmp:
+                    path = Path(tmp) / "config.toml"
+                    path.write_text(text, encoding="utf-8")
+
+                    with self.assertRaisesRegex(RuntimeError, message):
+                        load_config(path)
+
     def test_invalid_path_value_reports_config_key_name(self) -> None:
         cases = [
             ("model_dir = 1\n", "model_dir must be a string"),

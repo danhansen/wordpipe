@@ -95,13 +95,13 @@ def load_config(path: Path | None = None) -> WordpipeConfig:
             asr_runtime=_runtime(data.get("asr_runtime", "parakeet")),
             asr_worker_path=_optional_path(data.get("asr_worker_path"), "asr_worker_path"),
             provider=_string(data, "provider", "cpu"),
-            num_threads=_integer(data, "num_threads", 2),
-            sample_rate=_integer(data, "sample_rate", 16000),
+            num_threads=_positive_integer(data, "num_threads", 2),
+            sample_rate=_positive_integer(data, "sample_rate", 16000),
             input_device=_optional_device(data.get("input_device")),
-            partial_interval_seconds=_number(data, "partial_interval_seconds", 0.10),
-            audio_chunk_seconds=_number(data, "audio_chunk_seconds", 0.03),
-            queue_seconds=_number(data, "queue_seconds", 10.0),
-            stats_interval_seconds=_number(data, "stats_interval_seconds", 1.0),
+            partial_interval_seconds=_positive_number(data, "partial_interval_seconds", 0.10),
+            audio_chunk_seconds=_positive_number(data, "audio_chunk_seconds", 0.03),
+            queue_seconds=_positive_number(data, "queue_seconds", 10.0),
+            stats_interval_seconds=_positive_number(data, "stats_interval_seconds", 1.0),
             enable_endpoint_detection=_boolean(data, "enable_endpoint_detection", False),
             endpoint_rule1_min_trailing_silence=_number(
                 data, "endpoint_rule1_min_trailing_silence", 0.55
@@ -202,11 +202,25 @@ def _integer(data: dict[str, Any], key: str, default: int) -> int:
     return value
 
 
+def _positive_integer(data: dict[str, Any], key: str, default: int) -> int:
+    value = _integer(data, key, default)
+    if value <= 0:
+        raise ValueError(f"{key} must be positive")
+    return value
+
+
 def _number(data: dict[str, Any], key: str, default: float) -> float:
     value = data.get(key, default)
     if isinstance(value, bool) or not isinstance(value, int | float):
         raise ValueError(f"{key} must be a number")
     return float(value)
+
+
+def _positive_number(data: dict[str, Any], key: str, default: float) -> float:
+    value = _number(data, key, default)
+    if value <= 0.0:
+        raise ValueError(f"{key} must be positive")
+    return value
 
 
 def _boolean(data: dict[str, Any], key: str, default: bool) -> bool:
