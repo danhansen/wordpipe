@@ -5,6 +5,7 @@ import shutil
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import threading
@@ -396,4 +397,57 @@ def run_hotkey_daemon(
         hotkey_loop.run(state.activate, state.deactivate)
         return 0
     finally:
+        controller.close()
+
+
+def default_voice_keyboard_pid_file() -> Path:
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime_dir:
+        return Path(runtime_dir) / "wordpipe" / "voice-keyboard.pid"
+    return Path("/tmp") / f"wordpipe-{os.getuid()}" / "voice-keyboard.pid"
+
+
+def run_signal_hotkey_daemon(
+    config: DaemonConfig,
+    transcript: TranscriptSink | None = None,
+    pid_file: Path | None = None,
+) -> int:
+    keyboard: KeyboardBackend
+    keyboard = DryRunKeyboardBackend() if config.dry_run_insertion else PortalKeyboardBackend()
+    controller = DictationController(config, keyboard, transcript)
+    done = threading.Event()
+    target_pid_file = pid_file or default_voice_keyboard_pid_file()
+    target_pid_file.parent.mkdir(parents=True, exist_ok=True)
+    target_pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
+
+    def toggle(_signum, _frame) -> None:  # type: ignore[no-untyped-def]
+        if controller.listening:
+            controller.stop_dictation()
+        else:
+            controller.start_dictation()
+
+    def shutdown(_signum, _frame) -> None:  # type: ignore[no-untyped-def]
+        done.set()
+
+    previous_usr1 = signal.getsignal(signal.SIGUSR1)
+    previous_term = signal.getsignal(signal.SIGTERM)
+    previous_int = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGUSR1, toggle)
+    signal.signal(signal.SIGTERM, shutdown)
+    signal.signal(signal.SIGINT, shutdown)
+    controller.open()
+    try:
+        transcript = transcript if transcript is not None else StderrTranscriptSink()
+        transcript.status(f"voice keyboard ready pid={os.getpid()}")
+        done.wait()
+        return 0
+    finally:
+        signal.signal(signal.SIGUSR1, previous_usr1)
+        signal.signal(signal.SIGTERM, previous_term)
+        signal.signal(signal.SIGINT, previous_int)
+        try:
+            if target_pid_file.read_text(encoding="utf-8").strip() == str(os.getpid()):
+                target_pid_file.unlink()
+        except FileNotFoundError:
+            pass
         controller.close()

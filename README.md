@@ -260,13 +260,46 @@ Manual commands are `down`, `up`, `toggle`, and `quit`.
 Run Wordpipe as a voice keyboard:
 
 ```sh
-PYTHONPATH=src python3 -m wordpipe voice-keyboard --model-profile compact
+scripts/install-wordpipe-gnome-shortcut
+PYTHONPATH=src python3 -m wordpipe voice-keyboard \
+  --model-profile compact \
+  --signal-hotkey \
+  --overlay stderr
 ```
 
 Then focus any text field, press `Ctrl+Alt+Space`, speak, and press
 `Ctrl+Alt+Space` again. In the default toggle mode, the second press sends the
 final recognized text through the RemoteDesktop portal into the focused text
-field. Use hold mode if you prefer press-and-hold dictation:
+field.
+
+The current development path uses a GNOME custom shortcut that runs
+`wordpipe voice-keyboard-toggle` against the resident daemon above. This avoids
+the GlobalShortcuts portal's stricter app-id requirements while the app is still
+running from a source checkout. Keep the daemon running in a terminal or tmux
+session while dictating.
+
+There is also an experimental desktop launcher:
+
+```sh
+scripts/install-wordpipe-desktop
+gtk-launch dev.wordpipe.Wordpipe
+```
+
+Desktop-launch logs are written to `~/.cache/wordpipe/wordpipe.log`.
+
+The lower-level GlobalShortcuts portal path is still available for diagnostics:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe voice-keyboard \
+  --model-profile compact \
+  --mode toggle \
+  --overlay stderr
+```
+
+If GNOME rejects that with `An app id is required`, use the desktop/custom
+shortcut path above.
+
+Use hold mode if you prefer press-and-hold dictation:
 
 ```sh
 PYTHONPATH=src python3 -m wordpipe voice-keyboard \

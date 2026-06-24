@@ -7,6 +7,7 @@ from wordpipe.insertion import (
     KEY_RELEASED,
     XK_RETURN,
     DryRunKeyboardBackend,
+    PortalKeyboardBackend,
     sanitize_text_for_keysyms,
     text_to_key_events,
 )
@@ -44,6 +45,12 @@ class InsertionTests(unittest.TestCase):
         backend.close()
 
         self.assertEqual(backend.events, ["open", "press 0x78", "release 0x78", "close"])
+
+    def test_portal_backend_open_is_lazy(self) -> None:
+        backend = PortalKeyboardBackend()
+
+        backend.open()
+        backend.close()
 
 
 if __name__ == "__main__":

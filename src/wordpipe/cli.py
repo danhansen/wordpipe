@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -406,12 +407,18 @@ def _cmd_hotkey_daemon(args: argparse.Namespace) -> int:
 
 
 def _cmd_voice_keyboard(args: argparse.Namespace) -> int:
-    from .daemon import run_hotkey_daemon
+    from .daemon import run_hotkey_daemon, run_signal_hotkey_daemon
     from .transcript import make_transcript_sink
 
     file_config = _load_cli_config(args)
     config = _daemon_config_from_args(args, file_config, log_metrics_default=True)
     overlay = args.overlay or file_config.overlay or "gtk"
+    if args.signal_hotkey:
+        return run_signal_hotkey_daemon(
+            config,
+            transcript=make_transcript_sink(overlay),
+            pid_file=Path(args.pid_file).expanduser() if args.pid_file else None,
+        )
     return run_hotkey_daemon(
         config,
         mode=args.mode or file_config.mode,
@@ -419,6 +426,23 @@ def _cmd_voice_keyboard(args: argparse.Namespace) -> int:
         manual_hotkey=args.manual_hotkey,
         transcript=make_transcript_sink(overlay),
     )
+
+
+def _cmd_voice_keyboard_toggle(args: argparse.Namespace) -> int:
+    import signal
+
+    from .daemon import default_voice_keyboard_pid_file
+
+    pid_file = Path(args.pid_file).expanduser() if args.pid_file else default_voice_keyboard_pid_file()
+    try:
+        pid = int(pid_file.read_text(encoding="utf-8").strip())
+    except FileNotFoundError:
+        raise RuntimeError(
+            f"voice keyboard is not running; missing pid file {pid_file}. "
+            "Start it with `wordpipe voice-keyboard --signal-hotkey`."
+        ) from None
+    os.kill(pid, signal.SIGUSR1)
+    return 0
 
 
 def _cmd_config_example(_args: argparse.Namespace) -> int:
@@ -797,6 +821,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Read manual commands from stdin instead of opening GlobalShortcuts.",
     )
     voice_keyboard.add_argument(
+        "--signal-hotkey",
+        action="store_true",
+        help="Use SIGUSR1/pid-file toggling instead of the GlobalShortcuts portal.",
+    )
+    voice_keyboard.add_argument(
+        "--pid-file",
+        help="Pid file used by --signal-hotkey and voice-keyboard-toggle.",
+    )
+    voice_keyboard.add_argument(
         "--dry-run-insertion",
         action="store_true",
         help="Print keyboard events instead of opening a portal keyboard session.",
@@ -824,6 +857,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Where partial transcript/status text is shown. Defaults to config overlay.",
     )
     voice_keyboard.set_defaults(func=_cmd_voice_keyboard)
+
+    voice_keyboard_toggle = subparsers.add_parser(
+        "voice-keyboard-toggle",
+        help="Toggle a running --signal-hotkey voice keyboard daemon.",
+    )
+    voice_keyboard_toggle.add_argument(
+        "--pid-file",
+        help="Pid file written by voice-keyboard --signal-hotkey.",
+    )
+    voice_keyboard_toggle.set_defaults(func=_cmd_voice_keyboard_toggle)
 
     daemon = subparsers.add_parser(
         "daemon",
@@ -930,6 +973,9 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("interrupted", file=sys.stderr)
         return 130
+    except RuntimeError as exc:
+        print(f"wordpipe error: {exc}", file=sys.stderr)
+        return 1
 
 
 __all__ = ["ProbeResult", "build_parser", "main"]

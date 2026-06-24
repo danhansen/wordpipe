@@ -191,7 +191,18 @@ class GlobalShortcutsPortalLoop:
             path_keyword="request_path",
         )
         try:
-            handle = method(*self._variant_args(args))
+            try:
+                handle = method(*self._variant_args(args))
+            except self._dbus.exceptions.DBusException as exc:
+                message = str(exc)
+                if "An app id is required" in message:
+                    raise RuntimeError(
+                        "GNOME GlobalShortcuts requires Wordpipe to be launched as a desktop "
+                        "application. Install the desktop entry with "
+                        "`scripts/install-wordpipe-desktop` and start it with "
+                        "`gtk-launch dev.wordpipe.Wordpipe`."
+                    ) from exc
+                raise
             expected_handle.append(str(handle))
             loop.run()
             if error:

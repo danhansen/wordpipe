@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from wordpipe.cli import _cmd_model_install, _resolve_model_dir, build_parser
+from wordpipe.cli import _cmd_model_install, _cmd_voice_keyboard_toggle, _resolve_model_dir, build_parser, main
 from wordpipe.config import WordpipeConfig
 from wordpipe.models import DEFAULT_NEMO_SOURCE_FILENAME, profile_runtime_dir
 
@@ -52,6 +52,31 @@ class CliModelResolutionTests(unittest.TestCase):
         self.assertEqual(args.model_profile, "compact")
         self.assertEqual(args.shortcut, "CTRL+ALT+D")
         self.assertEqual(args.overlay, "gtk")
+
+    def test_voice_keyboard_toggle_sends_sigusr1_to_pid_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pid_file = Path(tmp) / "voice-keyboard.pid"
+            pid_file.write_text("12345\n", encoding="utf-8")
+            args = argparse.Namespace(pid_file=str(pid_file))
+
+            with mock.patch("os.kill") as kill:
+                self.assertEqual(_cmd_voice_keyboard_toggle(args), 0)
+
+        self.assertEqual(kill.call_args.args[0], 12345)
+
+    def test_runtime_error_prints_without_traceback(self) -> None:
+        parser = mock.Mock()
+        parser.parse_args.return_value = argparse.Namespace(
+            func=mock.Mock(side_effect=RuntimeError("setup failed"))
+        )
+
+        with mock.patch("wordpipe.cli.build_parser", return_value=parser), contextlib.redirect_stderr(
+            io.StringIO()
+        ) as stderr:
+            code = main(["probe"])
+
+        self.assertEqual(code, 1)
+        self.assertIn("wordpipe error: setup failed", stderr.getvalue())
 
     def test_explicit_model_dir_wins(self) -> None:
         config = WordpipeConfig(model_dir=None, model_profile="fast")

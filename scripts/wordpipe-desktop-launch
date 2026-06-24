@@ -1,0 +1,27 @@
+#!/usr/bin/env sh
+set -eu
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/wordpipe"
+LOG_FILE="$CACHE_DIR/wordpipe.log"
+DESKTOP_FILE="${XDG_DATA_HOME:-$HOME/.local/share}/applications/dev.wordpipe.Wordpipe.desktop"
+
+mkdir -p "$CACHE_DIR"
+
+exec >> "$LOG_FILE" 2>&1
+
+printf '\n[%s] starting Wordpipe desktop launcher\n' "$(date -Is)"
+printf 'root=%s\n' "$ROOT"
+printf 'desktop_file=%s\n' "$DESKTOP_FILE"
+
+export GIO_LAUNCHED_DESKTOP_FILE="${GIO_LAUNCHED_DESKTOP_FILE:-$DESKTOP_FILE}"
+export GIO_LAUNCHED_DESKTOP_FILE_PID="$$"
+export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+
+PYTHON="$ROOT/.venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+  PYTHON="python3"
+fi
+printf 'python=%s\n' "$PYTHON"
+
+exec "$PYTHON" -m wordpipe voice-keyboard --model-profile compact --overlay stderr --signal-hotkey

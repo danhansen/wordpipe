@@ -100,12 +100,12 @@ class PortalKeyboardBackend:
         self._portal: RemoteDesktopPortalSession | None = None
 
     def open(self) -> None:
-        self._portal = RemoteDesktopPortalSession()
-        self._portal.open()
+        return
 
     def insert_text(self, text: str) -> None:
         if self._portal is None:
-            raise RuntimeError("keyboard backend is not open")
+            self._portal = RemoteDesktopPortalSession()
+            self._portal.open()
         for key_event in text_to_key_events(text):
             self._portal.notify_keysym(key_event.keysym, key_event.state)
 
