@@ -208,6 +208,15 @@ produced:
 .venv/bin/python scripts/smoke_stream_file.py --model-profile compact
 ```
 
+If the profile was built by the Flatpak but you want to run the local dev
+command against it, pass the Flatpak app-data model root:
+
+```sh
+.venv/bin/python scripts/smoke_stream_file.py \
+  --model-profile compact \
+  --model-root ~/.var/app/dev.wordpipe.Wordpipe/data/wordpipe/models
+```
+
 To smoke-test the installed Flatpak against the same profile and a host WAV:
 
 ```sh
