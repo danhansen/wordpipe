@@ -437,6 +437,12 @@ automatically. Building `fast` emits the FP32 projected-cache runtime directory.
 Run `model-install` again with the other profile when you want to try it; both
 artifacts can coexist under `model_root`.
 
+`model-install --source` can also import an already-built Wordpipe profile
+directory or archive. This is the supported Flatpak-friendly path, because the
+app Flatpak packages the runtime but not the full NeMo/PyTorch export stack.
+The source must contain `tokenizer.model`, `encoder.onnx` or `encoder.ort`, and
+`decoder_joint.onnx` or `decoder_joint.ort`.
+
 Select the default profile in `~/.config/wordpipe/config.toml`:
 
 ```toml

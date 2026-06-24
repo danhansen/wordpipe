@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from wordpipe.models import (
     DEFAULT_MODEL_REPO,
     _progress_reporter,
     build_profile_command,
+    install_built_profile,
     make_download_plan,
     model_file_url,
     profile_runtime_dir,
@@ -75,6 +77,27 @@ class ModelDownloadTests(unittest.TestCase):
             profile_runtime_dir(Path("/models/wordpipe"), "compact"),
             Path("/models/wordpipe/nemotron-wordpipe-compact-fixed-shape-ort-format"),
         )
+
+    def test_install_built_profile_copies_runtime_dir_to_profile_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            source.mkdir()
+            (source / "tokenizer.model").write_text("tokenizer", encoding="utf-8")
+            (source / "encoder.ort").write_text("encoder", encoding="utf-8")
+            (source / "decoder_joint.ort").write_text("decoder", encoding="utf-8")
+            (source / "config.json").write_text("{}", encoding="utf-8")
+
+            runtime_dir = install_built_profile(
+                source=source,
+                model_root=root / "installed",
+                profile="compact",
+            )
+
+            self.assertEqual(runtime_dir, profile_runtime_dir(root / "installed", "compact"))
+            self.assertEqual((runtime_dir / "tokenizer.model").read_text(encoding="utf-8"), "tokenizer")
+            self.assertTrue((runtime_dir / "encoder.ort").exists())
+            self.assertTrue((runtime_dir / "decoder_joint.ort").exists())
 
 
 if __name__ == "__main__":

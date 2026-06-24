@@ -60,6 +60,13 @@ modules:
           - build
           - target
           - models
+          - docs
+          - packaging
+          - scripts
+          - src
+          - tests
+          - README.md
+          - pyproject.toml
       # - packaging/flatpak/cargo-sources.json
 
   - name: wordpipe-python

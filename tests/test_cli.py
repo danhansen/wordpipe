@@ -38,6 +38,7 @@ def _install_marker(model_root: Path, profile: str) -> Path:
     runtime_dir.mkdir(parents=True)
     (runtime_dir / "tokenizer.model").write_text("tokenizer", encoding="utf-8")
     (runtime_dir / "encoder.onnx").write_text("encoder", encoding="utf-8")
+    (runtime_dir / "decoder_joint.onnx").write_text("decoder", encoding="utf-8")
     return runtime_dir
 
 
@@ -202,6 +203,40 @@ class CliModelResolutionTests(unittest.TestCase):
             expected_source,
             force=False,
         )
+
+    def test_model_install_imports_built_profile_source_without_huggingface_download(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source-profile"
+            source.mkdir()
+            (source / "tokenizer.model").write_text("tokenizer", encoding="utf-8")
+            (source / "encoder.ort").write_text("encoder", encoding="utf-8")
+            (source / "decoder_joint.ort").write_text("decoder", encoding="utf-8")
+            args = argparse.Namespace(
+                config=None,
+                profile="compact",
+                model_root=str(root / "models"),
+                source=str(source),
+                source_output=None,
+                python="/venv/bin/python",
+                force=False,
+                force_source=False,
+                dry_run=False,
+            )
+
+            with (
+                mock.patch("wordpipe.models.download_nemo_source") as download,
+                mock.patch("wordpipe.models.build_model_profile") as build,
+                contextlib.redirect_stdout(io.StringIO()) as stdout,
+            ):
+                self.assertEqual(_cmd_model_install(args), 0)
+
+            runtime_dir = profile_runtime_dir(root / "models", "compact")
+            self.assertEqual(Path(stdout.getvalue().strip()), runtime_dir)
+            self.assertTrue((runtime_dir / "encoder.ort").exists())
+
+        download.assert_not_called()
+        build.assert_not_called()
 
 
 if __name__ == "__main__":

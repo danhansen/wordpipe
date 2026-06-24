@@ -63,20 +63,35 @@ flatpak run dev.wordpipe.Wordpipe voice-keyboard --model-profile compact
 ## First-Run Model Flow
 
 The GUI now opens even when the selected model profile is missing, showing setup
-state instead of exiting before GTK starts. The intended Flatpak flow is:
+state instead of exiting before GTK starts. The app Flatpak intentionally does
+not ship the full NeMo/PyTorch export stack. Instead, install a model profile by
+importing a built Wordpipe runtime directory or archive into the Flatpak app data
+directory.
 
-1. Launch Wordpipe.
-2. Pick `compact` or `fast`.
-3. Download or reuse the source NeMo checkpoint.
-4. Build the selected profile into the Flatpak app data directory.
-5. Start dictation after the model profile is installed.
-
-The command-line version of that flow is already:
+For example, import a host-built compact profile:
 
 ```sh
-flatpak run dev.wordpipe.Wordpipe model-install --profile compact
+flatpak run \
+  --filesystem=/home/dhansen/.local/share/wordpipe/models:ro \
+  dev.wordpipe.Wordpipe model-install \
+  --profile compact \
+  --source /home/dhansen/.local/share/wordpipe/models/nemotron-wordpipe-compact-fixed-shape-ort-format
+```
+
+After that copy, the model lives under
+`~/.var/app/dev.wordpipe.Wordpipe/data/wordpipe/models/` and the runtime command
+does not need the extra host filesystem grant:
+
+```sh
 flatpak run dev.wordpipe.Wordpipe app --model-profile compact
 ```
 
-The next UI task is adding model-profile selection and install controls to the
-libadwaita window.
+`model-install --source` also accepts a `.tar`, `.tar.gz`, `.tgz`, or `.zip`
+archive containing a built Wordpipe profile directory with `tokenizer.model`,
+`encoder.onnx` or `encoder.ort`, and `decoder_joint.onnx` or
+`decoder_joint.ort`.
+
+The non-Flatpak development environment can still build profiles directly from a
+local `.nemo` file or Hugging Face NeMo repo id. Packaging that export toolchain
+inside the app Flatpak is deferred because it requires NeMo, PyTorch, ONNX
+tooling, and substantially more memory than the runtime.

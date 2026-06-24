@@ -218,7 +218,13 @@ def _cmd_download_model(args: argparse.Namespace) -> int:
 
 
 def _cmd_model_install(args: argparse.Namespace) -> int:
-    from .models import build_model_profile, default_nemo_source_path, download_nemo_source
+    from .models import (
+        build_model_profile,
+        default_nemo_source_path,
+        download_nemo_source,
+        install_built_profile,
+        source_is_built_profile,
+    )
 
     file_config = _load_cli_config(args)
     profile = args.profile or file_config.model_profile
@@ -226,10 +232,24 @@ def _cmd_model_install(args: argparse.Namespace) -> int:
     if model_root is None:
         raise SystemExit("model_root is required")
     source_value = args.source or file_config.nemo_source
+    source_candidate = Path(source_value).expanduser()
+    if source_candidate.exists() and (source_is_built_profile(source_candidate) or source_candidate.is_file()):
+        try:
+            runtime_dir = install_built_profile(
+                source=source_candidate,
+                model_root=model_root,
+                profile=profile,
+                force=args.force,
+            )
+        except RuntimeError:
+            if source_is_built_profile(source_candidate) or source_candidate.suffix.lower() in {".zip", ".tar", ".tgz", ".gz"}:
+                raise
+        else:
+            print(runtime_dir)
+            return 0
     source_output = Path(args.source_output).expanduser() if args.source_output else None
     if args.dry_run:
-        candidate = Path(source_value).expanduser()
-        source_path = candidate if candidate.exists() else source_output or default_nemo_source_path(model_root)
+        source_path = source_candidate if source_candidate.exists() else source_output or default_nemo_source_path(model_root)
     else:
         source_path = download_nemo_source(
             source_value,
@@ -737,7 +757,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     model_install = subparsers.add_parser(
         "model-install",
-        help="Download the source NeMo model if needed and build a selectable Wordpipe profile.",
+        help="Install a selectable Wordpipe profile from a built profile, archive, or NeMo source.",
     )
     model_install.add_argument("--config", help="Path to config.toml.")
     model_install.add_argument(
@@ -751,7 +771,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     model_install.add_argument(
         "--source",
-        help="Local .nemo path or Hugging Face repo id. Defaults to config.toml nemo_source.",
+        help=(
+            "Built Wordpipe profile directory/archive, local .nemo path, or Hugging Face "
+            "repo id. Defaults to config.toml nemo_source."
+        ),
     )
     model_install.add_argument(
         "--source-output",

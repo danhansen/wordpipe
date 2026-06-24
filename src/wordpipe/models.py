@@ -3,11 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
+import tarfile
 import time
 from typing import Literal
 from urllib.request import urlretrieve
+import zipfile
 
 
 DEFAULT_MODEL_REPO = (
@@ -152,9 +155,70 @@ def profile_runtime_dir(model_root: Path, profile: str) -> Path:
 
 def profile_installed(model_root: Path, profile: str) -> bool:
     runtime_dir = profile_runtime_dir(model_root, profile)
+    return model_runtime_dir_valid(runtime_dir)
+
+
+def model_runtime_dir_valid(runtime_dir: Path) -> bool:
     return (runtime_dir / "tokenizer.model").exists() and (
         (runtime_dir / "encoder.ort").exists() or (runtime_dir / "encoder.onnx").exists()
+    ) and ((runtime_dir / "decoder_joint.ort").exists() or (runtime_dir / "decoder_joint.onnx").exists())
+
+
+def source_is_built_profile(source: Path) -> bool:
+    return source.is_dir() and model_runtime_dir_valid(source)
+
+
+def install_built_profile(
+    *,
+    source: Path,
+    model_root: Path,
+    profile: str,
+    force: bool = False,
+) -> Path:
+    prepared_source = _prepare_built_profile_source(source)
+    destination = profile_runtime_dir(model_root, profile)
+    if destination.exists():
+        if not force:
+            raise RuntimeError(f"profile {profile!r} is already installed at {destination}; pass --force to overwrite it")
+        shutil.rmtree(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(prepared_source, destination)
+    return destination
+
+
+def _prepare_built_profile_source(source: Path) -> Path:
+    source = source.expanduser()
+    if source_is_built_profile(source):
+        return source
+    if source.is_file() and tarfile.is_tarfile(source):
+        import tempfile
+
+        tempdir = Path(tempfile.mkdtemp(prefix="wordpipe-profile-"))
+        with tarfile.open(source, "r:*") as archive:
+            archive.extractall(tempdir, filter="data")
+        return _find_built_profile_dir(tempdir)
+    if source.is_file() and zipfile.is_zipfile(source):
+        import tempfile
+
+        tempdir = Path(tempfile.mkdtemp(prefix="wordpipe-profile-"))
+        with zipfile.ZipFile(source) as archive:
+            archive.extractall(tempdir)
+        return _find_built_profile_dir(tempdir)
+    raise RuntimeError(
+        f"{source} is not a built Wordpipe model profile. Expected a directory or archive "
+        "containing tokenizer.model plus encoder/decoder_joint ONNX or ORT files."
     )
+
+
+def _find_built_profile_dir(root: Path) -> Path:
+    if source_is_built_profile(root):
+        return root
+    matches = [path for path in root.rglob("tokenizer.model") if source_is_built_profile(path.parent)]
+    if len(matches) == 1:
+        return matches[0].parent
+    if not matches:
+        raise RuntimeError(f"archive did not contain a built Wordpipe model profile: {root}")
+    raise RuntimeError(f"archive contained multiple built Wordpipe model profiles: {root}")
 
 
 def download_nemo_source(
