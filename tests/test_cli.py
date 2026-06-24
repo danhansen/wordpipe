@@ -12,6 +12,7 @@ from unittest import mock
 from wordpipe.cli import (
     _cmd_app,
     _cmd_model_install,
+    _cmd_stream_file_test,
     _cmd_voice_keyboard_toggle,
     _start_voice_keyboard_daemon,
     _resolve_model_dir,
@@ -275,6 +276,37 @@ class CliModelResolutionTests(unittest.TestCase):
 
             self.assertIn("voice keyboard is not running", str(raised.exception))
             self.assertFalse(pid_file.exists())
+
+    def test_stream_file_test_drains_parakeet_stderr_while_streaming_stdout(self) -> None:
+        args = argparse.Namespace(
+            asr_runtime="parakeet",
+            asr_worker_path="/tmp/worker",
+            model_dir="/models/parakeet",
+            num_threads=2,
+            sample_rate=16000,
+            stats_interval_seconds=1.0,
+            chunk_seconds=0.56,
+            flush_chunks=3,
+            wav="/tmp/input.wav",
+            json=False,
+        )
+        process = mock.Mock()
+        process.stdout = io.StringIO('{"event":"commit","text":"hello","data":{}}\n')
+        process.stderr = io.StringIO("worker failed\n")
+        process.wait.return_value = 7
+
+        with (
+            mock.patch("wordpipe.daemon._resolve_parakeet_worker", return_value="/tmp/worker"),
+            mock.patch("wordpipe.daemon.parakeet_worker_env", return_value={}),
+            mock.patch("wordpipe.cli.subprocess.Popen", return_value=process),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(io.StringIO()) as stderr,
+        ):
+            code = _cmd_stream_file_test(args)
+
+        self.assertEqual(code, 7)
+        self.assertIn("worker failed", stderr.getvalue())
+        process.communicate.assert_not_called()
 
     def test_runtime_error_prints_without_traceback(self) -> None:
         parser = mock.Mock()

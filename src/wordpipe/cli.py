@@ -7,6 +7,7 @@ import math
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -175,17 +176,27 @@ def _cmd_stream_file_test(args: argparse.Namespace) -> int:
             env=parakeet_worker_env(),
         )
         assert proc.stdout is not None
+        assert proc.stderr is not None
+        stderr_lines: list[str] = []
+        stderr_thread = threading.Thread(
+            target=_collect_stderr_lines,
+            args=(proc.stderr, stderr_lines),
+            name="wordpipe-stream-file-stderr",
+            daemon=True,
+        )
+        stderr_thread.start()
         for line in proc.stdout:
             item = json.loads(line)
             if args.json:
                 print(json.dumps(item, sort_keys=True), flush=True)
             else:
                 print(_format_event(item), flush=True)
-        _, stderr = proc.communicate()
-        if proc.returncode != 0:
-            if stderr:
-                print(stderr, file=sys.stderr, end="")
-            return proc.returncode or 1
+        return_code = proc.wait()
+        stderr_thread.join(timeout=1)
+        if return_code != 0:
+            if stderr_lines:
+                print("".join(stderr_lines), file=sys.stderr, end="")
+            return return_code or 1
         return 0
 
     from .asr_worker import AsrWorkerConfig, stream_wav_file_events
@@ -215,6 +226,11 @@ def _cmd_stream_file_test(args: argparse.Namespace) -> int:
         else:
             print(_format_event(item), flush=True)
     return 0
+
+
+def _collect_stderr_lines(stream, lines: list[str]) -> None:  # type: ignore[no-untyped-def]
+    for line in stream:
+        lines.append(line)
 
 
 def _cmd_audio_devices(_args: argparse.Namespace) -> int:
