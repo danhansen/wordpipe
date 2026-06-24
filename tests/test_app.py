@@ -80,9 +80,13 @@ class FakeGLib:
 class FakeButton:
     def __init__(self) -> None:
         self.sensitive_values: list[bool] = []
+        self.active_values: list[bool] = []
 
     def set_sensitive(self, sensitive: bool) -> None:
         self.sensitive_values.append(sensitive)
+
+    def set_active(self, active: bool) -> None:
+        self.active_values.append(active)
 
 
 class FakeDropdown:
@@ -110,6 +114,24 @@ class AppControllerStateTests(unittest.TestCase):
 
         self.assertEqual(button.sensitive_values, [True])
         controller_cls.return_value.open.assert_called_once_with()
+
+    def test_open_controller_closes_failed_controller(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            model_dir = Path(tmp)
+            config = DaemonConfig(model_dir=model_dir, dry_run_insertion=True)
+            app = WordpipeApp(config)
+            button = FakeButton()
+            app._glib = FakeGLib()
+            app._toggle_button = button
+
+            with mock.patch("wordpipe.app.DictationController") as controller_cls:
+                controller_cls.return_value.open.side_effect = RuntimeError("portal failed")
+
+                self.assertFalse(app._open_controller())
+
+        controller_cls.return_value.close.assert_called_once_with()
+        self.assertIsNone(app._controller)
+        self.assertEqual(button.sensitive_values[-1], False)
 
     def test_profile_change_persists_selected_profile(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
