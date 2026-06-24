@@ -19,7 +19,9 @@ const NEMOTRON_CHUNK_SAMPLES: usize = 8960;
 #[derive(Debug, Parser)]
 struct Args {
     #[arg(long)]
-    model_dir: PathBuf,
+    model_dir: Option<PathBuf>,
+    #[arg(long)]
+    list_input_devices: bool,
     #[arg(long, default_value_t = 2)]
     num_threads: usize,
     #[arg(long, default_value_t = 16000)]
@@ -123,11 +125,16 @@ fn main() -> Result<()> {
     validate_args(&args)?;
     let emitter = Arc::new(JsonEmitter::new());
 
+    if args.list_input_devices {
+        return list_input_devices(emitter);
+    }
+
     if args.wav.is_some() {
         return run_wav_file(args, emitter);
     }
 
-    emitter.emit(json!({"event": "loading_model", "data": {"model_dir": args.model_dir}}));
+    emitter
+        .emit(json!({"event": "loading_model", "data": {"model_dir": required_model_dir(&args)?}}));
     let load_started = Instant::now();
     let mut model = Some(load_model(&args)?);
     emitter.emit(json!({
@@ -209,6 +216,11 @@ fn main() -> Result<()> {
 }
 
 fn validate_args(args: &Args) -> Result<()> {
+    if args.model_dir.is_none() && !args.list_input_devices {
+        return Err(anyhow!(
+            "--model-dir is required unless --list-input-devices is used"
+        ));
+    }
     if args.num_threads == 0 {
         return Err(anyhow!("--num-threads must be at least 1"));
     }
@@ -225,6 +237,29 @@ fn validate_args(args: &Args) -> Result<()> {
         return Err(anyhow!(
             "--stats-interval-seconds must be a positive finite number"
         ));
+    }
+    Ok(())
+}
+
+fn list_input_devices(emitter: Arc<JsonEmitter>) -> Result<()> {
+    let host = cpal::default_host();
+    let default_name = host
+        .default_input_device()
+        .and_then(|device| device.name().ok());
+    for (index, device) in host
+        .input_devices()
+        .context("failed to enumerate input devices")?
+        .enumerate()
+    {
+        let name = device.name().unwrap_or_else(|_| "unknown".to_string());
+        emitter.emit(json!({
+            "event": "input_device",
+            "data": {
+                "index": index,
+                "name": name,
+                "is_default": default_name.as_ref() == Some(&name),
+            }
+        }));
     }
     Ok(())
 }
@@ -389,7 +424,8 @@ fn run_wav_file(args: Arc<Args>, emitter: Arc<JsonEmitter>) -> Result<()> {
         .ok_or_else(|| anyhow!("--wav is required for WAV mode"))?;
     emitter.emit(json!({"event": "loading_wav", "data": {"path": wav_path}}));
     let samples = read_wav_mono_float32(wav_path, args.sample_rate)?;
-    emitter.emit(json!({"event": "loading_model", "data": {"model_dir": args.model_dir}}));
+    emitter
+        .emit(json!({"event": "loading_model", "data": {"model_dir": required_model_dir(&args)?}}));
     let load_started = Instant::now();
     let mut model = load_model(&args)?;
     emitter.emit(json!({
@@ -491,6 +527,7 @@ fn run_wav_file(args: Arc<Args>, emitter: Arc<JsonEmitter>) -> Result<()> {
 }
 
 fn load_model(args: &Args) -> Result<Nemotron> {
+    let model_dir = required_model_dir(args)?;
     let config = ExecutionConfig::new()
         .with_intra_threads(args.num_threads)
         .with_inter_threads(1)
@@ -503,14 +540,14 @@ fn load_model(args: &Args) -> Result<Nemotron> {
     } else {
         config
     };
-    Nemotron::from_pretrained(args.model_dir.to_string_lossy().as_ref(), Some(config)).with_context(
-        || {
-            format!(
-                "failed to load Nemotron model from {}",
-                args.model_dir.display()
-            )
-        },
-    )
+    Nemotron::from_pretrained(model_dir.to_string_lossy().as_ref(), Some(config))
+        .with_context(|| format!("failed to load Nemotron model from {}", model_dir.display()))
+}
+
+fn required_model_dir(args: &Args) -> Result<&PathBuf> {
+    args.model_dir
+        .as_ref()
+        .ok_or_else(|| anyhow!("--model-dir is required"))
 }
 
 fn decode_chunk(
@@ -780,7 +817,8 @@ mod tests {
 
     fn default_args() -> Args {
         Args {
-            model_dir: PathBuf::from("/models/nemotron"),
+            model_dir: Some(PathBuf::from("/models/nemotron")),
+            list_input_devices: false,
             num_threads: 2,
             sample_rate: 16_000,
             input_device: None,
@@ -831,5 +869,24 @@ mod tests {
         let error = validate_args(&args).unwrap_err().to_string();
 
         assert!(error.contains("--queue-seconds"));
+    }
+
+    #[test]
+    fn validate_args_allows_device_listing_without_model_dir() {
+        let mut args = default_args();
+        args.model_dir = None;
+        args.list_input_devices = true;
+
+        validate_args(&args).unwrap();
+    }
+
+    #[test]
+    fn validate_args_rejects_missing_model_dir_for_recognition() {
+        let mut args = default_args();
+        args.model_dir = None;
+
+        let error = validate_args(&args).unwrap_err().to_string();
+
+        assert!(error.contains("--model-dir"));
     }
 }

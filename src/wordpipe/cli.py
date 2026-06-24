@@ -236,11 +236,50 @@ def _collect_stderr_lines(stream, lines: list[str]) -> None:  # type: ignore[no-
         lines.append(line)
 
 
-def _cmd_audio_devices(_args: argparse.Namespace) -> int:
+def _cmd_audio_devices(args: argparse.Namespace) -> int:
     from .audio import render_input_devices
 
-    print(render_input_devices())
+    if args.backend == "parakeet":
+        print(_render_parakeet_input_devices(args.asr_worker_path))
+    else:
+        print(render_input_devices())
     return 0
+
+
+def _render_parakeet_input_devices(configured_worker: str | None = None) -> str:
+    from .daemon import _resolve_parakeet_worker, parakeet_worker_env
+
+    worker = _resolve_parakeet_worker(
+        Path(configured_worker).expanduser() if configured_worker else None
+    )
+    command = [str(worker), "--list-input-devices"]
+    process = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=parakeet_worker_env(),
+    )
+    if process.returncode != 0:
+        detail = process.stderr.strip() or process.stdout.strip() or "unknown error"
+        raise RuntimeError(f"Parakeet worker failed to list input devices: {detail}")
+
+    rows: list[dict[str, object]] = []
+    for line in process.stdout.splitlines():
+        if not line.strip():
+            continue
+        item = json.loads(line)
+        if item.get("event") == "input_device" and isinstance(item.get("data"), dict):
+            rows.append(item["data"])  # type: ignore[arg-type]
+
+    lines = ["Input devices (Parakeet/CPAL):"]
+    if not rows:
+        lines.append("  none found")
+        return "\n".join(lines)
+    for row in rows:
+        marker = "*" if row.get("is_default") else " "
+        lines.append(f"{marker} {row.get('index', '?'):>3} {row.get('name', '')}")
+    return "\n".join(lines)
 
 
 def _cmd_record_test(args: argparse.Namespace) -> int:
@@ -911,7 +950,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     audio_devices = subparsers.add_parser(
         "audio-devices",
-        help="List available sounddevice input devices.",
+        help="List available input devices.",
+    )
+    audio_devices.add_argument(
+        "--backend",
+        choices=("sounddevice", "parakeet"),
+        default="sounddevice",
+        help="Audio backend to query. Use parakeet to list the Rust/CPAL worker devices.",
+    )
+    audio_devices.add_argument(
+        "--asr-worker-path",
+        help="Path to wordpipe-parakeet-worker when --backend parakeet is used.",
     )
     audio_devices.set_defaults(func=_cmd_audio_devices)
 

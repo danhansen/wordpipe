@@ -15,6 +15,7 @@ from wordpipe.cli import (
     _cmd_model_install,
     _cmd_stream_file_test,
     _cmd_voice_keyboard_toggle,
+    _render_parakeet_input_devices,
     _start_voice_keyboard_daemon,
     _resolve_model_dir,
     build_parser,
@@ -135,6 +136,60 @@ class CliModelResolutionTests(unittest.TestCase):
         self.assertIsNone(listen_args.model_dir)
         self.assertEqual(stream_args.model_profile, "fast")
         self.assertIsNone(stream_args.model_dir)
+
+    def test_audio_devices_parser_accepts_parakeet_backend(self) -> None:
+        args = build_parser().parse_args(
+            ["audio-devices", "--backend", "parakeet", "--asr-worker-path", "/tmp/worker"]
+        )
+
+        self.assertEqual(args.command, "audio-devices")
+        self.assertEqual(args.backend, "parakeet")
+        self.assertEqual(args.asr_worker_path, "/tmp/worker")
+
+    def test_render_parakeet_input_devices_uses_worker_json_events(self) -> None:
+        output = "\n".join(
+            [
+                '{"event":"input_device","data":{"index":0,"name":"Built-in","is_default":true}}',
+                '{"event":"input_device","data":{"index":1,"name":"USB Mic","is_default":false}}',
+            ]
+        )
+
+        with (
+            mock.patch("wordpipe.daemon._resolve_parakeet_worker", return_value="/tmp/worker"),
+            mock.patch("wordpipe.daemon.parakeet_worker_env", return_value={}),
+            mock.patch(
+                "subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    ["/tmp/worker", "--list-input-devices"],
+                    0,
+                    stdout=output,
+                    stderr="",
+                ),
+            ) as run,
+        ):
+            rendered = _render_parakeet_input_devices("/tmp/worker")
+
+        run.assert_called_once()
+        self.assertIn("Input devices (Parakeet/CPAL):", rendered)
+        self.assertIn("*   0 Built-in", rendered)
+        self.assertIn("    1 USB Mic", rendered)
+
+    def test_render_parakeet_input_devices_reports_worker_failure(self) -> None:
+        with (
+            mock.patch("wordpipe.daemon._resolve_parakeet_worker", return_value="/tmp/worker"),
+            mock.patch("wordpipe.daemon.parakeet_worker_env", return_value={}),
+            mock.patch(
+                "subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    ["/tmp/worker", "--list-input-devices"],
+                    2,
+                    stdout="",
+                    stderr="no audio host",
+                ),
+            ),
+            self.assertRaisesRegex(RuntimeError, "no audio host"),
+        ):
+            _render_parakeet_input_devices("/tmp/worker")
 
     def test_parser_rejects_non_positive_runtime_values(self) -> None:
         cases = [

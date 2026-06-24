@@ -170,11 +170,14 @@ List input devices:
 
 ```sh
 scripts/wordpipe-dev audio-devices
+scripts/wordpipe-dev audio-devices --backend parakeet
 ```
 
 Try a specific input device. Numeric values are the indices shown by
-`audio-devices`; for the Parakeet runtime Wordpipe resolves the index to a
-device name before handing it to the Rust/CPAL worker.
+`audio-devices`; for the Parakeet runtime, prefer the `--backend parakeet`
+listing because it comes from the same Rust/CPAL worker that records audio.
+When a sounddevice index is passed to Parakeet, Wordpipe resolves it to a device
+name before handing it to CPAL.
 
 ```sh
 scripts/wordpipe-dev listen-test \
