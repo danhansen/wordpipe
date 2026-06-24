@@ -9,6 +9,7 @@ from wordpipe.insertion import (
     XK_RETURN,
     DryRunKeyboardBackend,
     PortalKeyboardBackend,
+    RemoteDesktopPortalSession,
     sanitize_text_for_keysyms,
     text_to_key_events,
 )
@@ -60,6 +61,40 @@ class InsertionTests(unittest.TestCase):
         portal.notify_keysym.assert_any_call(ord("x"), KEY_PRESSED)
         portal.notify_keysym.assert_any_call(ord("x"), KEY_RELEASED)
         portal.close.assert_called_once_with()
+
+    def test_portal_backend_does_not_retain_failed_open_session(self) -> None:
+        failed = Mock()
+        failed.open.side_effect = RuntimeError("portal denied")
+        working = Mock()
+
+        with patch(
+            "wordpipe.insertion.RemoteDesktopPortalSession",
+            side_effect=[failed, working],
+        ):
+            backend = PortalKeyboardBackend()
+            with self.assertRaisesRegex(RuntimeError, "portal denied"):
+                backend.open()
+            backend.insert_text("x")
+
+        failed.open.assert_called_once_with()
+        working.open.assert_called_once_with()
+        working.notify_keysym.assert_any_call(ord("x"), KEY_PRESSED)
+
+    def test_remote_desktop_session_closes_partial_session_when_select_fails(self) -> None:
+        remote = Mock()
+        remote.request.side_effect = [
+            {"session_handle": "/session/wordpipe"},
+            RuntimeError("select failed"),
+        ]
+        session = RemoteDesktopPortalSession.__new__(RemoteDesktopPortalSession)
+        session._remote = remote
+        session._session_handle = None
+
+        with self.assertRaisesRegex(RuntimeError, "select failed"):
+            session.open()
+
+        remote.close_session.assert_called_once_with("/session/wordpipe")
+        self.assertIsNone(session._session_handle)
 
 
 if __name__ == "__main__":

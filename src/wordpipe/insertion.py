@@ -102,8 +102,9 @@ class PortalKeyboardBackend:
 
     def open(self) -> None:
         if self._portal is None:
-            self._portal = RemoteDesktopPortalSession()
-            self._portal.open()
+            portal = RemoteDesktopPortalSession()
+            portal.open()
+            self._portal = portal
 
     def insert_text(self, text: str) -> None:
         if self._portal is None:
@@ -126,32 +127,36 @@ class RemoteDesktopPortalSession:
         self._session_handle: str | None = None
 
     def open(self) -> None:
-        create = self._request(
-            "CreateSession",
-            "(a{sv})",
-            {
-                "handle_token": self._token("create"),
-                "session_handle_token": self._token("session"),
-            },
-        )
-        self._session_handle = str(create["session_handle"])
+        try:
+            create = self._request(
+                "CreateSession",
+                "(a{sv})",
+                {
+                    "handle_token": self._token("create"),
+                    "session_handle_token": self._token("session"),
+                },
+            )
+            self._session_handle = str(create["session_handle"])
 
-        self._request(
-            "SelectDevices",
-            "(oa{sv})",
-            self._session_handle,
-            {
-                "handle_token": self._token("devices"),
-                "types": variant_uint32(KEYBOARD_DEVICE),
-            },
-        )
-        self._request(
-            "Start",
-            "(osa{sv})",
-            self._session_handle,
-            "",
-            {"handle_token": self._token("start")},
-        )
+            self._request(
+                "SelectDevices",
+                "(oa{sv})",
+                self._session_handle,
+                {
+                    "handle_token": self._token("devices"),
+                    "types": variant_uint32(KEYBOARD_DEVICE),
+                },
+            )
+            self._request(
+                "Start",
+                "(osa{sv})",
+                self._session_handle,
+                "",
+                {"handle_token": self._token("start")},
+            )
+        except Exception:
+            self.close()
+            raise
 
     def notify_keysym(self, keysym: int, state: int) -> None:
         if self._session_handle is None:
