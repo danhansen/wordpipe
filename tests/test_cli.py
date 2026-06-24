@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +13,7 @@ from wordpipe.cli import (
     _cmd_app,
     _cmd_model_install,
     _cmd_voice_keyboard_toggle,
+    _start_voice_keyboard_daemon,
     _resolve_model_dir,
     build_parser,
     main,
@@ -48,12 +50,14 @@ def _toggle_args(
     start_if_needed: bool = False,
     config: str | None = None,
     start_timeout: float = 30.0,
+    daemon_log_file: str | None = None,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         pid_file=str(pid_file),
         start_if_needed=start_if_needed,
         config=config,
         start_timeout=start_timeout,
+        daemon_log_file=daemon_log_file,
     )
 
 
@@ -100,6 +104,8 @@ class CliModelResolutionTests(unittest.TestCase):
                 "12.5",
                 "--config",
                 "/tmp/wordpipe.toml",
+                "--daemon-log-file",
+                "/tmp/wordpipe.log",
             ]
         )
 
@@ -107,6 +113,7 @@ class CliModelResolutionTests(unittest.TestCase):
         self.assertTrue(args.start_if_needed)
         self.assertEqual(args.start_timeout, 12.5)
         self.assertEqual(args.config, "/tmp/wordpipe.toml")
+        self.assertEqual(args.daemon_log_file, "/tmp/wordpipe.log")
 
     def test_voice_keyboard_toggle_sends_sigusr1_to_pid_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -135,6 +142,37 @@ class CliModelResolutionTests(unittest.TestCase):
 
         start.assert_called_once()
         self.assertEqual(kill.call_args.args[0], 23456)
+
+    def test_start_voice_keyboard_daemon_logs_child_output(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pid_file = root / "voice-keyboard.pid"
+            log_file = root / "voice-keyboard.log"
+            args = _toggle_args(
+                pid_file,
+                start_if_needed=True,
+                start_timeout=0.2,
+                daemon_log_file=str(log_file),
+            )
+
+            process = mock.Mock()
+            process.poll.return_value = None
+
+            def popen(_command, **kwargs):
+                kwargs["stdout"].write("daemon output\n")
+                kwargs["stdout"].flush()
+                pid_file.write_text("23456\n", encoding="utf-8")
+                return process
+
+            with (
+                mock.patch("wordpipe.cli.subprocess.Popen", side_effect=popen) as popen_mock,
+                mock.patch("wordpipe.cli.os.kill"),
+            ):
+                _start_voice_keyboard_daemon(pid_file, args)
+
+            self.assertIn("wordpipe voice-keyboard start", log_file.read_text(encoding="utf-8"))
+            self.assertIn("daemon output", log_file.read_text(encoding="utf-8"))
+            self.assertEqual(popen_mock.call_args.kwargs["stderr"], subprocess.STDOUT)
 
     def test_voice_keyboard_toggle_removes_stale_pid_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

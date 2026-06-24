@@ -134,6 +134,10 @@ shortcut:
 flatpak run dev.wordpipe.Wordpipe voice-keyboard --signal-hotkey
 ```
 
+If the shortcut starts the daemon itself, startup logs are written inside the
+Flatpak cache at
+`~/.var/app/dev.wordpipe.Wordpipe/cache/wordpipe/voice-keyboard.log`.
+
 The app profile selector writes `model_profile` into the Flatpak config, so the
 resident daemon uses the selected profile unless `--model-profile` is passed.
 

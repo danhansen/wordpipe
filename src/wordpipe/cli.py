@@ -534,6 +534,12 @@ def _signal_voice_keyboard(pid_file: Path, signum: int) -> bool:
 
 
 def _start_voice_keyboard_daemon(pid_file: Path, args: argparse.Namespace) -> None:
+    log_file = (
+        Path(args.daemon_log_file).expanduser()
+        if getattr(args, "daemon_log_file", None)
+        else _default_voice_keyboard_log_file()
+    )
+    log_file.parent.mkdir(parents=True, exist_ok=True)
     command = [
         sys.executable,
         "-m",
@@ -545,25 +551,32 @@ def _start_voice_keyboard_daemon(pid_file: Path, args: argparse.Namespace) -> No
     ]
     if getattr(args, "config", None):
         command.extend(["--config", str(Path(args.config).expanduser())])
-    process = subprocess.Popen(
-        command,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    with log_file.open("a", encoding="utf-8") as log:
+        print(
+            f"\n--- wordpipe voice-keyboard start {time.strftime('%Y-%m-%d %H:%M:%S')} ---",
+            file=log,
+            flush=True,
+        )
+        process = subprocess.Popen(
+            command,
+            stdin=subprocess.DEVNULL,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
     deadline = time.monotonic() + float(args.start_timeout)
     while time.monotonic() < deadline:
         if pid_file.exists() and _pid_file_points_to_live_process(pid_file):
             return
         if process.poll() is not None:
             raise RuntimeError(
-                f"voice keyboard daemon exited before becoming ready; command: {' '.join(command)}"
+                "voice keyboard daemon exited before becoming ready; "
+                f"command: {' '.join(command)}; log: {log_file}"
             )
         time.sleep(0.05)
     raise RuntimeError(
         f"voice keyboard daemon did not become ready within {args.start_timeout}s; "
-        f"pid file: {pid_file}"
+        f"pid file: {pid_file}; log: {log_file}"
     )
 
 
@@ -587,6 +600,13 @@ def _voice_keyboard_not_running_error(pid_file: Path) -> RuntimeError:
         f"voice keyboard is not running; missing or stale pid file {pid_file}. "
         "Start it with `wordpipe voice-keyboard --signal-hotkey`."
     )
+
+
+def _default_voice_keyboard_log_file() -> Path:
+    cache_home = os.environ.get("XDG_CACHE_HOME")
+    if cache_home:
+        return Path(cache_home) / "wordpipe" / "voice-keyboard.log"
+    return Path.home() / ".cache" / "wordpipe" / "voice-keyboard.log"
 
 
 def _remove_stale_pid_file(pid_file: Path) -> None:
@@ -1056,6 +1076,10 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=30.0,
         help="Seconds to wait for a newly started daemon to become ready.",
+    )
+    voice_keyboard_toggle.add_argument(
+        "--daemon-log-file",
+        help="Log file for a daemon started by --start-if-needed.",
     )
     voice_keyboard_toggle.set_defaults(func=_cmd_voice_keyboard_toggle)
 

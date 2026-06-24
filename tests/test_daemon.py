@@ -137,6 +137,38 @@ class DaemonTests(unittest.TestCase):
             controller_cls.return_value.close.assert_called_once_with()
             self.assertFalse(pid_file.exists())
 
+    def test_signal_hotkey_restores_signals_when_controller_open_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            pid_file = Path(tmp) / "voice-keyboard.pid"
+            previous = object()
+
+            with (
+                mock.patch("wordpipe.daemon.signal.getsignal", return_value=previous),
+                mock.patch("wordpipe.daemon.signal.signal") as set_signal,
+                mock.patch("wordpipe.daemon.DictationController") as controller_cls,
+            ):
+                controller_cls.return_value.open.side_effect = RuntimeError("portal failed")
+
+                with self.assertRaises(RuntimeError):
+                    run_signal_hotkey_daemon(
+                        DaemonConfig(model_dir=Path("/models/parakeet"), dry_run_insertion=True),
+                        transcript=mock.Mock(),
+                        pid_file=pid_file,
+                    )
+
+            self.assertEqual(set_signal.call_count, 6)
+            restored = [call.args for call in set_signal.call_args_list[-3:]]
+            self.assertEqual(
+                restored,
+                [
+                    (mock.ANY, previous),
+                    (mock.ANY, previous),
+                    (mock.ANY, previous),
+                ],
+            )
+            controller_cls.return_value.close.assert_called_once_with()
+            self.assertFalse(pid_file.exists())
+
     def test_streaming_partials_insert_only_appended_suffixes(self) -> None:
         keyboard = FakeKeyboard()
         transcript = FakeTranscript()

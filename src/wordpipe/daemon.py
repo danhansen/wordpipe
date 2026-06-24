@@ -482,10 +482,10 @@ def run_signal_hotkey_daemon(
     signal.signal(signal.SIGUSR1, toggle)
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)
-    controller.open()
-    target_pid_file.parent.mkdir(parents=True, exist_ok=True)
-    target_pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
     try:
+        controller.open()
+        target_pid_file.parent.mkdir(parents=True, exist_ok=True)
+        target_pid_file.write_text(f"{os.getpid()}\n", encoding="utf-8")
         transcript.status(f"voice keyboard ready pid={os.getpid()}")
         done.wait()
         return 0

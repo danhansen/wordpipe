@@ -320,6 +320,12 @@ PYTHONPATH=src python3 -m wordpipe voice-keyboard \
   --overlay stderr
 ```
 
+When `voice-keyboard-toggle --start-if-needed` starts the daemon for a GNOME
+shortcut, daemon stdout/stderr is written to
+`$XDG_CACHE_HOME/wordpipe/voice-keyboard.log`, or
+`~/.cache/wordpipe/voice-keyboard.log` when `XDG_CACHE_HOME` is unset. Pass
+`--daemon-log-file` to `voice-keyboard-toggle` to override it.
+
 For the Flatpak build, install the equivalent host shortcut with:
 
 ```sh
