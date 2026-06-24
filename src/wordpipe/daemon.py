@@ -241,6 +241,11 @@ class AsrProcess:
             if text:
                 yield text
 
+    def return_code(self) -> int | None:
+        if self._proc is None:
+            return None
+        return self._proc.poll()
+
     def close(self) -> None:
         if self._proc is None:
             return
@@ -294,6 +299,7 @@ class DictationController:
         self._lock = threading.Lock()
         self._opened = False
         self._listening = False
+        self._closing = False
         self._inserted_partial_text = ""
         self._streaming_inserted_any = False
         self._exit_code = 0
@@ -308,6 +314,8 @@ class DictationController:
             return
         self._done.clear()
         self._exit_code = 0
+        with self._lock:
+            self._closing = False
         transcript_opened = False
         keyboard_opened = False
         try:
@@ -359,6 +367,8 @@ class DictationController:
 
     def close(self) -> None:
         try:
+            with self._lock:
+                self._closing = True
             self._asr.close()
             self._join_reader_threads()
         finally:
@@ -373,6 +383,8 @@ class DictationController:
 
     def _cleanup_failed_open(self, *, keyboard_opened: bool, transcript_opened: bool) -> None:
         try:
+            with self._lock:
+                self._closing = True
             self._asr.close()
             self._join_reader_threads()
         finally:
@@ -396,7 +408,11 @@ class DictationController:
         try:
             for item in self._asr.events():
                 self._handle_event(item)
+            self._handle_worker_stdout_closed()
         except Exception as exc:  # noqa: BLE001 - daemon must surface subprocess failures.
+            if self._is_closing():
+                self._done.set()
+                return
             self._transcript.error(f"{type(exc).__name__}: {exc}")
             self._exit_code = 1
             self._done.set()
@@ -408,6 +424,34 @@ class DictationController:
         except Exception as exc:  # noqa: BLE001 - stderr drain must not kill dictation.
             if not self._done.is_set():
                 self._transcript.error(f"ASR stderr reader failed: {type(exc).__name__}: {exc}")
+
+    def _handle_worker_stdout_closed(self) -> None:
+        if self._done.is_set():
+            return
+        if self._is_closing():
+            self._done.set()
+            return
+        return_code = self._asr_return_code()
+        if return_code == 0:
+            self._transcript.status("ASR worker exited")
+            self._exit_code = 0
+        elif return_code is None:
+            self._transcript.error("ASR worker stdout closed unexpectedly")
+            self._exit_code = 1
+        else:
+            self._transcript.error(f"ASR worker exited with status {return_code}")
+            self._exit_code = return_code
+        self._done.set()
+
+    def _asr_return_code(self) -> int | None:
+        return_code = getattr(self._asr, "return_code", None)
+        if return_code is None:
+            return None
+        return return_code()
+
+    def _is_closing(self) -> bool:
+        with self._lock:
+            return self._closing
 
     def _handle_event(self, item: dict[str, object]) -> None:
         kind = item.get("event")

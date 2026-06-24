@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import tempfile
 import subprocess
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -125,14 +126,17 @@ class ReusableAsr:
         self.starts = 0
         self.closes = 0
         self.commands: list[str] = []
+        self.closed = threading.Event()
 
     def start(self) -> None:
         self.starts += 1
+        self.closed.clear()
 
     def send(self, command: str) -> None:
         self.commands.append(command)
 
     def events(self):
+        self.closed.wait()
         return iter(())
 
     def stderr_lines(self):
@@ -140,6 +144,18 @@ class ReusableAsr:
 
     def close(self) -> None:
         self.closes += 1
+        self.closed.set()
+
+
+class ExitedAsr:
+    def __init__(self, return_code: int | None) -> None:
+        self._return_code = return_code
+
+    def events(self):
+        return iter(())
+
+    def return_code(self) -> int | None:
+        return self._return_code
 
 
 class DaemonTests(unittest.TestCase):
@@ -236,6 +252,35 @@ class DaemonTests(unittest.TestCase):
 
         self.assertIn(("error", "ASR worker stderr: first warning"), transcript.events)
         self.assertIn(("error", "ASR worker stderr: second warning"), transcript.events)
+
+    def test_event_reader_reports_unexpected_worker_exit(self) -> None:
+        transcript = FakeTranscript()
+        controller = DictationController(
+            DaemonConfig(model_dir=Path("/models/parakeet")),
+            FakeKeyboard(),
+            transcript,
+        )
+        controller._asr = ExitedAsr(7)  # type: ignore[assignment]
+
+        controller._read_events()
+
+        self.assertIn(("error", "ASR worker exited with status 7"), transcript.events)
+        self.assertEqual(controller.wait(), 7)
+
+    def test_event_reader_suppresses_exit_error_during_close(self) -> None:
+        transcript = FakeTranscript()
+        controller = DictationController(
+            DaemonConfig(model_dir=Path("/models/parakeet")),
+            FakeKeyboard(),
+            transcript,
+        )
+        controller._asr = ExitedAsr(None)  # type: ignore[assignment]
+        controller._closing = True
+
+        controller._read_events()
+
+        self.assertNotIn(("error", "ASR worker stdout closed unexpectedly"), transcript.events)
+        self.assertEqual(controller.wait(), 0)
 
     def test_close_joins_reader_threads_before_closing_transcript(self) -> None:
         order: list[str] = []
