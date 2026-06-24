@@ -205,7 +205,7 @@ def _prepare_built_profile_source(source: Path) -> Path:
 
         tempdir = Path(tempfile.mkdtemp(prefix="wordpipe-profile-"))
         with tarfile.open(source, "r:*") as archive:
-            archive.extractall(tempdir, filter="data")
+            _extract_tar_safely(archive, tempdir)
         return _find_built_profile_dir(tempdir)
     if source.is_file() and source_may_be_built_profile_archive(source) and zipfile.is_zipfile(source):
         import tempfile
@@ -227,6 +227,17 @@ def _extract_zip_safely(archive: zipfile.ZipFile, destination: Path) -> None:
         if target != root and root not in target.parents:
             raise RuntimeError(f"Refusing unsafe zip member: {info.filename}")
         archive.extract(info, destination)
+
+
+def _extract_tar_safely(archive: tarfile.TarFile, destination: Path) -> None:
+    root = destination.resolve()
+    for member in archive.getmembers():
+        target = (destination / member.name).resolve()
+        if target != root and root not in target.parents:
+            raise RuntimeError(f"Refusing unsafe tar member: {member.name}")
+        if not (member.isfile() or member.isdir()):
+            raise RuntimeError(f"Refusing unsupported tar member: {member.name}")
+    archive.extractall(destination)
 
 
 def _find_built_profile_dir(root: Path) -> Path:

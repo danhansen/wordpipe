@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import io
 import tempfile
+import tarfile
 import unittest
 import zipfile
 from unittest import mock
@@ -143,6 +144,63 @@ class ModelDownloadTests(unittest.TestCase):
 
             self.assertFalse(outside.exists())
 
+    def test_install_built_profile_imports_tar_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive_path = root / "profile.tar.gz"
+            with tarfile.open(archive_path, "w:gz") as archive:
+                _add_tar_text(archive, "profile/tokenizer.model", "tokenizer")
+                _add_tar_text(archive, "profile/encoder.ort", "encoder")
+                _add_tar_text(archive, "profile/decoder_joint.ort", "decoder")
+
+            runtime_dir = install_built_profile(
+                source=archive_path,
+                model_root=root / "installed",
+                profile="compact",
+            )
+
+            self.assertEqual(runtime_dir, profile_runtime_dir(root / "installed", "compact"))
+            self.assertEqual((runtime_dir / "tokenizer.model").read_text(encoding="utf-8"), "tokenizer")
+
+    def test_install_built_profile_rejects_unsafe_tar_member(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive_path = root / "profile.tar"
+            outside = root / "evil.txt"
+            with tarfile.open(archive_path, "w") as archive:
+                _add_tar_text(archive, "../evil.txt", "bad")
+                _add_tar_text(archive, "profile/tokenizer.model", "tokenizer")
+                _add_tar_text(archive, "profile/encoder.ort", "encoder")
+                _add_tar_text(archive, "profile/decoder_joint.ort", "decoder")
+
+            with self.assertRaisesRegex(RuntimeError, "unsafe tar member"):
+                install_built_profile(
+                    source=archive_path,
+                    model_root=root / "installed",
+                    profile="compact",
+                )
+
+            self.assertFalse(outside.exists())
+
+    def test_install_built_profile_rejects_tar_symlink_member(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive_path = root / "profile.tar"
+            with tarfile.open(archive_path, "w") as archive:
+                link = tarfile.TarInfo("profile/encoder.ort")
+                link.type = tarfile.SYMTYPE
+                link.linkname = "/tmp/encoder.ort"
+                archive.addfile(link)
+                _add_tar_text(archive, "profile/tokenizer.model", "tokenizer")
+                _add_tar_text(archive, "profile/decoder_joint.ort", "decoder")
+
+            with self.assertRaisesRegex(RuntimeError, "unsupported tar member"):
+                install_built_profile(
+                    source=archive_path,
+                    model_root=root / "installed",
+                    profile="compact",
+                )
+
     def test_nemo_source_is_not_built_profile_archive(self) -> None:
         self.assertFalse(source_may_be_built_profile_archive(Path("source.nemo")))
         self.assertTrue(source_may_be_built_profile_archive(Path("profile.tar.gz")))
@@ -213,6 +271,13 @@ class ModelDownloadTests(unittest.TestCase):
         self.assertEqual(runtime_dir, profile_runtime_dir(root, "compact"))
         self.assertTrue(any("build_nemotron_wordpipe_model.py" in event for event in events))
         self.assertEqual(events[-1], f"Model profile ready: {runtime_dir}")
+
+
+def _add_tar_text(archive: tarfile.TarFile, name: str, text: str) -> None:
+    data = text.encode("utf-8")
+    info = tarfile.TarInfo(name)
+    info.size = len(data)
+    archive.addfile(info, io.BytesIO(data))
 
 
 if __name__ == "__main__":
