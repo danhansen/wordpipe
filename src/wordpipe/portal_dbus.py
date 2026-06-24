@@ -50,11 +50,14 @@ class GioPortalProxy:
         values: tuple[object, ...],
         *,
         app_id_error: str | None = None,
+        timeout_seconds: int = 30,
     ) -> dict[str, object]:
         loop = self.GLib.MainLoop()
         response: dict[str, object] = {}
         error: list[BaseException] = []
         expected_handle: list[str] = []
+        timeout_active = [False]
+        timeout_id: int | None = None
 
         def on_response(
             _connection,
@@ -72,6 +75,12 @@ class GioPortalProxy:
             else:
                 response.update(_unpack_variant_dict(results))
             loop.quit()
+
+        def on_timeout() -> bool:
+            timeout_active[0] = False
+            error.append(TimeoutError(f"portal request {method} timed out after {timeout_seconds}s"))
+            loop.quit()
+            return False
 
         subscription = self._bus.signal_subscribe(
             PORTAL_BUS_NAME,
@@ -91,11 +100,17 @@ class GioPortalProxy:
                     raise RuntimeError(app_id_error) from exc
                 raise
             expected_handle.append(str(handle))
+            if timeout_seconds > 0:
+                timeout_active[0] = True
+                timeout_id = self.GLib.timeout_add_seconds(timeout_seconds, on_timeout)
             loop.run()
             if error:
                 raise error[0]
             return response
         finally:
+            if timeout_active[0]:
+                assert timeout_id is not None
+                self.GLib.source_remove(timeout_id)
             self._bus.signal_unsubscribe(subscription)
 
     def subscribe_signal(
