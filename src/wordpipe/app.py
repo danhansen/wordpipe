@@ -340,7 +340,7 @@ class WordpipeApp:
             )
             self._post_event(UiEvent("install-complete", f"{profile}:{runtime_dir}"))
         except Exception as exc:  # noqa: BLE001 - surface setup failures in the UI.
-            self._post_event(UiEvent("install-error", f"{type(exc).__name__}: {exc}"))
+            self._post_event(UiEvent("install-error", f"{profile}:{type(exc).__name__}: {exc}"))
 
     def _post_install_progress(self, message: str) -> None:
         now = time.monotonic()
@@ -384,17 +384,36 @@ class WordpipeApp:
             self._set_button_sensitive(False)
             self._set_button_state(False)
         elif event.kind == "install-complete":
+            profile, _detail = _split_profile_event(event.text)
             self._install_thread = None
             self._set_label(self._error_label, "")
             self._refresh_profile_state()
+            if profile is not None and profile != self._selected_profile:
+                self._post_event(
+                    UiEvent("status", f"{MODEL_PROFILES[profile].title} model installed")
+                )
+                return False
             if self._selected_profile_installed():
                 self._open_controller()
             else:
                 self._post_event(UiEvent("status", "Setup required"))
         elif event.kind == "install-error":
+            profile, detail = _split_profile_event(event.text)
             self._install_thread = None
             self._refresh_profile_state()
-            self._set_label(self._error_label, event.text)
+            if profile is not None and profile != self._selected_profile:
+                self._set_label(
+                    self._error_label,
+                    f"{MODEL_PROFILES[profile].title} install failed: {detail}",
+                )
+                selected_status = (
+                    profile_status_text(self._model_setup.model_root, self._selected_profile)
+                    if self._model_setup
+                    else "Ready"
+                )
+                self._post_event(UiEvent("status", selected_status))
+                return False
+            self._set_label(self._error_label, detail)
             self._post_event(UiEvent("status", "Setup required"))
         return False
 
@@ -473,3 +492,10 @@ def _summarize_progress(message: str) -> str:
     if len(text) <= 120:
         return text
     return f"...{text[-117:]}"
+
+
+def _split_profile_event(text: str) -> tuple[str | None, str]:
+    profile, separator, detail = text.partition(":")
+    if separator and profile in MODEL_PROFILES:
+        return profile, detail
+    return None, text

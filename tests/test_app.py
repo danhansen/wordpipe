@@ -198,6 +198,73 @@ class AppControllerStateTests(unittest.TestCase):
         self.assertNotEqual(app._status_label.text, "Ready")
         self.assertIn("portal failed", app._error_label.text)
 
+    def test_install_complete_for_previous_profile_does_not_open_selected_profile(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            model_root = root / "models"
+            compact_runtime_dir = profile_runtime_dir(model_root, "compact")
+            fast_runtime_dir = profile_runtime_dir(model_root, "fast")
+            fast_runtime_dir.mkdir(parents=True)
+            (fast_runtime_dir / "tokenizer.model").write_text("", encoding="utf-8")
+            (fast_runtime_dir / "encoder.ort").write_text("", encoding="utf-8")
+            (fast_runtime_dir / "decoder_joint.ort").write_text("", encoding="utf-8")
+            app = WordpipeApp(
+                DaemonConfig(model_dir=fast_runtime_dir, dry_run_insertion=True),
+                model_setup=AppModelSetup(
+                    model_root=model_root,
+                    model_profile="fast",
+                    nemo_source="nvidia/example",
+                ),
+            )
+            app._glib = FakeGLib()
+            app._status_label = FakeLabel()
+            app._error_label = FakeLabel()
+            app._profile_status_label = FakeLabel()
+            app._toggle_button = FakeButton()
+            app._install_button = FakeButton()
+            app._selected_profile = "fast"
+
+            with mock.patch("wordpipe.app.DictationController") as controller_cls:
+                self.assertFalse(
+                    app._apply_event(UiEvent("install-complete", f"compact:{compact_runtime_dir}"))
+                )
+
+        controller_cls.assert_not_called()
+        self.assertIn("Compact model installed", app._status_label.text)
+
+    def test_install_error_for_previous_profile_keeps_selected_profile_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            model_root = root / "models"
+            fast_runtime_dir = profile_runtime_dir(model_root, "fast")
+            fast_runtime_dir.mkdir(parents=True)
+            (fast_runtime_dir / "tokenizer.model").write_text("", encoding="utf-8")
+            (fast_runtime_dir / "encoder.ort").write_text("", encoding="utf-8")
+            (fast_runtime_dir / "decoder_joint.ort").write_text("", encoding="utf-8")
+            app = WordpipeApp(
+                DaemonConfig(model_dir=fast_runtime_dir, dry_run_insertion=True),
+                model_setup=AppModelSetup(
+                    model_root=model_root,
+                    model_profile="fast",
+                    nemo_source="nvidia/example",
+                ),
+            )
+            app._glib = FakeGLib()
+            app._status_label = FakeLabel()
+            app._error_label = FakeLabel()
+            app._profile_status_label = FakeLabel()
+            app._toggle_button = FakeButton()
+            app._install_button = FakeButton()
+            app._selected_profile = "fast"
+
+            self.assertFalse(
+                app._apply_event(UiEvent("install-error", "compact:RuntimeError: boom"))
+            )
+
+        self.assertIn("Compact install failed: RuntimeError: boom", app._error_label.text)
+        self.assertIn("Fast: installed", app._status_label.text)
+        self.assertNotEqual(app._status_label.text, "Setup required")
+
 
 if __name__ == "__main__":
     unittest.main()
