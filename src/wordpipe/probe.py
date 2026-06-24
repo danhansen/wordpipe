@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 
@@ -115,9 +116,14 @@ def _gnome_shell_version() -> str | None:
 
 
 def _introspect_portal(interface: str) -> PortalInterface:
-    if not shutil.which("busctl"):
-        return PortalInterface(interface, False, error="busctl is not installed")
+    if shutil.which("busctl"):
+        return _introspect_portal_busctl(interface)
+    if shutil.which("gdbus"):
+        return _introspect_portal_gdbus(interface)
+    return PortalInterface(interface, False, error="neither busctl nor gdbus is installed")
 
+
+def _introspect_portal_busctl(interface: str) -> PortalInterface:
     code, stdout, stderr = _run(
         [
             "busctl",
@@ -141,6 +147,49 @@ def _introspect_portal(interface: str) -> PortalInterface:
     return PortalInterface(interface, True, tuple(sorted(methods)))
 
 
+def _introspect_portal_gdbus(interface: str) -> PortalInterface:
+    code, stdout, stderr = _run(
+        [
+            "gdbus",
+            "introspect",
+            "--session",
+            "--dest",
+            PORTAL_BUS_NAME,
+            "--object-path",
+            PORTAL_OBJECT_PATH,
+        ]
+    )
+    if code != 0:
+        return PortalInterface(interface, False, error=stderr or stdout or "introspection failed")
+
+    in_interface = False
+    in_methods = False
+    methods: list[str] = []
+    interface_header = f"interface {interface}"
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("interface "):
+            in_interface = stripped.startswith(interface_header)
+            in_methods = False
+            continue
+        if not in_interface:
+            continue
+        if stripped == "methods:":
+            in_methods = True
+            continue
+        if stripped in {"signals:", "properties:"}:
+            in_methods = False
+            continue
+        if in_methods:
+            match = re.match(r"([A-Za-z_][A-Za-z0-9_]*)\(", stripped)
+            if match:
+                methods.append(match.group(1))
+
+    if not methods and interface not in stdout:
+        return PortalInterface(interface, False, error="interface not present in gdbus output")
+    return PortalInterface(interface, bool(methods), tuple(sorted(methods)))
+
+
 def _module_available(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
@@ -153,7 +202,6 @@ def run_probe() -> ProbeResult:
     }
     modules = {
         "gi": _module_available("gi"),
-        "dbus": _module_available("dbus"),
         "numpy": _module_available("numpy"),
         "sherpa_onnx": _module_available("sherpa_onnx"),
         "sounddevice": _module_available("sounddevice"),

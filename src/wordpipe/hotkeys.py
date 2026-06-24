@@ -5,7 +5,8 @@ import itertools
 import re
 from typing import Callable, Literal, Protocol
 
-from .probe import GLOBAL_SHORTCUTS_IFACE, PORTAL_BUS_NAME, PORTAL_OBJECT_PATH
+from .portal_dbus import GioPortalProxy, variant_options
+from .probe import GLOBAL_SHORTCUTS_IFACE
 
 
 HotkeyMode = Literal["hold", "toggle"]
@@ -75,18 +76,8 @@ class GlobalShortcutsPortalLoop:
     _tokens = itertools.count(1)
 
     def __init__(self, config: HotkeyConfig) -> None:
-        try:
-            import dbus
-            from dbus.mainloop.glib import DBusGMainLoop
-        except ImportError as exc:
-            raise RuntimeError("dbus-python is required for GlobalShortcuts") from exc
-
-        DBusGMainLoop(set_as_default=True)
-        self._dbus = dbus
         self._config = config
-        self._bus = dbus.SessionBus()
-        obj = self._bus.get_object(PORTAL_BUS_NAME, PORTAL_OBJECT_PATH)
-        self._shortcuts = dbus.Interface(obj, GLOBAL_SHORTCUTS_IFACE)
+        self._shortcuts = GioPortalProxy(GLOBAL_SHORTCUTS_IFACE)
         self._session_handle: str | None = None
 
     def run(self, on_activate: ShortcutHandler, on_deactivate: ShortcutHandler) -> None:
@@ -95,42 +86,39 @@ class GlobalShortcutsPortalLoop:
         self._open_session()
         loop = GLib.MainLoop()
 
-        def activated(session_handle, shortcut_id, _timestamp, _options) -> None:  # type: ignore[no-untyped-def]
+        def activated(parameters: tuple[object, ...], _object_path: str) -> None:
+            session_handle, shortcut_id, _timestamp, _options = parameters
             if str(session_handle) == self._session_handle and str(shortcut_id) == self._config.shortcut_id:
                 on_activate()
 
-        def deactivated(session_handle, shortcut_id, _timestamp, _options) -> None:  # type: ignore[no-untyped-def]
+        def deactivated(parameters: tuple[object, ...], _object_path: str) -> None:
+            session_handle, shortcut_id, _timestamp, _options = parameters
             if str(session_handle) == self._session_handle and str(shortcut_id) == self._config.shortcut_id:
                 on_deactivate()
 
-        self._bus.add_signal_receiver(
-            activated,
-            signal_name="Activated",
-            dbus_interface=GLOBAL_SHORTCUTS_IFACE,
-        )
-        self._bus.add_signal_receiver(
-            deactivated,
-            signal_name="Deactivated",
-            dbus_interface=GLOBAL_SHORTCUTS_IFACE,
-        )
+        subscriptions = [
+            self._shortcuts.subscribe_signal(GLOBAL_SHORTCUTS_IFACE, "Activated", activated),
+            self._shortcuts.subscribe_signal(GLOBAL_SHORTCUTS_IFACE, "Deactivated", deactivated),
+        ]
         try:
             loop.run()
         finally:
+            for subscription in subscriptions:
+                self._shortcuts.unsubscribe_signal(subscription)
             self.close()
 
     def close(self) -> None:
         if self._session_handle is None:
             return
         try:
-            session = self._bus.get_object(PORTAL_BUS_NAME, self._session_handle)
-            iface = self._dbus.Interface(session, "org.freedesktop.portal.Session")
-            iface.Close()
+            self._shortcuts.close_session(self._session_handle)
         finally:
             self._session_handle = None
 
     def _open_session(self) -> None:
         create = self._request(
-            self._shortcuts.CreateSession,
+            "CreateSession",
+            "(a{sv})",
             {
                 "handle_token": self._token("create"),
                 "session_handle_token": self._token("session"),
@@ -138,85 +126,45 @@ class GlobalShortcutsPortalLoop:
         )
         self._session_handle = str(create["session_handle"])
         self._request(
-            self._shortcuts.BindShortcuts,
+            "BindShortcuts",
+            "(oa(sa{sv})sa{sv})",
             self._session_handle,
             self._shortcut_array(),
             "",
             {"handle_token": self._token("bind")},
         )
 
-    def _shortcut_array(self):  # type: ignore[no-untyped-def]
-        return self._dbus.Array(
-            [
-                self._dbus.Struct(
-                    (
-                        self._dbus.String(self._config.shortcut_id),
-                        self._dbus.Dictionary(
-                            {
-                                "description": self._dbus.String(self._config.description),
-                                "preferred_trigger": self._dbus.String(
-                                    self._config.preferred_trigger
-                                ),
-                            },
-                            signature="sv",
-                        ),
-                    ),
-                    signature=None,
-                )
-            ],
-            signature="(sa{sv})",
+    def _shortcut_array(self) -> list[tuple[str, dict[str, object]]]:
+        return [
+            (
+                self._config.shortcut_id,
+                variant_options(
+                    {
+                        "description": self._config.description,
+                        "preferred_trigger": self._config.preferred_trigger,
+                    }
+                ),
+            )
+        ]
+
+    def _request(self, method: str, signature: str, *args: object) -> dict[str, object]:
+        return self._shortcuts.request(
+            method,
+            signature,
+            self._variant_args(args),
+            app_id_error=(
+                "GNOME GlobalShortcuts requires Wordpipe to be launched as a desktop "
+                "application. Install the desktop entry with "
+                "`scripts/install-wordpipe-desktop` and start it with "
+                "`gtk-launch dev.wordpipe.Wordpipe`."
+            ),
         )
-
-    def _request(self, method, *args):  # type: ignore[no-untyped-def]
-        from gi.repository import GLib
-
-        loop = GLib.MainLoop()
-        response: dict[str, object] = {}
-        error: list[BaseException] = []
-        expected_handle: list[str] = []
-
-        def on_response(code, results, request_path=None) -> None:  # type: ignore[no-untyped-def]
-            if expected_handle and str(request_path) != expected_handle[0]:
-                return
-            if int(code) != 0:
-                error.append(RuntimeError(f"portal request failed with response code {int(code)}"))
-            else:
-                response.update(dict(results))
-            loop.quit()
-
-        match = self._bus.add_signal_receiver(
-            on_response,
-            signal_name="Response",
-            dbus_interface="org.freedesktop.portal.Request",
-            path_keyword="request_path",
-        )
-        try:
-            try:
-                handle = method(*self._variant_args(args))
-            except self._dbus.exceptions.DBusException as exc:
-                message = str(exc)
-                if "An app id is required" in message:
-                    raise RuntimeError(
-                        "GNOME GlobalShortcuts requires Wordpipe to be launched as a desktop "
-                        "application. Install the desktop entry with "
-                        "`scripts/install-wordpipe-desktop` and start it with "
-                        "`gtk-launch dev.wordpipe.Wordpipe`."
-                    ) from exc
-                raise
-            expected_handle.append(str(handle))
-            loop.run()
-            if error:
-                raise error[0]
-            return response
-        finally:
-            if match is not None:
-                match.remove()
 
     def _variant_args(self, args: tuple[object, ...]) -> tuple[object, ...]:
         converted: list[object] = []
         for arg in args:
             if isinstance(arg, dict):
-                converted.append(self._dbus.Dictionary(arg, signature="sv"))
+                converted.append(variant_options(arg))
             else:
                 converted.append(arg)
         return tuple(converted)

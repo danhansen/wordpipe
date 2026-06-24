@@ -10,25 +10,24 @@ portal-based text insertion. A GNOME Shell extension can remain optional later.
 - `packaging/flatpak/wordpipe-flatpak-launch`: launcher that defaults to
   `wordpipe app` and sets `ORT_DYLIB_PATH` when ONNX Runtime is installed under
   `/app`.
-- `packaging/flatpak/requirements-runtime.txt`: Python runtime dependencies
-  that need Flatpak source generation.
+- `packaging/flatpak/requirements-runtime.txt`: placeholder for future Python
+  runtime dependencies that need Flatpak source generation.
 - `packaging/applications/dev.wordpipe.Wordpipe.desktop`: desktop entry.
 - `packaging/metainfo/dev.wordpipe.Wordpipe.metainfo.xml`: AppStream metadata.
 - `packaging/icons/hicolor/scalable/apps/dev.wordpipe.Wordpipe.svg`: app icon.
 
 ## Current Status
 
-The manifest is a source-tree packaging skeleton. It is intentionally checked in
-before vendored dependency source files so the install layout and permissions are
-reviewable. Before a reproducible Flatpak build, generate and add:
+The manifest is currently a network-enabled local development build. It fetches
+Cargo crates during the Rust worker build and downloads ONNX Runtime from the
+official release archive. Before a reproducible/distributable Flatpak build,
+generate and add:
 
 - `packaging/flatpak/cargo-sources.json` from `Cargo.lock`
-- `packaging/flatpak/python3-runtime-deps.json` from
-  `packaging/flatpak/requirements-runtime.txt`
 
-The Rust worker is built offline in the manifest, so the Cargo source list is
-required. The Python runtime dependency list is required for `dbus-python` and
-the ONNX Runtime wheel that provides `libonnxruntime.so`.
+The Python app uses PyGObject/GIO from the GNOME runtime for portal D-Bus access,
+so `dbus-python` is not required. ONNX Runtime is installed from the official
+Linux x64 archive as `/app/lib/libonnxruntime.so`.
 
 ## Target Local Build
 
@@ -39,7 +38,7 @@ sudo dnf install flatpak-builder
 flatpak install flathub org.gnome.Platform//50 org.gnome.Sdk//50
 ```
 
-After dependency source manifests exist, build and install locally:
+Build and install locally:
 
 ```sh
 flatpak-builder --user --install --force-clean \

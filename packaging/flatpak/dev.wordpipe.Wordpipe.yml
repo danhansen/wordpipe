@@ -2,7 +2,12 @@ app-id: dev.wordpipe.Wordpipe
 runtime: org.gnome.Platform
 runtime-version: "50"
 sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
 command: wordpipe-flatpak-launch
+
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
 
 finish-args:
   - --share=ipc
@@ -22,17 +27,27 @@ modules:
   # Generate and include vendored dependency source manifests before using this
   # for distribution:
   #   flatpak-cargo-generator Cargo.lock -o packaging/flatpak/cargo-sources.json
-  #   flatpak-pip-generator --runtime=org.gnome.Sdk//50 \
-  #     --requirements-file=packaging/flatpak/requirements-runtime.txt \
-  #     -o packaging/flatpak/python3-runtime-deps
-  # Add python3-runtime-deps.json here as a module before wordpipe-python.
+  - name: onnxruntime
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 lib/libonnxruntime.so.1.27.0 /app/lib/libonnxruntime.so.1.27.0
+      - install -Dm755 lib/libonnxruntime_providers_shared.so /app/lib/libonnxruntime_providers_shared.so
+      - ln -sf libonnxruntime.so.1.27.0 /app/lib/libonnxruntime.so.1
+      - ln -sf libonnxruntime.so.1 /app/lib/libonnxruntime.so
+    sources:
+      - type: archive
+        url: https://github.com/microsoft/onnxruntime/releases/download/v1.27.0/onnxruntime-linux-x64-1.27.0.tgz
+        sha256: 547e40a48f1fe73e3f812d7c88a948612c23f896b91e4e2ee1e232d7b468246f
+
   - name: wordpipe-rust-worker
     buildsystem: simple
     build-options:
+      build-args:
+        - --share=network
       env:
         CARGO_HOME: /run/build/wordpipe-rust-worker/cargo
     build-commands:
-      - cargo build --release -p wordpipe-parakeet-worker --offline
+      - cargo build --release -p wordpipe-parakeet-worker
       - install -Dm755 target/release/wordpipe-parakeet-worker /app/bin/wordpipe-parakeet-worker
     sources:
       - type: dir
@@ -47,10 +62,11 @@ modules:
           - models
       # - packaging/flatpak/cargo-sources.json
 
-  # - packaging/flatpak/python3-runtime-deps.json
-
   - name: wordpipe-python
     buildsystem: simple
+    build-options:
+      build-args:
+        - --share=network
     build-commands:
       - python3 -m pip install --no-build-isolation --prefix=/app .
       - install -Dm755 packaging/flatpak/wordpipe-flatpak-launch /app/bin/wordpipe-flatpak-launch

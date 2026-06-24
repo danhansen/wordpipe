@@ -6,7 +6,8 @@ import re
 import unicodedata
 from typing import Protocol
 
-from .probe import PORTAL_BUS_NAME, PORTAL_OBJECT_PATH, REMOTE_DESKTOP_IFACE
+from .probe import REMOTE_DESKTOP_IFACE
+from .portal_dbus import GioPortalProxy, variant_options, variant_uint32
 
 
 KEYBOARD_DEVICE = 1
@@ -121,22 +122,13 @@ class RemoteDesktopPortalSession:
     _tokens = itertools.count(1)
 
     def __init__(self) -> None:
-        try:
-            import dbus
-            from dbus.mainloop.glib import DBusGMainLoop
-        except ImportError as exc:
-            raise RuntimeError("dbus-python is required for portal keyboard insertion") from exc
-
-        DBusGMainLoop(set_as_default=True)
-        self._dbus = dbus
-        self._bus = dbus.SessionBus()
-        obj = self._bus.get_object(PORTAL_BUS_NAME, PORTAL_OBJECT_PATH)
-        self._remote = dbus.Interface(obj, REMOTE_DESKTOP_IFACE)
+        self._remote = GioPortalProxy(REMOTE_DESKTOP_IFACE)
         self._session_handle: str | None = None
 
     def open(self) -> None:
         create = self._request(
-            self._remote.CreateSession,
+            "CreateSession",
+            "(a{sv})",
             {
                 "handle_token": self._token("create"),
                 "session_handle_token": self._token("session"),
@@ -145,15 +137,17 @@ class RemoteDesktopPortalSession:
         self._session_handle = str(create["session_handle"])
 
         self._request(
-            self._remote.SelectDevices,
+            "SelectDevices",
+            "(oa{sv})",
             self._session_handle,
             {
                 "handle_token": self._token("devices"),
-                "types": self._dbus.UInt32(KEYBOARD_DEVICE),
+                "types": variant_uint32(KEYBOARD_DEVICE),
             },
         )
         self._request(
-            self._remote.Start,
+            "Start",
+            "(osa{sv})",
             self._session_handle,
             "",
             {"handle_token": self._token("start")},
@@ -162,62 +156,28 @@ class RemoteDesktopPortalSession:
     def notify_keysym(self, keysym: int, state: int) -> None:
         if self._session_handle is None:
             raise RuntimeError("remote desktop portal session is not open")
-        self._remote.NotifyKeyboardKeysym(
-            self._session_handle,
-            self._dbus.Dictionary({}, signature="sv"),
-            self._dbus.Int32(keysym),
-            self._dbus.UInt32(state),
+        self._remote.call(
+            "NotifyKeyboardKeysym",
+            "(oa{sv}iu)",
+            (self._session_handle, {}, keysym, state),
         )
 
     def close(self) -> None:
         if self._session_handle is None:
             return
         try:
-            session = self._bus.get_object(PORTAL_BUS_NAME, self._session_handle)
-            iface = self._dbus.Interface(session, "org.freedesktop.portal.Session")
-            iface.Close()
+            self._remote.close_session(self._session_handle)
         finally:
             self._session_handle = None
 
-    def _request(self, method, *args):  # type: ignore[no-untyped-def]
-        from gi.repository import GLib
-
-        loop = GLib.MainLoop()
-        response: dict[str, object] = {}
-        error: list[BaseException] = []
-        expected_handle: list[str] = []
-
-        def on_response(code, results, request_path=None) -> None:  # type: ignore[no-untyped-def]
-            if expected_handle and str(request_path) != expected_handle[0]:
-                return
-            if int(code) != 0:
-                error.append(RuntimeError(f"portal request failed with response code {int(code)}"))
-            else:
-                response.update(dict(results))
-            loop.quit()
-
-        match = self._bus.add_signal_receiver(
-            on_response,
-            signal_name="Response",
-            dbus_interface="org.freedesktop.portal.Request",
-            path_keyword="request_path",
-        )
-        try:
-            handle = method(*self._variant_args(args))
-            expected_handle.append(str(handle))
-            loop.run()
-            if error:
-                raise error[0]
-            return response
-        finally:
-            if match is not None:
-                match.remove()
+    def _request(self, method: str, signature: str, *args: object) -> dict[str, object]:
+        return self._remote.request(method, signature, self._variant_args(args))
 
     def _variant_args(self, args: tuple[object, ...]) -> tuple[object, ...]:
         converted: list[object] = []
         for arg in args:
             if isinstance(arg, dict):
-                converted.append(self._dbus.Dictionary(arg, signature="sv"))
+                converted.append(variant_options(arg))
             else:
                 converted.append(arg)
         return tuple(converted)
