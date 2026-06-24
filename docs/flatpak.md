@@ -100,6 +100,18 @@ do not need model paths:
 flatpak run dev.wordpipe.Wordpipe app --model-profile compact
 ```
 
+For focus-preserving dictation into another app, install a host GNOME custom
+shortcut that toggles the resident Flatpak voice keyboard:
+
+```sh
+scripts/install-wordpipe-flatpak-gnome-shortcut
+flatpak run dev.wordpipe.Wordpipe voice-keyboard --signal-hotkey
+```
+
+Then focus a text field and press `Ctrl+Alt+Space` to start or stop dictation.
+The app profile selector writes `model_profile` into the Flatpak config, so the
+resident daemon uses the selected profile unless `--model-profile` is passed.
+
 Successful builds remove intermediate export files under
 `~/.var/app/dev.wordpipe.Wordpipe/data/wordpipe/models/build/` by default. Pass
 `--keep-build-dir` to `model-install` when debugging the export pipeline.

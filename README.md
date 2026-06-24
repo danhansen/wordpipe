@@ -304,6 +304,13 @@ the GlobalShortcuts portal's stricter app-id requirements while the app is still
 running from a source checkout. Keep the daemon running in a terminal or tmux
 session while dictating.
 
+For the Flatpak build, install the equivalent host shortcut with:
+
+```sh
+scripts/install-wordpipe-flatpak-gnome-shortcut
+flatpak run dev.wordpipe.Wordpipe voice-keyboard --signal-hotkey
+```
+
 To restore the older behavior where nothing is typed until dictation stops:
 
 ```sh
