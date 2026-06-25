@@ -80,6 +80,7 @@ class WordpipePage extends Adw.PreferencesPage {
         this._buildInputGroup();
         this._buildBehaviorGroup();
         this._buildAdvancedGroup();
+        this._buildTranscriptGroup();
         this._buildServiceGroup();
         this._connectProxy();
     }
@@ -289,6 +290,24 @@ class WordpipePage extends Adw.PreferencesPage {
         group.add(this._sampleRateRow);
     }
 
+    _buildTranscriptGroup() {
+        const group = new Adw.PreferencesGroup({
+            title: _('Transcript'),
+        });
+        this.add(group);
+
+        this._partialRow = new Adw.ActionRow({
+            title: _('Live Transcript'),
+            subtitle: _('No speech yet'),
+        });
+        group.add(this._partialRow);
+
+        this._commitRow = new Adw.ActionRow({
+            title: _('Last Committed'),
+            subtitle: _('Nothing committed'),
+        });
+        group.add(this._commitRow);
+    }
 
     _buildServiceGroup() {
         const group = new Adw.PreferencesGroup({
@@ -364,6 +383,14 @@ class WordpipePage extends Adw.PreferencesPage {
         this._signalIds.push(this._proxy.connectSignal('InstallProgress',
             (_proxy, _sender, [profile, progress]) => {
                 this._handleInstallProgress(profile, deepUnpackMap(progress));
+            }));
+        this._signalIds.push(this._proxy.connectSignal('Partial',
+            (_proxy, _sender, [_sessionId, _seq, fullText]) => {
+                this._partialRow.subtitle = fullText || _('No speech yet');
+            }));
+        this._signalIds.push(this._proxy.connectSignal('Commit',
+            (_proxy, _sender, [_sessionId, _seq, text]) => {
+                this._commitRow.subtitle = text || _('Nothing committed');
             }));
         this._signalIds.push(this._proxy.connectSignal('Metrics',
             (_proxy, _sender, [metrics]) => {
@@ -593,6 +620,10 @@ class WordpipePage extends Adw.PreferencesPage {
         const installSummary = formatInstallProgress(values.last_install_progress ?? {});
         if (installSummary)
             this._progressRow.subtitle = installSummary;
+        if (typeof values.partial_text === 'string')
+            this._partialRow.subtitle = values.partial_text || _('No speech yet');
+        if (typeof values.last_commit_text === 'string')
+            this._commitRow.subtitle = values.last_commit_text || _('Nothing committed');
         if (this._startButton) {
             this._startButton.sensitive = !values.loading_model &&
                 !values.installing &&

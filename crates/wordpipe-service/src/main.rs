@@ -114,6 +114,7 @@ struct ServiceData {
     session_id: u64,
     seq: u64,
     partial_text: String,
+    last_commit_text: String,
     last_error: String,
     last_metrics: VariantMap,
     last_install_progress: VariantMap,
@@ -133,6 +134,7 @@ impl Default for ServiceData {
             session_id: 0,
             seq: 0,
             partial_text: String::new(),
+            last_commit_text: String::new(),
             last_error: String::new(),
             last_metrics: VariantMap::new(),
             last_install_progress: VariantMap::new(),
@@ -197,6 +199,7 @@ impl WordpipeService {
                 data.session_id = next_session_id(data.session_id);
                 data.seq = 0;
                 data.partial_text.clear();
+                data.last_commit_text.clear();
             }
             let stdin = data
                 .worker
@@ -845,6 +848,7 @@ impl WordpipeService {
             };
             data.seq = data.seq.saturating_add(1);
             data.last_metrics = metrics.clone();
+            data.last_commit_text = text.clone();
             (data.session_id, data.seq, text)
         };
         if !text.is_empty() {
@@ -950,6 +954,8 @@ fn state_map(data: &ServiceData) -> VariantMap {
     insert_str(&mut map, "backend", &data.config.backend);
     insert_str(&mut map, "model_profile", &data.config.model_profile);
     insert_str(&mut map, "input_device", &data.config.input_device);
+    insert_str(&mut map, "partial_text", &data.partial_text);
+    insert_str(&mut map, "last_commit_text", &data.last_commit_text);
     insert_str(&mut map, "selected_runtime_dir", &runtime_dir);
     insert_bool(
         &mut map,
@@ -1774,6 +1780,26 @@ mod tests {
         assert_eq!(
             String::try_from(last_progress["message"].clone()).unwrap(),
             "downloading"
+        );
+    }
+
+    #[test]
+    fn state_includes_transcript_text() {
+        let data = ServiceData {
+            partial_text: "hello wor".to_string(),
+            last_commit_text: "hello world".to_string(),
+            ..ServiceData::default()
+        };
+
+        let state = state_map(&data);
+
+        assert_eq!(
+            String::try_from(state["partial_text"].clone()).unwrap(),
+            "hello wor"
+        );
+        assert_eq!(
+            String::try_from(state["last_commit_text"].clone()).unwrap(),
+            "hello world"
         );
     }
 

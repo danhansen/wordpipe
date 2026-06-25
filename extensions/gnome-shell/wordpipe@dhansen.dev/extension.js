@@ -599,6 +599,8 @@ export default class WordpipeExtension extends Extension {
                 subtitle = _('Loading model');
             else if (state.stopping)
                 subtitle = _('Stopping');
+            else if (state.partial_text)
+                subtitle = state.partial_text;
             else if (state.selected_model_installed === false)
                 subtitle = _('Model missing');
             this._overlay?.setSubtitle(subtitle);

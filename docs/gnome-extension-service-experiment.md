@@ -119,6 +119,8 @@ without waiting for another `Metrics` signal. Similarly,
 `last_install_progress` stores the latest installer progress payload, including
 the model profile, so setup UI opened mid-install can show the current phase
 without waiting for another `InstallProgress` signal.
+`partial_text` and `last_commit_text` expose the current transcript snapshot for
+preferences and clients that connect after the corresponding transcript signal.
 Configuration setters emit `ConfigChanged` followed by `StateChanged`; this is
 important when a setting change stops the current worker or changes selected
 model readiness.
