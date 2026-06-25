@@ -180,7 +180,8 @@ fn main() -> Result<()> {
                         stop_rx,
                         &mut session_model,
                     ) {
-                        worker_emitter.emit(json!({"event": "error", "message": err.to_string()}));
+                        worker_emitter
+                            .emit(json!({"event": "error", "message": format!("{err:#}")}));
                     }
                     worker_emitter.emit(json!({"event": "stopped"}));
                     session_model

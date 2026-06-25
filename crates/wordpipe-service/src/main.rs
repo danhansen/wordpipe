@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::{BufRead, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -914,6 +914,77 @@ fn default_model_installer_path() -> String {
     "wordpipe-model-install".to_string()
 }
 
+fn default_ort_dylib_path() -> Option<PathBuf> {
+    if let Some(value) = std::env::var_os("ORT_DYLIB_PATH") {
+        return Some(PathBuf::from(value));
+    }
+
+    for path in [
+        PathBuf::from("/app/lib/libonnxruntime.so"),
+        PathBuf::from("/app/lib/onnxruntime/libonnxruntime.so"),
+    ] {
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    for root in candidate_repo_roots() {
+        for venv in [".venv", ".venv-nemo-export"] {
+            if let Some(path) = find_ort_in_venv(&root.join(venv)) {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+fn candidate_repo_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(current_dir) = std::env::current_dir() {
+        roots.push(current_dir);
+    }
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(target_dir) = current_exe.parent().and_then(Path::parent) {
+            if target_dir.file_name().and_then(|value| value.to_str()) == Some("target") {
+                if let Some(repo) = target_dir.parent() {
+                    roots.push(repo.to_path_buf());
+                }
+            }
+        }
+    }
+    if let Some(manifest_dir) = option_env!("CARGO_MANIFEST_DIR") {
+        let crate_dir = PathBuf::from(manifest_dir);
+        if let Some(repo) = crate_dir.parent().and_then(Path::parent) {
+            roots.push(repo.to_path_buf());
+        }
+    }
+    roots.sort();
+    roots.dedup();
+    roots
+}
+
+fn find_ort_in_venv(venv: &Path) -> Option<PathBuf> {
+    let python_dirs = std::fs::read_dir(venv.join("lib")).ok()?;
+    for python_dir in python_dirs.flatten() {
+        let capi_dir = python_dir
+            .path()
+            .join("site-packages")
+            .join("onnxruntime")
+            .join("capi");
+        let files = std::fs::read_dir(capi_dir).ok()?;
+        for file in files.flatten() {
+            let path = file.path();
+            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if name.starts_with("libonnxruntime.so") {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
 fn spawn_worker(
     config: &ServiceConfig,
     runtime_dir: &str,
@@ -931,6 +1002,11 @@ fn spawn_worker(
         .stderr(Stdio::inherit());
     if !config.input_device.is_empty() {
         command.arg("--input-device").arg(&config.input_device);
+    }
+    if std::env::var_os("ORT_DYLIB_PATH").is_none() {
+        if let Some(path) = default_ort_dylib_path() {
+            command.env("ORT_DYLIB_PATH", path);
+        }
     }
     let mut child = command.spawn().with_context(|| {
         format!(
