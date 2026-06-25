@@ -117,8 +117,11 @@ The service applies spoken-punctuation normalization before computing
 `TextDelta` when `spoken_punctuation` is enabled. Partial normalization holds
 ambiguous trailing command prefixes such as `new`, `question`, `full`, and
 `exclamation` until they either become a complete command or ordinary text.
-The GNOME client inserts `TextDelta` only when `insert_partials` is enabled and
-inserts `Commit` text when it adds text that has not already been streamed.
+The GNOME client inserts `TextDelta` only when `insert_partials` is enabled,
+optionally delaying those append-only insertions by `stream_insert_delay_ms`.
+The overlay displays `Partial` full-text updates rather than insertion deltas.
+The client inserts `Commit` text when it adds text that has not already been
+streamed and cancels any delayed deltas before applying a final commit.
 `Stop()` moves state to `stopping=true` while the worker flushes. The service
 emits final `Commit` before `SessionStopped` when the worker produces one.
 

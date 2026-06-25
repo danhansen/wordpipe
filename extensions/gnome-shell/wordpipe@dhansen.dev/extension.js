@@ -215,15 +215,33 @@ class TextInjector {
         this._lastSeq = 0;
         this._insertedText = '';
         this._inputMethod = null;
+        this._pendingDeltaIds = new Set();
     }
 
     reset(sessionId) {
+        this._clearPendingDeltas();
         this._lastSession = Number(sessionId);
         this._lastSeq = 0;
         this._insertedText = '';
     }
 
-    insertDelta(sessionId, seq, text) {
+    insertDelta(sessionId, seq, text, delayMs = 0) {
+        if (delayMs > 0) {
+            const sourceId = GLib.timeout_add(
+                GLib.PRIORITY_DEFAULT,
+                delayMs,
+                () => {
+                    this._pendingDeltaIds.delete(sourceId);
+                    this._insertDeltaNow(sessionId, seq, text);
+                    return GLib.SOURCE_REMOVE;
+                });
+            this._pendingDeltaIds.add(sourceId);
+            return;
+        }
+        this._insertDeltaNow(sessionId, seq, text);
+    }
+
+    _insertDeltaNow(sessionId, seq, text) {
         const numericSession = Number(sessionId);
         const numericSeq = Number(seq);
         if (numericSession !== this._lastSession)
@@ -246,6 +264,8 @@ class TextInjector {
         const numericSeq = Number(seq);
         if (numericSession !== this._lastSession)
             this.reset(numericSession);
+        else
+            this._clearPendingDeltas();
         if (numericSeq <= this._lastSeq || !text)
             return;
         this._lastSeq = numericSeq;
@@ -278,6 +298,12 @@ class TextInjector {
         const backend = Clutter.get_default_backend?.();
         this._inputMethod = backend?.get_input_method?.() ?? null;
         return this._inputMethod;
+    }
+
+    _clearPendingDeltas() {
+        for (const sourceId of this._pendingDeltaIds)
+            GLib.Source.remove(sourceId);
+        this._pendingDeltaIds.clear();
     }
 }
 
@@ -382,9 +408,17 @@ export default class WordpipeExtension extends Extension {
             }));
         this._signalIds.push(this._proxy.connectSignal('TextDelta',
             (_proxy, _sender, [sessionId, seq, text]) => {
-                if (this._settings.get_boolean('insert-partials'))
-                    this._injector.insertDelta(sessionId, seq, text);
-                this._overlay?.setSubtitle(text);
+                if (this._settings.get_boolean('insert-partials')) {
+                    this._injector.insertDelta(
+                        sessionId,
+                        seq,
+                        text,
+                        this._settings.get_uint('stream-insert-delay-ms'));
+                }
+            }));
+        this._signalIds.push(this._proxy.connectSignal('Partial',
+            (_proxy, _sender, [_sessionId, _seq, fullText]) => {
+                this._overlay?.setSubtitle(fullText);
             }));
         this._signalIds.push(this._proxy.connectSignal('Commit',
             (_proxy, _sender, [sessionId, seq, text]) => {
