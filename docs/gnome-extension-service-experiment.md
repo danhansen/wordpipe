@@ -110,6 +110,78 @@ Error(s message)
 `Partial` is for display/debugging. `session_id` and `seq` let clients ignore
 stale events after toggles, restarts, or extension reloads.
 
+`GetState` and `StateChanged` use these keys:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `listening` | `b` | A dictation session is actively streaming audio/ASR output. |
+| `stopping` | `b` | The service has asked the worker to stop and is waiting for final flush/exit. |
+| `installing` | `b` | A model install/export process is running. |
+| `installing_profile` | `s` | Profile id currently being installed, or empty. |
+| `loading_model` | `b` | A worker has started and is loading the selected model. |
+| `model_loaded` | `b` | The active worker has reported ready/model-loaded. |
+| `session_id` | `t` | Monotonic dictation session id. |
+| `seq` | `t` | Monotonic transcript event sequence within the current service lifetime. |
+| `backend` | `s` | Selected backend id, currently `parakeet`. |
+| `model_profile` | `s` | Selected model profile id, currently `fast` or `compact`. |
+| `input_device` | `s` | Selected CPAL input-device selector, or empty for system default. |
+| `partial_text` | `s` | Most recent full partial transcript for UI display. |
+| `last_commit_text` | `s` | Most recent committed/final transcript payload. |
+| `selected_runtime_dir` | `s` | Runtime directory expected for the selected model profile. |
+| `selected_model_installed` | `b` | Whether the selected runtime directory looks installed. |
+| `last_error` | `s` | Most recent service/worker error, or empty. |
+| `last_metrics` | `a{sv}` | Most recent worker metrics payload. |
+| `last_install_progress` | `a{sv}` | Most recent model-installer progress payload. |
+
+`GetConfig` and `ConfigChanged` use these keys:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `backend` | `s` | Backend id. Unknown values are rejected. |
+| `model_profile` | `s` | Model profile id. Unknown values are rejected. |
+| `input_device` | `s` | CPAL input-device selector, or empty for default. |
+| `shortcut` | `s` | GNOME accelerator string mirrored from extension settings. |
+| `model_root` | `s` | Root directory for installed model profiles. Empty input is normalized to the service default. |
+| `worker_path` | `s` | Path to `wordpipe-parakeet-worker`. |
+| `model_installer_path` | `s` | Path to the model install/export wrapper. |
+| `sample_rate` | `u` | Capture/ASR sample rate. Must be positive. |
+| `num_threads` | `u` | Worker ORT thread count. Must be positive. |
+| `spoken_punctuation` | `b` | Enable spoken punctuation normalization before text events. |
+| `insert_partials` | `b` | Insert append-only `TextDelta` events before final stop. |
+| `stream_insert_delay_ms` | `u` | Optional delay before inserting streaming deltas. |
+| `show_overlay` | `b` | Whether the Shell extension should show the dictation overlay. |
+
+`ListBackends` returns one map per backend:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `id` | `s` | Backend id used by `SetBackend`. |
+| `title` | `s` | User-facing backend label. |
+| `description` | `s` | User-facing backend description. |
+
+`ListModelProfiles` returns one map per model profile:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `id` | `s` | Profile id used by `SetModelProfile` and `InstallModel`. |
+| `title` | `s` | User-facing profile label. |
+| `description` | `s` | User-facing profile description. |
+| `build_profile` | `s` | Installer/export recipe name. |
+| `output_name` | `s` | Installed model directory base name. |
+| `prebuilt_filename` | `s` | Expected prebuilt archive name when prebuilt downloads are used. |
+| `ort_format` | `b` | Whether the runtime dir points at ORT-format output. |
+| `runtime_dir` | `s` | Full expected installed runtime directory for this profile. |
+| `installed` | `b` | Whether `runtime_dir` has the expected installed profile marker/files. |
+
+`ListInputDevices` returns one map per CPAL input device:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `index` | `u` | Enumeration index from CPAL. |
+| `name` | `s` | Device name. |
+| `selector` | `s` | Value accepted by `SetInputDevice`. |
+| `default` | `b` | Whether the device matches the current system default name. |
+
 `GetState` includes `selected_runtime_dir`, `selected_model_installed`, and
 `installing_profile`, so clients can disable start/install controls and steer
 users to model setup before the service attempts to spawn the worker. It also
