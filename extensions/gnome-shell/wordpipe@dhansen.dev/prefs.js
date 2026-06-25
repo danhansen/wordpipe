@@ -73,6 +73,9 @@ class WordpipePage extends Adw.PreferencesPage {
         }));
         this._deviceSelectors = [''];
         this._installRows = new Map();
+        this._installButtons = new Map();
+        this._installing = false;
+        this._installingProfile = '';
         this._buildModelGroup();
         this._buildInputGroup();
         this._buildBehaviorGroup();
@@ -517,41 +520,58 @@ class WordpipePage extends Adw.PreferencesPage {
         for (const row of this._installRows.values())
             this._modelGroup.remove(row);
         this._installRows.clear();
+        this._installButtons.clear();
 
         for (const profile of this._profiles) {
+            const installing = this._installing && this._installingProfile === profile.id;
             const row = new Adw.ActionRow({
-                title: profile.installed
+                title: installing
+                    ? _(`Installing ${profile.title}`)
+                    : profile.installed
                     ? profile.title
                     : _(`Install ${profile.title}`),
                 subtitle: this._profileSubtitle(profile),
             });
             const button = new Gtk.Button({
-                icon_name: profile.installed ? 'emblem-ok-symbolic' : 'folder-download-symbolic',
+                icon_name: profile.installed
+                    ? 'emblem-ok-symbolic'
+                    : installing
+                        ? 'emblem-synchronizing-symbolic'
+                        : 'folder-download-symbolic',
                 valign: Gtk.Align.CENTER,
-                sensitive: !profile.installed,
+                sensitive: !profile.installed && !this._installing,
                 tooltip_text: profile.installed
                     ? _(`${profile.title} is installed`)
+                    : installing
+                        ? _(`${profile.title} is installing`)
                     : _(`Download and prepare the ${profile.title} model`),
             });
             button.connect('clicked', () => {
-                if (profile.installed)
+                if (profile.installed || this._installing)
                     return;
                 this._progressRow.subtitle = _(`Starting ${profile.title}`);
                 this._callRemote('InstallModel', profile.id);
             });
             row.add_suffix(button);
             this._installRows.set(profile.id, row);
+            this._installButtons.set(profile.id, button);
             this._modelGroup.add(row);
         }
     }
 
     _profileSubtitle(profile) {
+        if (this._installing && this._installingProfile === profile.id)
+            return _('Installing');
         const status = profile.installed ? _('Installed') : _('Not installed');
         const detail = profile.description || profile.runtime_dir;
         return detail ? `${status} - ${detail}` : status;
     }
 
     _handleState(values) {
+        const previousInstalling = this._installing;
+        const previousInstallingProfile = this._installingProfile;
+        this._installing = Boolean(values.installing);
+        this._installingProfile = values.installing_profile ?? '';
         const selectedModelInstalled = values.selected_model_installed !== false;
         if (values.loading_model)
             this._statusRow.subtitle = _('Loading model');
@@ -576,6 +596,12 @@ class WordpipePage extends Adw.PreferencesPage {
         }
         if (this._stopButton)
             this._stopButton.sensitive = Boolean(values.listening || values.stopping);
+        this._syncInstallButtons();
+        if (
+            previousInstalling !== this._installing ||
+            previousInstallingProfile !== this._installingProfile
+        )
+            this._rebuildProfileRows();
     }
 
     _handleInstallProgress(profile, progress) {
@@ -583,6 +609,13 @@ class WordpipePage extends Adw.PreferencesPage {
         this._progressRow.subtitle = message ? `${profile}: ${message}` : profile;
         if (progress.phase === 'complete' || progress.phase === 'error')
             this._refreshModelProfiles();
+    }
+
+    _syncInstallButtons() {
+        for (const [profileId, button] of this._installButtons.entries()) {
+            const profile = this._profiles.find(item => item.id === profileId);
+            button.sensitive = Boolean(profile && !profile.installed && !this._installing);
+        }
     }
 
     _selectedIndex(items, selectedId) {

@@ -77,6 +77,9 @@ class Indicator extends PanelMenu.Button {
         this.menu.addMenuItem(this._profileStatusItem);
 
         this._profileItems = [];
+        this._installProfileItems = new Map();
+        this._installing = false;
+        this._installingProfile = '';
         this._profileSection = new PopupMenu.PopupMenuSection();
         this.menu.addMenuItem(this._profileSection);
 
@@ -93,6 +96,8 @@ class Indicator extends PanelMenu.Button {
         const installing = Boolean(state?.installing);
         const loading = Boolean(state?.loading_model);
         const selectedModelInstalled = state?.selected_model_installed !== false;
+        this._installing = installing;
+        this._installingProfile = state?.installing_profile ?? '';
         this._icon.icon_name = listening || stopping
             ? 'media-record-symbolic'
             : 'audio-input-microphone-symbolic';
@@ -105,12 +110,14 @@ class Indicator extends PanelMenu.Button {
         this._statusItem.label.text = available
             ? statusText(state, selectedModelInstalled)
             : _('Service unavailable');
+        this._syncInstallActions();
     }
 
     setProfiles(profiles, selectedProfile) {
         for (const item of this._profileItems)
             item.destroy();
         this._profileItems = [];
+        this._installProfileItems.clear();
 
         if (!profiles.length) {
             this._profileStatusItem.label.text = _('No model profiles');
@@ -137,17 +144,22 @@ class Indicator extends PanelMenu.Button {
                 this._profileSection.addMenuItem(selectItem);
                 this._profileItems.push(selectItem);
             } else {
+                const installing = this._installingProfile === profile.id;
                 const missingItem = new PopupMenu.PopupMenuItem(
-                    `${profile.title} ${_('not installed')}`,
+                    installing
+                        ? `${profile.title} ${_('installing')}`
+                        : `${profile.title} ${_('not installed')}`,
                     {reactive: false});
                 this._profileSection.addMenuItem(missingItem);
                 this._profileItems.push(missingItem);
 
                 const installItem = new PopupMenu.PopupMenuItem(
                     `${_('Install')} ${profile.title}`);
+                installItem.setSensitive(!this._installing);
                 installItem.connect('activate', () => this._extension.installModel(profile.id));
                 this._profileSection.addMenuItem(installItem);
                 this._profileItems.push(installItem);
+                this._installProfileItems.set(profile.id, installItem);
             }
         }
     }
@@ -155,6 +167,11 @@ class Indicator extends PanelMenu.Button {
     setMetrics(summary) {
         if (summary)
             this._statusItem.label.text = summary;
+    }
+
+    _syncInstallActions() {
+        for (const item of this._installProfileItems.values())
+            item.setSensitive(!this._installing);
     }
 });
 

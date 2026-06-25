@@ -108,6 +108,7 @@ struct ServiceData {
     listening: bool,
     stopping: bool,
     installing: bool,
+    installing_profile: String,
     loading_model: bool,
     model_loaded: bool,
     session_id: u64,
@@ -124,6 +125,7 @@ impl Default for ServiceData {
             listening: false,
             stopping: false,
             installing: false,
+            installing_profile: String::new(),
             loading_model: false,
             model_loaded: false,
             session_id: 0,
@@ -457,6 +459,7 @@ impl WordpipeService {
                 ));
             }
             data.installing = true;
+            data.installing_profile = profile.to_string();
             (
                 data.config.model_installer_path.clone(),
                 data.config.model_root.clone(),
@@ -825,6 +828,7 @@ impl WordpipeService {
                 Err(_) => return,
             };
             data.installing = false;
+            data.installing_profile.clear();
             match result {
                 Ok(()) => {
                     data.last_error.clear();
@@ -886,6 +890,7 @@ fn state_map(data: &ServiceData) -> VariantMap {
     insert_bool(&mut map, "listening", data.listening);
     insert_bool(&mut map, "stopping", data.stopping);
     insert_bool(&mut map, "installing", data.installing);
+    insert_str(&mut map, "installing_profile", &data.installing_profile);
     insert_bool(&mut map, "loading_model", data.loading_model);
     insert_bool(&mut map, "model_loaded", data.model_loaded);
     insert_u64(&mut map, "session_id", data.session_id);
@@ -1621,6 +1626,23 @@ mod tests {
             compact_runtime.to_string_lossy()
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn state_includes_installing_profile() {
+        let data = ServiceData {
+            installing: true,
+            installing_profile: "compact".to_string(),
+            ..ServiceData::default()
+        };
+
+        let state = state_map(&data);
+
+        assert_eq!(bool::try_from(state["installing"].clone()).unwrap(), true);
+        assert_eq!(
+            String::try_from(state["installing_profile"].clone()).unwrap(),
+            "compact"
+        );
     }
 
     #[test]
