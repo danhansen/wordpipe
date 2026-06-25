@@ -17,6 +17,8 @@ const SERVICE_XML = `
     <method name="Toggle"/>
     <method name="GetState"><arg name="state" type="a{sv}" direction="out"/></method>
     <method name="GetConfig"><arg name="config" type="a{sv}" direction="out"/></method>
+    <method name="ListBackends"><arg name="backends" type="aa{sv}" direction="out"/></method>
+    <method name="ListModelProfiles"><arg name="profiles" type="aa{sv}" direction="out"/></method>
     <method name="ListInputDevices"><arg name="devices" type="aa{sv}" direction="out"/></method>
     <method name="SetBackend"><arg name="backend" type="s" direction="in"/></method>
     <method name="SetModelProfile"><arg name="profile" type="s" direction="in"/></method>
@@ -25,6 +27,10 @@ const SERVICE_XML = `
     <method name="SetInsertionOptions"><arg name="options" type="a{sv}" direction="in"/></method>
     <method name="SetRuntimeOptions"><arg name="options" type="a{sv}" direction="in"/></method>
     <method name="InstallModel"><arg name="profile" type="s" direction="in"/></method>
+    <signal name="StateChanged"><arg name="state" type="a{sv}"/></signal>
+    <signal name="ConfigChanged"><arg name="config" type="a{sv}"/></signal>
+    <signal name="InstallProgress"><arg name="profile" type="s"/><arg name="progress" type="a{sv}"/></signal>
+    <signal name="Error"><arg name="message" type="s"/></signal>
   </interface>
 </node>`;
 
@@ -48,7 +54,18 @@ class WordpipePage extends Adw.PreferencesPage {
         });
         this._settings = settings;
         this._proxy = null;
+        this._signalIds = [];
+        this._syncingSettings = false;
+        this._backends = BACKENDS.map(([id, title]) => ({id, title, description: ''}));
+        this._profiles = PROFILES.map(([id, title, description]) => ({
+            id,
+            title,
+            description,
+            installed: false,
+            runtime_dir: '',
+        }));
         this._deviceSelectors = [''];
+        this._installRows = new Map();
         this._buildModelGroup();
         this._buildInputGroup();
         this._buildBehaviorGroup();
@@ -57,56 +74,62 @@ class WordpipePage extends Adw.PreferencesPage {
         this._connectProxy();
     }
 
+    vfunc_unroot() {
+        if (this._proxy) {
+            for (const id of this._signalIds)
+                this._proxy.disconnectSignal(id);
+            this._signalIds = [];
+            this._proxy = null;
+        }
+        super.vfunc_unroot();
+    }
+
     _buildModelGroup() {
-        const group = new Adw.PreferencesGroup({
+        this._modelGroup = new Adw.PreferencesGroup({
             title: _('Model'),
         });
-        this.add(group);
+        this.add(this._modelGroup);
 
-        const backendModel = new Gtk.StringList();
-        BACKENDS.forEach(([_id, title]) => backendModel.append(title));
-        const backendRow = new Adw.ComboRow({
+        this._backendModel = new Gtk.StringList();
+        this._backends.forEach(backend => this._backendModel.append(backend.title));
+        this._backendRow = new Adw.ComboRow({
             title: _('Backend'),
-            model: backendModel,
+            model: this._backendModel,
         });
-        backendRow.selected = Math.max(0, BACKENDS.findIndex(([id]) =>
-            id === this._settings.get_string('backend')));
-        backendRow.connect('notify::selected', row => {
-            this._settings.set_string('backend', BACKENDS[row.selected][0]);
-            this._callRemote('SetBackend', BACKENDS[row.selected][0]);
+        this._backendRow.selected = this._selectedIndex(
+            this._backends, this._settings.get_string('backend'));
+        this._backendRow.connect('notify::selected', row => {
+            if (this._syncingSettings)
+                return;
+            const backend = this._backends[row.selected]?.id;
+            if (!backend)
+                return;
+            this._settings.set_string('backend', backend);
+            this._callRemote('SetBackend', backend);
         });
-        group.add(backendRow);
+        this._modelGroup.add(this._backendRow);
 
-        const profileModel = new Gtk.StringList();
-        PROFILES.forEach(([_id, title]) => profileModel.append(title));
-        const profileRow = new Adw.ComboRow({
+        this._profileModel = new Gtk.StringList();
+        this._profiles.forEach(profile => this._profileModel.append(profile.title));
+        this._profileRow = new Adw.ComboRow({
             title: _('Model Profile'),
             subtitle: _('Choose the speed, memory, and disk footprint tradeoff.'),
-            model: profileModel,
+            model: this._profileModel,
         });
-        profileRow.selected = Math.max(0, PROFILES.findIndex(([id]) =>
-            id === this._settings.get_string('model-profile')));
-        profileRow.connect('notify::selected', row => {
-            const profile = PROFILES[row.selected][0];
+        this._profileRow.selected = this._selectedIndex(
+            this._profiles, this._settings.get_string('model-profile'));
+        this._profileRow.connect('notify::selected', row => {
+            if (this._syncingSettings)
+                return;
+            const profile = this._profiles[row.selected]?.id;
+            if (!profile)
+                return;
             this._settings.set_string('model-profile', profile);
             this._callRemote('SetModelProfile', profile);
         });
-        group.add(profileRow);
+        this._modelGroup.add(this._profileRow);
 
-        for (const [id, title, subtitle] of PROFILES) {
-            const row = new Adw.ActionRow({
-                title: _(`Install ${title}`),
-                subtitle,
-            });
-            const button = new Gtk.Button({
-                icon_name: 'folder-download-symbolic',
-                valign: Gtk.Align.CENTER,
-                tooltip_text: _(`Download and export the ${title} model`),
-            });
-            button.connect('clicked', () => this._callRemote('InstallModel', id));
-            row.add_suffix(button);
-            group.add(row);
-        }
+        this._rebuildProfileRows();
     }
 
     _buildInputGroup() {
@@ -123,6 +146,8 @@ class WordpipePage extends Adw.PreferencesPage {
             model: this._deviceModel,
         });
         this._deviceRow.connect('notify::selected', row => {
+            if (this._syncingSettings)
+                return;
             const selector = this._deviceSelectors[row.selected] ?? '';
             this._settings.set_string('input-device', selector);
             this._callRemote('SetInputDevice', selector);
@@ -153,9 +178,12 @@ class WordpipePage extends Adw.PreferencesPage {
             active: this._settings.get_boolean('spoken-punctuation'),
         });
         row.connect('notify::active', widget => {
+            if (this._syncingSettings)
+                return;
             this._settings.set_boolean('spoken-punctuation', widget.active);
             this._pushInsertionOptions();
         });
+        this._spokenPunctuationRow = row;
         group.add(row);
 
         row = new Adw.SwitchRow({
@@ -163,9 +191,12 @@ class WordpipePage extends Adw.PreferencesPage {
             active: this._settings.get_boolean('insert-partials'),
         });
         row.connect('notify::active', widget => {
+            if (this._syncingSettings)
+                return;
             this._settings.set_boolean('insert-partials', widget.active);
             this._pushInsertionOptions();
         });
+        this._insertPartialsRow = row;
         group.add(row);
 
         row = new Adw.SwitchRow({
@@ -173,31 +204,38 @@ class WordpipePage extends Adw.PreferencesPage {
             active: this._settings.get_boolean('show-overlay'),
         });
         row.connect('notify::active', widget => {
+            if (this._syncingSettings)
+                return;
             this._settings.set_boolean('show-overlay', widget.active);
             this._pushInsertionOptions();
         });
+        this._showOverlayRow = row;
         group.add(row);
 
-        const delayRow = Adw.SpinRow.new_with_range(0, 1000, 25);
-        delayRow.title = _('Insertion Delay');
-        delayRow.subtitle = _('Additional delay in milliseconds before inserting streamed text.');
-        delayRow.value = this._settings.get_uint('stream-insert-delay-ms');
-        delayRow.connect('notify::value', widget => {
+        this._delayRow = Adw.SpinRow.new_with_range(0, 1000, 25);
+        this._delayRow.title = _('Insertion Delay');
+        this._delayRow.subtitle = _('Additional delay in milliseconds before inserting streamed text.');
+        this._delayRow.value = this._settings.get_uint('stream-insert-delay-ms');
+        this._delayRow.connect('notify::value', widget => {
+            if (this._syncingSettings)
+                return;
             this._settings.set_uint('stream-insert-delay-ms', Math.round(widget.value));
             this._pushInsertionOptions();
         });
-        group.add(delayRow);
+        group.add(this._delayRow);
 
-        const shortcutRow = new Adw.EntryRow({
+        this._shortcutRow = new Adw.EntryRow({
             title: _('Shortcut'),
             text: this._settings.get_strv('toggle-shortcut')[0] ?? '',
         });
-        shortcutRow.connect('changed', row => {
+        this._shortcutRow.connect('changed', row => {
+            if (this._syncingSettings)
+                return;
             const accelerator = row.text.trim();
             this._settings.set_strv('toggle-shortcut', accelerator ? [accelerator] : []);
             this._callRemote('SetShortcut', accelerator);
         });
-        group.add(shortcutRow);
+        group.add(this._shortcutRow);
     }
 
     _buildAdvancedGroup() {
@@ -206,33 +244,39 @@ class WordpipePage extends Adw.PreferencesPage {
         });
         this.add(group);
 
-        const modelRootRow = new Adw.EntryRow({
+        this._modelRootRow = new Adw.EntryRow({
             title: _('Model Directory'),
             text: this._settings.get_string('model-root'),
         });
-        modelRootRow.connect('changed', row => {
+        this._modelRootRow.connect('changed', row => {
+            if (this._syncingSettings)
+                return;
             this._settings.set_string('model-root', row.text.trim());
             this._pushRuntimeOptions();
         });
-        group.add(modelRootRow);
+        group.add(this._modelRootRow);
 
-        const threadsRow = Adw.SpinRow.new_with_range(1, 16, 1);
-        threadsRow.title = _('Worker Threads');
-        threadsRow.value = this._settings.get_uint('num-threads');
-        threadsRow.connect('notify::value', row => {
+        this._threadsRow = Adw.SpinRow.new_with_range(1, 16, 1);
+        this._threadsRow.title = _('Worker Threads');
+        this._threadsRow.value = this._settings.get_uint('num-threads');
+        this._threadsRow.connect('notify::value', row => {
+            if (this._syncingSettings)
+                return;
             this._settings.set_uint('num-threads', Math.max(1, Math.round(row.value)));
             this._pushRuntimeOptions();
         });
-        group.add(threadsRow);
+        group.add(this._threadsRow);
 
-        const sampleRateRow = Adw.SpinRow.new_with_range(8000, 48000, 1000);
-        sampleRateRow.title = _('Sample Rate');
-        sampleRateRow.value = this._settings.get_uint('sample-rate');
-        sampleRateRow.connect('notify::value', row => {
+        this._sampleRateRow = Adw.SpinRow.new_with_range(8000, 48000, 1000);
+        this._sampleRateRow.title = _('Sample Rate');
+        this._sampleRateRow.value = this._settings.get_uint('sample-rate');
+        this._sampleRateRow.connect('notify::value', row => {
+            if (this._syncingSettings)
+                return;
             this._settings.set_uint('sample-rate', Math.max(1, Math.round(row.value)));
             this._pushRuntimeOptions();
         });
-        group.add(sampleRateRow);
+        group.add(this._sampleRateRow);
     }
 
 
@@ -247,6 +291,12 @@ class WordpipePage extends Adw.PreferencesPage {
             subtitle: _('Connecting'),
         });
         group.add(this._statusRow);
+
+        this._progressRow = new Adw.ActionRow({
+            title: _('Model Setup'),
+            subtitle: _('Idle'),
+        });
+        group.add(this._progressRow);
 
         const actions = new Adw.ActionRow({
             title: _('Dictation'),
@@ -279,45 +329,85 @@ class WordpipePage extends Adw.PreferencesPage {
                     return;
                 }
                 this._statusRow.subtitle = _('Connected');
+                this._subscribeSignals();
+                this._refreshBackends();
+                this._refreshModelProfiles();
                 this._refreshConfig();
                 this._refreshState();
                 this._refreshInputDevices();
-                this._pushInsertionOptions();
             });
+    }
+
+    _subscribeSignals() {
+        if (this._signalIds.length > 0)
+            return;
+        this._signalIds.push(this._proxy.connectSignal('StateChanged',
+            (_proxy, _sender, [state]) => this._handleState(deepUnpackMap(state))));
+        this._signalIds.push(this._proxy.connectSignal('ConfigChanged',
+            (_proxy, _sender, [config]) => this._syncFromConfig(deepUnpackMap(config))));
+        this._signalIds.push(this._proxy.connectSignal('InstallProgress',
+            (_proxy, _sender, [profile, progress]) => {
+                this._handleInstallProgress(profile, deepUnpackMap(progress));
+            }));
+        this._signalIds.push(this._proxy.connectSignal('Error',
+            (_proxy, _sender, [message]) => {
+                this._statusRow.subtitle = message;
+                this._progressRow.subtitle = message;
+            }));
     }
 
     _refreshState() {
         this._callRemote('GetState', state => {
-            const values = deepUnpackMap(state);
-            this._statusRow.subtitle = values.listening ? _('Listening') : _('Ready');
+            this._handleState(deepUnpackMap(state));
         });
     }
 
     _refreshConfig() {
         this._callRemote('GetConfig', config => {
-            const values = deepUnpackMap(config);
-            if (typeof values.backend === 'string')
-                this._settings.set_string('backend', values.backend);
-            if (typeof values.model_profile === 'string')
-                this._settings.set_string('model-profile', values.model_profile);
-            if (typeof values.input_device === 'string')
-                this._settings.set_string('input-device', values.input_device);
-            if (typeof values.model_root === 'string')
-                this._settings.set_string('model-root', values.model_root);
-            if (typeof values.shortcut === 'string')
-                this._settings.set_strv('toggle-shortcut', values.shortcut ? [values.shortcut] : []);
-            if (typeof values.num_threads === 'number')
-                this._settings.set_uint('num-threads', values.num_threads);
-            if (typeof values.sample_rate === 'number')
-                this._settings.set_uint('sample-rate', values.sample_rate);
+            this._syncFromConfig(deepUnpackMap(config));
         });
     }
 
+    _refreshBackends() {
+        this._callRemote('ListBackends', backends => {
+            const parsed = backends.map(item => deepUnpackMap(item))
+                .filter(item => typeof item.id === 'string');
+            if (parsed.length === 0)
+                return;
+            this._backends = parsed.map(item => ({
+                id: item.id,
+                title: item.title ?? item.id,
+                description: item.description ?? '',
+            }));
+            clearStringList(this._backendModel);
+            this._backends.forEach(backend => this._backendModel.append(backend.title));
+            this._syncComboSelections();
+        });
+    }
+
+    _refreshModelProfiles() {
+        this._callRemote('ListModelProfiles', profiles => {
+            const parsed = profiles.map(item => deepUnpackMap(item))
+                .filter(item => typeof item.id === 'string');
+            if (parsed.length === 0)
+                return;
+            this._profiles = parsed.map(item => ({
+                id: item.id,
+                title: item.title ?? item.id,
+                description: item.description ?? '',
+                installed: Boolean(item.installed),
+                runtime_dir: item.runtime_dir ?? '',
+            }));
+            clearStringList(this._profileModel);
+            this._profiles.forEach(profile => this._profileModel.append(profile.title));
+            this._rebuildProfileRows();
+            this._syncComboSelections();
+        });
+    }
 
     _refreshInputDevices() {
         this._callRemote('ListInputDevices', devices => {
-            while (this._deviceModel.get_n_items() > 0)
-                this._deviceModel.remove(0);
+            clearStringList(this._deviceModel);
             this._deviceSelectors = [''];
             this._deviceModel.append(_('System Default'));
 
@@ -332,8 +422,141 @@ class WordpipePage extends Adw.PreferencesPage {
 
             const configured = this._settings.get_string('input-device');
             const selected = Math.max(0, this._deviceSelectors.indexOf(configured));
+            this._withSyncing(() => {
+                this._deviceRow.selected = selected;
+            });
+        });
+    }
+
+    _syncFromConfig(values) {
+        this._syncingSettings = true;
+        try {
+            if (typeof values.backend === 'string')
+                this._settings.set_string('backend', values.backend);
+            if (typeof values.model_profile === 'string')
+                this._settings.set_string('model-profile', values.model_profile);
+            if (typeof values.input_device === 'string')
+                this._settings.set_string('input-device', values.input_device);
+            if (typeof values.model_root === 'string')
+                this._settings.set_string('model-root', values.model_root);
+            if (typeof values.shortcut === 'string')
+                this._settings.set_strv('toggle-shortcut', values.shortcut ? [values.shortcut] : []);
+            if (typeof values.num_threads === 'number')
+                this._settings.set_uint('num-threads', values.num_threads);
+            if (typeof values.sample_rate === 'number')
+                this._settings.set_uint('sample-rate', values.sample_rate);
+            if (typeof values.spoken_punctuation === 'boolean')
+                this._settings.set_boolean('spoken-punctuation', values.spoken_punctuation);
+            if (typeof values.insert_partials === 'boolean')
+                this._settings.set_boolean('insert-partials', values.insert_partials);
+            if (typeof values.stream_insert_delay_ms === 'number')
+                this._settings.set_uint('stream-insert-delay-ms', values.stream_insert_delay_ms);
+            if (typeof values.show_overlay === 'boolean')
+                this._settings.set_boolean('show-overlay', values.show_overlay);
+
+            this._syncComboSelections();
+            this._syncDeviceSelection();
+            this._syncControlValues();
+        } finally {
+            this._syncingSettings = false;
+        }
+    }
+
+    _syncComboSelections() {
+        if (!this._backendRow || !this._profileRow)
+            return;
+        const backend = this._settings.get_string('backend');
+        const profile = this._settings.get_string('model-profile');
+        this._withSyncing(() => {
+            this._backendRow.selected = this._selectedIndex(this._backends, backend);
+            this._profileRow.selected = this._selectedIndex(this._profiles, profile);
+        });
+    }
+
+    _syncDeviceSelection() {
+        if (!this._deviceRow)
+            return;
+        const configured = this._settings.get_string('input-device');
+        const selected = Math.max(0, this._deviceSelectors.indexOf(configured));
+        this._withSyncing(() => {
             this._deviceRow.selected = selected;
         });
+    }
+
+    _syncControlValues() {
+        this._spokenPunctuationRow.active = this._settings.get_boolean('spoken-punctuation');
+        this._insertPartialsRow.active = this._settings.get_boolean('insert-partials');
+        this._showOverlayRow.active = this._settings.get_boolean('show-overlay');
+        this._delayRow.value = this._settings.get_uint('stream-insert-delay-ms');
+        this._shortcutRow.text = this._settings.get_strv('toggle-shortcut')[0] ?? '';
+        this._modelRootRow.text = this._settings.get_string('model-root');
+        this._threadsRow.value = this._settings.get_uint('num-threads');
+        this._sampleRateRow.value = this._settings.get_uint('sample-rate');
+    }
+
+    _rebuildProfileRows() {
+        for (const row of this._installRows.values())
+            this._modelGroup.remove(row);
+        this._installRows.clear();
+
+        for (const profile of this._profiles) {
+            const row = new Adw.ActionRow({
+                title: _(`Install ${profile.title}`),
+                subtitle: this._profileSubtitle(profile),
+            });
+            const button = new Gtk.Button({
+                icon_name: profile.installed ? 'emblem-ok-symbolic' : 'folder-download-symbolic',
+                valign: Gtk.Align.CENTER,
+                tooltip_text: _(`Download and prepare the ${profile.title} model`),
+            });
+            button.connect('clicked', () => {
+                this._progressRow.subtitle = _(`Starting ${profile.title}`);
+                this._callRemote('InstallModel', profile.id);
+            });
+            row.add_suffix(button);
+            this._installRows.set(profile.id, row);
+            this._modelGroup.add(row);
+        }
+    }
+
+    _profileSubtitle(profile) {
+        const status = profile.installed ? _('Installed') : _('Not installed');
+        const detail = profile.description || profile.runtime_dir;
+        return detail ? `${status} - ${detail}` : status;
+    }
+
+    _handleState(values) {
+        if (values.loading_model)
+            this._statusRow.subtitle = _('Loading model');
+        else if (values.listening)
+            this._statusRow.subtitle = _('Listening');
+        else if (values.installing)
+            this._statusRow.subtitle = _('Installing model');
+        else if (values.last_error)
+            this._statusRow.subtitle = values.last_error;
+        else
+            this._statusRow.subtitle = _('Ready');
+    }
+
+    _handleInstallProgress(profile, progress) {
+        const message = progress.message ?? progress.phase ?? '';
+        this._progressRow.subtitle = message ? `${profile}: ${message}` : profile;
+        if (progress.phase === 'complete' || progress.phase === 'error')
+            this._refreshModelProfiles();
+    }
+
+    _selectedIndex(items, selectedId) {
+        return Math.max(0, items.findIndex(item => item.id === selectedId));
+    }
+
+    _withSyncing(callback) {
+        const wasSyncing = this._syncingSettings;
+        this._syncingSettings = true;
+        try {
+            callback();
+        } finally {
+            this._syncingSettings = wasSyncing;
+        }
     }
 
     _pushInsertionOptions() {
@@ -388,4 +611,9 @@ function deepUnpackMap(value) {
     for (const [key, variant] of Object.entries(unpacked))
         result[key] = variant?.deep_unpack ? variant.deep_unpack() : variant;
     return result;
+}
+
+function clearStringList(model) {
+    while (model.get_n_items() > 0)
+        model.remove(0);
 }

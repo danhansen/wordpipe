@@ -268,7 +268,10 @@ export default class WordpipeExtension extends Extension {
         this._signalIds.push(this._proxy.connectSignal('StateChanged',
             (_proxy, _sender, [state]) => this._handleState(deepUnpackMap(state))));
         this._signalIds.push(this._proxy.connectSignal('ConfigChanged',
-            () => this._refreshState()));
+            (_proxy, _sender, [config]) => {
+                this._syncSettingsFromConfig(deepUnpackMap(config));
+                this._refreshState();
+            }));
         this._signalIds.push(this._proxy.connectSignal('SessionStarted',
             (_proxy, _sender, [sessionId]) => {
                 this._injector.reset(sessionId);
@@ -396,10 +399,14 @@ export default class WordpipeExtension extends Extension {
     _handleState(state) {
         this._state = state;
         this._indicator?.setState(this._state, true);
-        const visible = Boolean(state.listening) && this._settings.get_boolean('show-overlay');
+        const visible = Boolean(state.listening || state.loading_model) &&
+            this._settings.get_boolean('show-overlay');
         this._overlay?.setVisible(visible);
-        if (visible)
-            this._overlay?.setSubtitle(state.model_profile ?? '');
+        if (visible) {
+            this._overlay?.setSubtitle(state.loading_model
+                ? _('Loading model')
+                : state.model_profile ?? '');
+        }
     }
 
     _setAvailable(available) {
