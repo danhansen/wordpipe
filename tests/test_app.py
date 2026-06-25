@@ -97,6 +97,44 @@ class FakeLabel:
         self.text = text
 
 
+class FakeActionRow:
+    def __init__(self) -> None:
+        self.subtitle = ""
+
+    def set_subtitle(self, text: str) -> None:
+        self.subtitle = text
+
+
+class FakeBanner:
+    def __init__(self) -> None:
+        self.title = ""
+        self.revealed_values: list[bool] = []
+
+    def set_title(self, text: str) -> None:
+        self.title = text
+
+    def set_revealed(self, revealed: bool) -> None:
+        self.revealed_values.append(revealed)
+
+
+class FakeToastOverlay:
+    def __init__(self) -> None:
+        self.toasts: list[str] = []
+
+    def add_toast(self, toast) -> None:  # type: ignore[no-untyped-def]
+        self.toasts.append(toast.text)
+
+
+class FakeAdw:
+    class Toast:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+        @classmethod
+        def new(cls, text: str):  # type: ignore[no-untyped-def]
+            return cls(text)
+
+
 class FakeDropdown:
     def __init__(self, selected: int) -> None:
         self._selected = selected
@@ -106,6 +144,38 @@ class FakeDropdown:
 
 
 class AppControllerStateTests(unittest.TestCase):
+    def test_set_label_updates_adwaita_action_row_subtitle(self) -> None:
+        app = WordpipeApp(None)
+        row = FakeActionRow()
+
+        app._set_label(row, "Ready")
+
+        self.assertEqual(row.subtitle, "Ready")
+
+    def test_error_text_updates_banner_visibility(self) -> None:
+        app = WordpipeApp(None)
+        row = FakeActionRow()
+        banner = FakeBanner()
+        app._error_label = row
+        app._error_banner = banner
+
+        app._set_error_text("Portal denied")
+        app._set_error_text("")
+
+        self.assertEqual(row.subtitle, "")
+        self.assertEqual(banner.title, "")
+        self.assertEqual(banner.revealed_values, [True, False])
+
+    def test_show_toast_uses_adwaita_toast_overlay(self) -> None:
+        app = WordpipeApp(None)
+        overlay = FakeToastOverlay()
+        app._adw = FakeAdw
+        app._toast_overlay = overlay
+
+        app._show_toast("Compact model installed")
+
+        self.assertEqual(overlay.toasts, ["Compact model installed"])
+
     def test_open_controller_reenables_dictate_button_after_setup_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             model_dir = Path(tmp)

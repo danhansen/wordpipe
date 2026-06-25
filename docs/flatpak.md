@@ -3,6 +3,7 @@
 Wordpipe is being packaged as an app-first Flatpak with a GNOME/libadwaita UI.
 The Flatpak app owns the ASR daemon, model profiles, microphone capture, and
 portal-based text insertion. A GNOME Shell extension can remain optional later.
+The HIG-informed completion plan is in `docs/gui-flatpak-plan.md`.
 
 ## Files
 

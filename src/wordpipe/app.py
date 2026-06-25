@@ -79,8 +79,11 @@ class WordpipeApp:
         self._controller: DictationController | None = None
         self._glib = None
         self._gtk = None
+        self._adw = None
         self._app = None
         self._window = None
+        self._toast_overlay = None
+        self._error_banner = None
         self._status_label = None
         self._partial_label = None
         self._commit_label = None
@@ -105,6 +108,7 @@ class WordpipeApp:
             gi.require_version("Gtk", "4.0")
             from gi.repository import Adw, Gio, GLib, Gtk
 
+            self._adw = Adw
             self._glib = GLib
             self._gtk = Gtk
             app = Adw.Application(
@@ -133,8 +137,14 @@ class WordpipeApp:
         toolbar = Adw.ToolbarView()
         header = Adw.HeaderBar()
         header.set_title_widget(Gtk.Label(label="Wordpipe"))
+        preferences_button = Gtk.Button.new_from_icon_name("emblem-system-symbolic")
+        preferences_button.set_tooltip_text("Preferences")
+        preferences_button.connect("clicked", self._show_preferences_placeholder)
+        header.pack_end(preferences_button)
         toolbar.add_top_bar(header)
-        toolbar.set_content(self._build_content(Gtk))
+        self._toast_overlay = Adw.ToastOverlay()
+        self._toast_overlay.set_child(self._build_content(Gtk, Adw))
+        toolbar.set_content(self._toast_overlay)
         window.set_content(toolbar)
         self._present(window)
 
@@ -156,7 +166,67 @@ class WordpipeApp:
         assert self._glib is not None
         self._glib.idle_add(self._open_controller)
 
-    def _build_content(self, Gtk):  # type: ignore[no-untyped-def]
+    def _build_content(self, Gtk, Adw=None):  # type: ignore[no-untyped-def]
+        if Adw is not None:
+            return self._build_adwaita_content(Gtk, Adw)
+        return self._build_gtk_content(Gtk)
+
+    def _build_adwaita_content(self, Gtk, Adw):  # type: ignore[no-untyped-def]
+        scrolled = Gtk.ScrolledWindow()
+        scrolled.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+
+        clamp = Adw.Clamp()
+        clamp.set_maximum_size(760)
+        clamp.set_tightening_threshold(560)
+        scrolled.set_child(clamp)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        root.set_margin_top(24)
+        root.set_margin_bottom(24)
+        root.set_margin_start(18)
+        root.set_margin_end(18)
+        clamp.set_child(root)
+
+        self._error_banner = Adw.Banner(title="")
+        self._error_banner.set_revealed(False)
+        root.append(self._error_banner)
+
+        dictation = Adw.PreferencesGroup(title="Dictation")
+        status_row = Adw.ActionRow(title="Status", subtitle="Initializing")
+        status_row.add_prefix(Gtk.Image.new_from_icon_name("audio-input-microphone-symbolic"))
+        self._status_label = status_row
+        self._toggle_button = Gtk.ToggleButton()
+        self._toggle_button.set_tooltip_text("Start or stop dictation")
+        self._button_image = Gtk.Image.new_from_icon_name("media-record-symbolic")
+        self._button_label = Gtk.Label(label="Dictate")
+        self._toggle_button.set_child(self._button_content(Gtk))
+        self._toggle_button.connect("toggled", self._toggle_dictation)
+        status_row.add_suffix(self._toggle_button)
+        status_row.set_activatable_widget(self._toggle_button)
+        dictation.add(status_row)
+
+        self._metrics_label = Adw.ActionRow(title="Performance", subtitle="RTF unavailable")
+        dictation.add(self._metrics_label)
+        root.append(dictation)
+
+        model = Adw.PreferencesGroup(title="Model")
+        self._build_profile_row(model, Gtk, Adw)
+        root.append(model)
+
+        transcript = Adw.PreferencesGroup(title="Transcript")
+        self._partial_label = Adw.ActionRow(title="Live Transcript", subtitle="No speech yet")
+        transcript.add(self._partial_label)
+        self._commit_label = Adw.ActionRow(title="Last Committed", subtitle="Nothing committed")
+        transcript.add(self._commit_label)
+        root.append(transcript)
+
+        diagnostics = Adw.PreferencesGroup(title="Diagnostics")
+        self._error_label = Adw.ActionRow(title="Last Error", subtitle="")
+        diagnostics.add(self._error_label)
+        root.append(diagnostics)
+        return scrolled
+
+    def _build_gtk_content(self, Gtk):  # type: ignore[no-untyped-def]
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
         root.set_margin_top(18)
         root.set_margin_bottom(18)
@@ -196,10 +266,7 @@ class WordpipeApp:
         root.append(self._error_label)
         return root
 
-    def _build_profile_row(self, root, Gtk) -> None:  # type: ignore[no-untyped-def]
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        row.set_valign(Gtk.Align.CENTER)
-
+    def _build_profile_row(self, root, Gtk, Adw=None) -> None:  # type: ignore[no-untyped-def]
         names = tuple(MODEL_PROFILES)
         selected = names.index(self._selected_profile) if self._selected_profile in names else 0
         self._profile_dropdown = Gtk.DropDown.new_from_strings(
@@ -207,20 +274,30 @@ class WordpipeApp:
         )
         self._profile_dropdown.set_selected(selected)
         self._profile_dropdown.connect("notify::selected", self._profile_changed)
-        row.append(self._profile_dropdown)
-
-        self._profile_status_label = Gtk.Label(label="")
-        self._profile_status_label.set_xalign(0)
-        self._profile_status_label.set_hexpand(True)
-        self._profile_status_label.set_wrap(True)
-        self._profile_status_label.add_css_class("dim-label")
-        row.append(self._profile_status_label)
-
         self._install_button = Gtk.Button(label="Install")
         self._install_button.set_tooltip_text("Download and build the selected model profile")
         self._install_button.connect("clicked", self._install_selected_profile)
-        row.append(self._install_button)
-        root.append(row)
+
+        if Adw is not None:
+            row = Adw.ActionRow(title="Active Profile", subtitle="")
+            row.add_prefix(Gtk.Image.new_from_icon_name("folder-download-symbolic"))
+            row.add_suffix(self._profile_dropdown)
+            row.add_suffix(self._install_button)
+            self._profile_status_label = row
+            root.add(row)
+        else:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            row.set_valign(Gtk.Align.CENTER)
+            row.append(self._profile_dropdown)
+
+            self._profile_status_label = Gtk.Label(label="")
+            self._profile_status_label.set_xalign(0)
+            self._profile_status_label.set_hexpand(True)
+            self._profile_status_label.set_wrap(True)
+            self._profile_status_label.add_css_class("dim-label")
+            row.append(self._profile_status_label)
+            row.append(self._install_button)
+            root.append(row)
         self._refresh_profile_state()
 
     def _section(self, root, Gtk, title: str, body: str):  # type: ignore[no-untyped-def]
@@ -381,15 +458,16 @@ class WordpipeApp:
         elif event.kind == "metrics":
             self._set_label(self._metrics_label, event.text or "RTF unavailable")
         elif event.kind == "error":
-            self._set_label(self._error_label, event.text)
+            self._set_error_text(event.text)
             self._set_button_sensitive(False)
             self._set_button_state(False)
         elif event.kind == "install-complete":
             profile, _detail = _split_profile_event(event.text)
             self._install_thread = None
-            self._set_label(self._error_label, "")
+            self._set_error_text("")
             self._refresh_profile_state()
             if profile is not None and profile != self._selected_profile:
+                self._show_toast(f"{MODEL_PROFILES[profile].title} model installed")
                 self._post_event(
                     UiEvent("status", f"{MODEL_PROFILES[profile].title} model installed")
                 )
@@ -403,10 +481,7 @@ class WordpipeApp:
             self._install_thread = None
             self._refresh_profile_state()
             if profile is not None and profile != self._selected_profile:
-                self._set_label(
-                    self._error_label,
-                    f"{MODEL_PROFILES[profile].title} install failed: {detail}",
-                )
+                self._set_error_text(f"{MODEL_PROFILES[profile].title} install failed: {detail}")
                 selected_status = (
                     profile_status_text(self._model_setup.model_root, self._selected_profile)
                     if self._model_setup
@@ -414,13 +489,30 @@ class WordpipeApp:
                 )
                 self._post_event(UiEvent("status", selected_status))
                 return False
-            self._set_label(self._error_label, detail)
+            self._set_error_text(detail)
             self._post_event(UiEvent("status", "Setup required"))
         return False
 
     def _set_label(self, label, text: str) -> None:  # type: ignore[no-untyped-def]
         if label is not None:
-            label.set_text(text)
+            if hasattr(label, "set_text"):
+                label.set_text(text)
+            elif hasattr(label, "set_subtitle"):
+                label.set_subtitle(text)
+
+    def _set_error_text(self, text: str) -> None:
+        self._set_label(self._error_label, text)
+        if self._error_banner is not None:
+            self._error_banner.set_title(text)
+            self._error_banner.set_revealed(bool(text))
+
+    def _show_toast(self, text: str) -> None:
+        if self._toast_overlay is None or self._adw is None:
+            return
+        self._toast_overlay.add_toast(self._adw.Toast.new(text))
+
+    def _show_preferences_placeholder(self, _button) -> None:  # type: ignore[no-untyped-def]
+        self._show_toast("Preferences are not available yet")
 
     def _set_button_sensitive(self, sensitive: bool) -> None:
         if self._toggle_button is not None:
