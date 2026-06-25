@@ -584,6 +584,9 @@ export default class WordpipeExtension extends Extension {
     _handleState(state) {
         this._state = state;
         this._indicator?.setState(this._state, true);
+        const metricsSummary = formatMetrics(state.last_metrics ?? {});
+        if (metricsSummary)
+            this._indicator?.setMetrics(metricsSummary);
         const visible = Boolean(state.listening || state.stopping || state.loading_model) &&
             this._settings.get_boolean('show-overlay');
         this._overlay?.setVisible(visible);
@@ -609,10 +612,19 @@ export default class WordpipeExtension extends Extension {
 function deepUnpackMap(value) {
     if (!value)
         return {};
-    const unpacked = value.deep_unpack ? value.deep_unpack() : value;
+    const unpacked = deepUnpackValue(value);
+    if (!unpacked || typeof unpacked !== 'object' || Array.isArray(unpacked))
+        return {};
+    return unpacked;
+}
+
+function deepUnpackValue(value) {
+    const unpacked = value?.deep_unpack ? value.deep_unpack() : value;
+    if (!unpacked || typeof unpacked !== 'object' || Array.isArray(unpacked))
+        return unpacked;
     const result = {};
     for (const [key, variant] of Object.entries(unpacked))
-        result[key] = variant?.deep_unpack ? variant.deep_unpack() : variant;
+        result[key] = deepUnpackValue(variant);
     return result;
 }
 

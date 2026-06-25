@@ -115,6 +115,7 @@ struct ServiceData {
     seq: u64,
     partial_text: String,
     last_error: String,
+    last_metrics: VariantMap,
     worker: Option<WorkerProcess>,
 }
 
@@ -132,6 +133,7 @@ impl Default for ServiceData {
             seq: 0,
             partial_text: String::new(),
             last_error: String::new(),
+            last_metrics: VariantMap::new(),
             worker: None,
         }
     }
@@ -681,6 +683,7 @@ impl WordpipeService {
                         .get("data")
                         .map(json_to_variant_map)
                         .unwrap_or_default();
+                    data.last_metrics = metrics.clone();
                     (state_map(&data), metrics)
                 };
                 let _ = zbus::block_on(Self::state_changed(emitter, state));
@@ -717,6 +720,9 @@ impl WordpipeService {
                     .get("data")
                     .map(json_to_variant_map)
                     .unwrap_or_default();
+                if let Ok(mut data) = self.data.lock() {
+                    data.last_metrics = metrics.clone();
+                }
                 let _ = zbus::block_on(Self::metrics(emitter, metrics));
             }
             "stopped" => {
@@ -779,6 +785,7 @@ impl WordpipeService {
                 .unwrap_or(&text)
                 .to_string();
             data.partial_text = text.clone();
+            data.last_metrics = metrics.clone();
             (data.session_id, data.seq, delta, text)
         };
         let _ = zbus::block_on(Self::partial(emitter, session_id, seq, &text));
@@ -809,6 +816,7 @@ impl WordpipeService {
                 text
             };
             data.seq = data.seq.saturating_add(1);
+            data.last_metrics = metrics.clone();
             (data.session_id, data.seq, text)
         };
         if !text.is_empty() {
@@ -917,6 +925,7 @@ fn state_map(data: &ServiceData) -> VariantMap {
         profile_installed(&runtime_dir),
     );
     insert_str(&mut map, "last_error", &data.last_error);
+    insert_map(&mut map, "last_metrics", &data.last_metrics);
     map
 }
 
@@ -1169,8 +1178,12 @@ fn insert_i64(map: &mut VariantMap, key: &str, value: i64) {
     map.insert(key.to_string(), owned(Value::from(value)));
 }
 
+fn insert_map(map: &mut VariantMap, key: &str, value: &VariantMap) {
+    map.insert(key.to_string(), owned(Value::from(value.clone())));
+}
+
 fn owned(value: Value<'_>) -> OwnedValue {
-    OwnedValue::try_from(value).expect("primitive D-Bus variant value should be valid")
+    OwnedValue::try_from(value).expect("D-Bus variant value should be valid")
 }
 
 fn get_bool(map: &VariantMap, key: &str) -> Option<bool> {
@@ -1654,6 +1667,30 @@ mod tests {
         assert_eq!(
             String::try_from(state["installing_profile"].clone()).unwrap(),
             "compact"
+        );
+    }
+
+    #[test]
+    fn state_includes_last_metrics() {
+        let mut metrics = VariantMap::new();
+        insert_f64(&mut metrics, "real_time_factor", 0.25);
+        insert_u64(&mut metrics, "decode_calls", 3);
+        let data = ServiceData {
+            last_metrics: metrics,
+            ..ServiceData::default()
+        };
+
+        let state = state_map(&data);
+        let last_metrics =
+            <HashMap<String, OwnedValue>>::try_from(state["last_metrics"].clone()).unwrap();
+
+        assert_eq!(
+            f64::try_from(last_metrics["real_time_factor"].clone()).unwrap(),
+            0.25
+        );
+        assert_eq!(
+            u64::try_from(last_metrics["decode_calls"].clone()).unwrap(),
+            3
         );
     }
 

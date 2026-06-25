@@ -112,7 +112,10 @@ stale events after toggles, restarts, or extension reloads.
 
 `GetState` includes `selected_runtime_dir`, `selected_model_installed`, and
 `installing_profile`, so clients can disable start/install controls and steer
-users to model setup before the service attempts to spawn the worker.
+users to model setup before the service attempts to spawn the worker. It also
+includes `last_metrics`, the most recent metrics payload, so preferences opened
+after model load or dictation start can show the current runtime snapshot
+without waiting for another `Metrics` signal.
 Configuration setters emit `ConfigChanged` followed by `StateChanged`; this is
 important when a setting change stops the current worker or changes selected
 model readiness.

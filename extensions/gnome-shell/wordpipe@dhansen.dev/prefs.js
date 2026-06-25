@@ -587,6 +587,9 @@ class WordpipePage extends Adw.PreferencesPage {
             this._statusRow.subtitle = values.last_error;
         else
             this._statusRow.subtitle = _('Ready');
+        const metricsSummary = formatMetrics(values.last_metrics ?? {});
+        if (metricsSummary)
+            this._metricsRow.subtitle = metricsSummary;
         if (this._startButton) {
             this._startButton.sensitive = !values.loading_model &&
                 !values.installing &&
@@ -679,10 +682,19 @@ export default class WordpipePreferences extends ExtensionPreferences {
 function deepUnpackMap(value) {
     if (!value)
         return {};
-    const unpacked = value.deep_unpack ? value.deep_unpack() : value;
+    const unpacked = deepUnpackValue(value);
+    if (!unpacked || typeof unpacked !== 'object' || Array.isArray(unpacked))
+        return {};
+    return unpacked;
+}
+
+function deepUnpackValue(value) {
+    const unpacked = value?.deep_unpack ? value.deep_unpack() : value;
+    if (!unpacked || typeof unpacked !== 'object' || Array.isArray(unpacked))
+        return unpacked;
     const result = {};
     for (const [key, variant] of Object.entries(unpacked))
-        result[key] = variant?.deep_unpack ? variant.deep_unpack() : variant;
+        result[key] = deepUnpackValue(variant);
     return result;
 }
 
