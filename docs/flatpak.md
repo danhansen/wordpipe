@@ -15,7 +15,7 @@ The HIG-informed completion plan is in `docs/gui-flatpak-plan.md`.
   runtime dependencies that need Flatpak source generation.
 - `packaging/applications/dev.wordpipe.Wordpipe.desktop`: desktop entry.
 - `packaging/metainfo/dev.wordpipe.Wordpipe.metainfo.xml`: AppStream metadata.
-- `packaging/icons/hicolor/scalable/apps/dev.wordpipe.Wordpipe.svg`: app icon.
+- `packaging/icons/hicolor/*/apps/dev.wordpipe.Wordpipe.png`: app icon.
 
 ## Current Status
 

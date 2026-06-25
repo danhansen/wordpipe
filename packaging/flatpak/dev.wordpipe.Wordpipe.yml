@@ -86,7 +86,7 @@ modules:
       - install -Dm755 packaging/flatpak/wordpipe-flatpak-launch /app/bin/wordpipe-flatpak-launch
       - install -Dm644 packaging/applications/dev.wordpipe.Wordpipe.desktop /app/share/applications/dev.wordpipe.Wordpipe.desktop
       - install -Dm644 packaging/metainfo/dev.wordpipe.Wordpipe.metainfo.xml /app/share/metainfo/dev.wordpipe.Wordpipe.metainfo.xml
-      - install -Dm644 packaging/icons/hicolor/scalable/apps/dev.wordpipe.Wordpipe.svg /app/share/icons/hicolor/scalable/apps/dev.wordpipe.Wordpipe.svg
+      - for size in 16x16 24x24 32x32 48x48 64x64 128x128 256x256 512x512; do install -Dm644 packaging/icons/hicolor/$size/apps/dev.wordpipe.Wordpipe.png /app/share/icons/hicolor/$size/apps/dev.wordpipe.Wordpipe.png; done
     sources:
       - type: file
         path: ../../pyproject.toml
