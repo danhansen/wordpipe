@@ -590,6 +590,9 @@ class WordpipePage extends Adw.PreferencesPage {
         const metricsSummary = formatMetrics(values.last_metrics ?? {});
         if (metricsSummary)
             this._metricsRow.subtitle = metricsSummary;
+        const installSummary = formatInstallProgress(values.last_install_progress ?? {});
+        if (installSummary)
+            this._progressRow.subtitle = installSummary;
         if (this._startButton) {
             this._startButton.sensitive = !values.loading_model &&
                 !values.installing &&
@@ -726,6 +729,22 @@ function formatMetrics(metrics) {
     if (droppedChunks)
         parts.push(`${droppedChunks} ${_('dropped')}`);
     return parts.join(' - ');
+}
+
+function formatInstallProgress(progress) {
+    const profile = typeof progress.profile === 'string' ? progress.profile : '';
+    const message = typeof progress.message === 'string'
+        ? progress.message
+        : typeof progress.phase === 'string'
+            ? progress.phase
+            : '';
+    if (!profile && !message)
+        return '';
+    if (!profile)
+        return message;
+    if (!message)
+        return profile;
+    return `${profile}: ${message}`;
 }
 
 function numberValue(value) {

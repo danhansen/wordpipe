@@ -584,8 +584,11 @@ export default class WordpipeExtension extends Extension {
     _handleState(state) {
         this._state = state;
         this._indicator?.setState(this._state, true);
+        const installSummary = formatInstallProgress(state.last_install_progress ?? {});
         const metricsSummary = formatMetrics(state.last_metrics ?? {});
-        if (metricsSummary)
+        if (state.installing && installSummary)
+            this._indicator?.setMetrics(installSummary);
+        else if (metricsSummary)
             this._indicator?.setMetrics(metricsSummary);
         const visible = Boolean(state.listening || state.stopping || state.loading_model) &&
             this._settings.get_boolean('show-overlay');
@@ -657,6 +660,22 @@ function formatMetrics(metrics) {
     if (droppedChunks)
         parts.push(`${droppedChunks} ${_('dropped')}`);
     return parts.join(' - ');
+}
+
+function formatInstallProgress(progress) {
+    const profile = typeof progress.profile === 'string' ? progress.profile : '';
+    const message = typeof progress.message === 'string'
+        ? progress.message
+        : typeof progress.phase === 'string'
+            ? progress.phase
+            : '';
+    if (!profile && !message)
+        return '';
+    if (!profile)
+        return message;
+    if (!message)
+        return profile;
+    return `${profile}: ${message}`;
 }
 
 function numberValue(value) {

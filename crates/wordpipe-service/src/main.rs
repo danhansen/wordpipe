@@ -116,6 +116,7 @@ struct ServiceData {
     partial_text: String,
     last_error: String,
     last_metrics: VariantMap,
+    last_install_progress: VariantMap,
     worker: Option<WorkerProcess>,
 }
 
@@ -134,6 +135,7 @@ impl Default for ServiceData {
             partial_text: String::new(),
             last_error: String::new(),
             last_metrics: VariantMap::new(),
+            last_install_progress: VariantMap::new(),
             worker: None,
         }
     }
@@ -489,6 +491,11 @@ impl WordpipeService {
                 "unknown model profile: {profile}"
             )));
         }
+        let mut progress = VariantMap::new();
+        insert_str(&mut progress, "profile", profile);
+        insert_str(&mut progress, "phase", "starting");
+        insert_str(&mut progress, "message", "starting model installer");
+        insert_f64(&mut progress, "fraction", 0.0);
         let (installer_path, model_root) = {
             let mut data = self.lock_data()?;
             if data.installing {
@@ -498,15 +505,12 @@ impl WordpipeService {
             }
             data.installing = true;
             data.installing_profile = profile.to_string();
+            data.last_install_progress = progress.clone();
             (
                 data.config.model_installer_path.clone(),
                 data.config.model_root.clone(),
             )
         };
-        let mut progress = VariantMap::new();
-        insert_str(&mut progress, "phase", "starting");
-        insert_str(&mut progress, "message", "starting model installer");
-        insert_f64(&mut progress, "fraction", 0.0);
         Self::install_progress(&emitter, profile, progress).await?;
 
         let service = self.clone();
@@ -865,7 +869,7 @@ impl WordpipeService {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let result = run_progress_command(command, &profile, &emitter);
+        let result = run_progress_command(command, &profile, &emitter, Arc::clone(&self.data));
         let state = {
             let mut data = match self.data.lock() {
                 Ok(data) => data,
@@ -877,17 +881,21 @@ impl WordpipeService {
                 Ok(()) => {
                     data.last_error.clear();
                     let mut progress = VariantMap::new();
+                    insert_str(&mut progress, "profile", &profile);
                     insert_str(&mut progress, "phase", "complete");
                     insert_str(&mut progress, "message", "model profile installed");
                     insert_f64(&mut progress, "fraction", 1.0);
+                    data.last_install_progress = progress.clone();
                     let _ = zbus::block_on(Self::install_progress(&emitter, &profile, progress));
                 }
                 Err(err) => {
                     data.last_error = err.to_string();
                     let mut progress = VariantMap::new();
+                    insert_str(&mut progress, "profile", &profile);
                     insert_str(&mut progress, "phase", "error");
                     insert_str(&mut progress, "message", &err.to_string());
                     insert_f64(&mut progress, "fraction", 0.0);
+                    data.last_install_progress = progress.clone();
                     let _ = zbus::block_on(Self::install_progress(&emitter, &profile, progress));
                     let _ = zbus::block_on(Self::error(&emitter, &err.to_string()));
                 }
@@ -950,6 +958,11 @@ fn state_map(data: &ServiceData) -> VariantMap {
     );
     insert_str(&mut map, "last_error", &data.last_error);
     insert_map(&mut map, "last_metrics", &data.last_metrics);
+    insert_map(
+        &mut map,
+        "last_install_progress",
+        &data.last_install_progress,
+    );
     map
 }
 
@@ -1501,6 +1514,7 @@ fn run_progress_command(
     mut command: Command,
     profile: &str,
     emitter: &SignalEmitter<'static>,
+    data: Arc<Mutex<ServiceData>>,
 ) -> Result<()> {
     let mut child = command
         .spawn()
@@ -1516,13 +1530,16 @@ fn run_progress_command(
 
     let stdout_profile = profile.to_string();
     let stdout_emitter = emitter.clone();
-    let stdout_thread =
-        std::thread::spawn(move || stream_progress_lines(stdout, &stdout_profile, &stdout_emitter));
+    let stdout_data = Arc::clone(&data);
+    let stdout_thread = std::thread::spawn(move || {
+        stream_progress_lines(stdout, &stdout_profile, &stdout_emitter, stdout_data)
+    });
 
     let stderr_profile = profile.to_string();
     let stderr_emitter = emitter.clone();
-    let stderr_thread =
-        std::thread::spawn(move || stream_progress_lines(stderr, &stderr_profile, &stderr_emitter));
+    let stderr_thread = std::thread::spawn(move || {
+        stream_progress_lines(stderr, &stderr_profile, &stderr_emitter, data)
+    });
 
     let status = child.wait()?;
     let _ = stdout_thread.join();
@@ -1534,8 +1551,12 @@ fn run_progress_command(
     }
 }
 
-fn stream_progress_lines<R>(reader: R, profile: &str, emitter: &SignalEmitter<'static>)
-where
+fn stream_progress_lines<R>(
+    reader: R,
+    profile: &str,
+    emitter: &SignalEmitter<'static>,
+    data: Arc<Mutex<ServiceData>>,
+) where
     R: std::io::Read,
 {
     let reader = std::io::BufReader::new(reader);
@@ -1544,9 +1565,13 @@ where
             continue;
         }
         let mut progress = VariantMap::new();
+        insert_str(&mut progress, "profile", profile);
         insert_str(&mut progress, "phase", "running");
         insert_str(&mut progress, "message", line.trim());
         insert_f64(&mut progress, "fraction", 0.0);
+        if let Ok(mut data) = data.lock() {
+            data.last_install_progress = progress.clone();
+        }
         let _ = zbus::block_on(WordpipeService::install_progress(
             emitter, profile, progress,
         ));
@@ -1723,6 +1748,32 @@ mod tests {
         assert_eq!(
             u64::try_from(last_metrics["decode_calls"].clone()).unwrap(),
             3
+        );
+    }
+
+    #[test]
+    fn state_includes_last_install_progress() {
+        let mut progress = VariantMap::new();
+        insert_str(&mut progress, "profile", "compact");
+        insert_str(&mut progress, "phase", "running");
+        insert_str(&mut progress, "message", "downloading");
+        let data = ServiceData {
+            last_install_progress: progress,
+            ..ServiceData::default()
+        };
+
+        let state = state_map(&data);
+        let last_progress =
+            <HashMap<String, OwnedValue>>::try_from(state["last_install_progress"].clone())
+                .unwrap();
+
+        assert_eq!(
+            String::try_from(last_progress["profile"].clone()).unwrap(),
+            "compact"
+        );
+        assert_eq!(
+            String::try_from(last_progress["message"].clone()).unwrap(),
+            "downloading"
         );
     }
 

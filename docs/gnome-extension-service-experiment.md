@@ -115,7 +115,10 @@ stale events after toggles, restarts, or extension reloads.
 users to model setup before the service attempts to spawn the worker. It also
 includes `last_metrics`, the most recent metrics payload, so preferences opened
 after model load or dictation start can show the current runtime snapshot
-without waiting for another `Metrics` signal.
+without waiting for another `Metrics` signal. Similarly,
+`last_install_progress` stores the latest installer progress payload, including
+the model profile, so setup UI opened mid-install can show the current phase
+without waiting for another `InstallProgress` signal.
 Configuration setters emit `ConfigChanged` followed by `StateChanged`; this is
 important when a setting change stops the current worker or changes selected
 model readiness.
