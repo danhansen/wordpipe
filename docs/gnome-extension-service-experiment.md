@@ -149,9 +149,11 @@ It currently provides:
   options, overlay, and shortcut.
 - Overlay/status updates driven by D-Bus state and transcript signals.
 
-The `TextInjector` in `extension.js` is intentionally isolated. It currently
-logs append-only text deltas. The next GNOME-specific step is replacing that
-method with the validated GNOME Shell 50 OSK/internal text injection call.
+The `TextInjector` in `extension.js` is intentionally isolated. The first
+GNOME Shell 50 implementation commits append-only text deltas through
+`Clutter.get_default_backend().get_input_method().commit(text)`. This is an
+internal Shell/input-method path, so it needs live GNOME testing across focused
+GTK/libadwaita apps, terminals, and browser text fields.
 
 ## Local Install
 

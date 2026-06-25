@@ -150,6 +150,7 @@ class TextInjector {
     constructor() {
         this._lastSession = 0;
         this._lastSeq = 0;
+        this._inputMethod = null;
     }
 
     reset(sessionId) {
@@ -166,9 +167,21 @@ class TextInjector {
             return;
         this._lastSeq = numericSeq;
 
-        // GNOME Shell's OSK/text-insertion API is internal and version-specific.
-        // Keep the boundary narrow so this method can become the Shell 50 injector.
-        log(`Wordpipe text delta: ${text}`);
+        const inputMethod = this._getInputMethod();
+        if (!inputMethod) {
+            log(`Wordpipe text delta without input method: ${text}`);
+            return;
+        }
+        inputMethod.commit(text);
+    }
+
+    _getInputMethod() {
+        if (this._inputMethod)
+            return this._inputMethod;
+
+        const backend = Clutter.get_default_backend?.();
+        this._inputMethod = backend?.get_input_method?.() ?? null;
+        return this._inputMethod;
     }
 }
 
