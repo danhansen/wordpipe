@@ -113,6 +113,9 @@ stale events after toggles, restarts, or extension reloads.
 `GetState` includes `selected_runtime_dir`, `selected_model_installed`, and
 `installing_profile`, so clients can disable start/install controls and steer
 users to model setup before the service attempts to spawn the worker.
+Configuration setters emit `ConfigChanged` followed by `StateChanged`; this is
+important when a setting change stops the current worker or changes selected
+model readiness.
 The service applies spoken-punctuation normalization before computing
 `TextDelta` when `spoken_punctuation` is enabled. Partial normalization holds
 ambiguous trailing command prefixes such as `new`, `question`, `full`, and

@@ -289,16 +289,18 @@ impl WordpipeService {
                 "unknown backend: {backend}"
             )));
         }
-        let (config_data, config) = {
+        let (config_data, config, state) = {
             let mut data = self.lock_data()?;
             data.config.backend = backend.to_string();
             shutdown_worker(&mut data);
             let config_data = data.config.clone();
             let config = config_map(&data.config);
-            (config_data, config)
+            let state = state_map(&data);
+            (config_data, config, state)
         };
         self.persist_config(&config_data)?;
         Self::config_changed(&emitter, config).await?;
+        Self::state_changed(&emitter, state).await?;
         Ok(())
     }
 
@@ -312,7 +314,7 @@ impl WordpipeService {
                 "unknown model profile: {profile}"
             )));
         }
-        let (config_data, config) = {
+        let (config_data, config, state) = {
             let mut data = self.lock_data()?;
             if data.config.model_profile != profile {
                 data.config.model_profile = profile.to_string();
@@ -320,10 +322,12 @@ impl WordpipeService {
             }
             let config_data = data.config.clone();
             let config = config_map(&data.config);
-            (config_data, config)
+            let state = state_map(&data);
+            (config_data, config, state)
         };
         self.persist_config(&config_data)?;
         Self::config_changed(&emitter, config).await?;
+        Self::state_changed(&emitter, state).await?;
         Ok(())
     }
 
@@ -332,7 +336,7 @@ impl WordpipeService {
         selector: &str,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        let (config_data, config) = {
+        let (config_data, config, state) = {
             let mut data = self.lock_data()?;
             if data.config.input_device != selector {
                 data.config.input_device = selector.to_string();
@@ -340,10 +344,12 @@ impl WordpipeService {
             }
             let config_data = data.config.clone();
             let config = config_map(&data.config);
-            (config_data, config)
+            let state = state_map(&data);
+            (config_data, config, state)
         };
         self.persist_config(&config_data)?;
         Self::config_changed(&emitter, config).await?;
+        Self::state_changed(&emitter, state).await?;
         Ok(())
     }
 
@@ -352,15 +358,17 @@ impl WordpipeService {
         accelerator: &str,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        let (config_data, config) = {
+        let (config_data, config, state) = {
             let mut data = self.lock_data()?;
             data.config.shortcut = accelerator.to_string();
             let config_data = data.config.clone();
             let config = config_map(&data.config);
-            (config_data, config)
+            let state = state_map(&data);
+            (config_data, config, state)
         };
         self.persist_config(&config_data)?;
         Self::config_changed(&emitter, config).await?;
+        Self::state_changed(&emitter, state).await?;
         Ok(())
     }
 
@@ -369,7 +377,7 @@ impl WordpipeService {
         options: VariantMap,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        let (config_data, config) = {
+        let (config_data, config, state) = {
             let mut data = self.lock_data()?;
             if let Some(value) = get_bool(&options, "spoken_punctuation") {
                 data.config.spoken_punctuation = value;
@@ -385,10 +393,12 @@ impl WordpipeService {
             }
             let config_data = data.config.clone();
             let config = config_map(&data.config);
-            (config_data, config)
+            let state = state_map(&data);
+            (config_data, config, state)
         };
         self.persist_config(&config_data)?;
         Self::config_changed(&emitter, config).await?;
+        Self::state_changed(&emitter, state).await?;
         Ok(())
     }
 
@@ -397,7 +407,7 @@ impl WordpipeService {
         options: VariantMap,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        let (config_data, config) = {
+        let (config_data, config, state) = {
             let mut data = self.lock_data()?;
             let mut restart_worker = false;
             if let Some(value) = get_string(&options, "model_root") {
@@ -434,10 +444,12 @@ impl WordpipeService {
             }
             let config_data = data.config.clone();
             let config = config_map(&data.config);
-            (config_data, config)
+            let state = state_map(&data);
+            (config_data, config, state)
         };
         self.persist_config(&config_data)?;
         Self::config_changed(&emitter, config).await?;
+        Self::state_changed(&emitter, state).await?;
         Ok(())
     }
 
