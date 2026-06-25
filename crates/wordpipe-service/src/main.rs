@@ -882,6 +882,7 @@ async fn run(args: Args) -> Result<()> {
 
 fn state_map(data: &ServiceData) -> VariantMap {
     let mut map = VariantMap::new();
+    let runtime_dir = selected_runtime_dir(&data.config);
     insert_bool(&mut map, "listening", data.listening);
     insert_bool(&mut map, "stopping", data.stopping);
     insert_bool(&mut map, "installing", data.installing);
@@ -892,6 +893,12 @@ fn state_map(data: &ServiceData) -> VariantMap {
     insert_str(&mut map, "backend", &data.config.backend);
     insert_str(&mut map, "model_profile", &data.config.model_profile);
     insert_str(&mut map, "input_device", &data.config.input_device);
+    insert_str(&mut map, "selected_runtime_dir", &runtime_dir);
+    insert_bool(
+        &mut map,
+        "selected_model_installed",
+        profile_installed(&runtime_dir),
+    );
     insert_str(&mut map, "last_error", &data.last_error);
     map
 }
@@ -1585,6 +1592,34 @@ mod tests {
         select_installed_model_profile(&mut config);
 
         assert_eq!(config.model_profile, "fast");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn state_includes_selected_model_install_status() {
+        let root = unique_temp_dir("state-model-installed");
+        let compact_runtime = root.join("nemotron-wordpipe-compact-fixed-shape-ort-format");
+        fs::create_dir_all(&compact_runtime).unwrap();
+        fs::write(compact_runtime.join("encoder.ort"), b"test").unwrap();
+        let data = ServiceData {
+            config: ServiceConfig {
+                model_root: root.to_string_lossy().to_string(),
+                model_profile: "compact".to_string(),
+                ..ServiceConfig::default()
+            },
+            ..ServiceData::default()
+        };
+
+        let state = state_map(&data);
+
+        assert_eq!(
+            bool::try_from(state["selected_model_installed"].clone()).unwrap(),
+            true
+        );
+        assert_eq!(
+            String::try_from(state["selected_runtime_dir"].clone()).unwrap(),
+            compact_runtime.to_string_lossy()
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

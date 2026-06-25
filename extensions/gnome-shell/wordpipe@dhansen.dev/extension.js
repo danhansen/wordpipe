@@ -90,14 +90,26 @@ class Indicator extends PanelMenu.Button {
     setState(state, available) {
         const listening = Boolean(state?.listening);
         const stopping = Boolean(state?.stopping);
+        const installing = Boolean(state?.installing);
+        const loading = Boolean(state?.loading_model);
+        const selectedModelInstalled = state?.selected_model_installed !== false;
         this._icon.icon_name = listening || stopping
             ? 'media-record-symbolic'
             : 'audio-input-microphone-symbolic';
         this._toggleItem.label.text = listening || stopping
             ? _('Stop Dictation')
             : _('Start Dictation');
+        this._toggleItem.setSensitive(
+            available && !installing && !loading &&
+            (listening || stopping || selectedModelInstalled));
         this._statusItem.label.text = available
-            ? listening ? _('Listening') : stopping ? _('Stopping') : _('Ready')
+            ? listening
+                ? _('Listening')
+                : stopping
+                    ? _('Stopping')
+                    : selectedModelInstalled
+                        ? _('Ready')
+                        : _('Model missing')
             : _('Service unavailable');
     }
 
@@ -525,6 +537,8 @@ export default class WordpipeExtension extends Extension {
                 subtitle = _('Loading model');
             else if (state.stopping)
                 subtitle = _('Stopping');
+            else if (state.selected_model_installed === false)
+                subtitle = _('Model missing');
             this._overlay?.setSubtitle(subtitle);
         }
     }

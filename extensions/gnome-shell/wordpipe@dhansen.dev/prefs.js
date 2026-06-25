@@ -308,20 +308,20 @@ class WordpipePage extends Adw.PreferencesPage {
         const actions = new Adw.ActionRow({
             title: _('Dictation'),
         });
-        const startButton = new Gtk.Button({
+        this._startButton = new Gtk.Button({
             icon_name: 'media-record-symbolic',
             valign: Gtk.Align.CENTER,
             tooltip_text: _('Start dictation'),
         });
-        startButton.connect('clicked', () => this._callRemote('Start'));
-        const stopButton = new Gtk.Button({
+        this._startButton.connect('clicked', () => this._callRemote('Start'));
+        this._stopButton = new Gtk.Button({
             icon_name: 'media-playback-stop-symbolic',
             valign: Gtk.Align.CENTER,
             tooltip_text: _('Stop dictation'),
         });
-        stopButton.connect('clicked', () => this._callRemote('Stop'));
-        actions.add_suffix(startButton);
-        actions.add_suffix(stopButton);
+        this._stopButton.connect('clicked', () => this._callRemote('Stop'));
+        actions.add_suffix(this._startButton);
+        actions.add_suffix(this._stopButton);
         group.add(actions);
     }
 
@@ -540,6 +540,7 @@ class WordpipePage extends Adw.PreferencesPage {
     }
 
     _handleState(values) {
+        const selectedModelInstalled = values.selected_model_installed !== false;
         if (values.loading_model)
             this._statusRow.subtitle = _('Loading model');
         else if (values.listening)
@@ -548,10 +549,21 @@ class WordpipePage extends Adw.PreferencesPage {
             this._statusRow.subtitle = _('Stopping');
         else if (values.installing)
             this._statusRow.subtitle = _('Installing model');
+        else if (!selectedModelInstalled)
+            this._statusRow.subtitle = _('Model missing');
         else if (values.last_error)
             this._statusRow.subtitle = values.last_error;
         else
             this._statusRow.subtitle = _('Ready');
+        if (this._startButton) {
+            this._startButton.sensitive = !values.loading_model &&
+                !values.installing &&
+                !values.listening &&
+                !values.stopping &&
+                selectedModelInstalled;
+        }
+        if (this._stopButton)
+            this._stopButton.sensitive = Boolean(values.listening || values.stopping);
     }
 
     _handleInstallProgress(profile, progress) {

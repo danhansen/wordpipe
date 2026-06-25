@@ -110,6 +110,9 @@ Error(s message)
 `Partial` is for display/debugging. `session_id` and `seq` let clients ignore
 stale events after toggles, restarts, or extension reloads.
 
+`GetState` includes `selected_runtime_dir` and `selected_model_installed`, so
+clients can disable start controls and steer users to model setup before the
+service attempts to spawn the worker.
 The service applies spoken-punctuation normalization before computing
 `TextDelta` when `spoken_punctuation` is enabled. Partial normalization holds
 ambiguous trailing command prefixes such as `new`, `question`, `full`, and
