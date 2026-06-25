@@ -180,7 +180,7 @@ stale events after toggles, restarts, or extension reloads.
 | `index` | `u` | Enumeration index from CPAL. |
 | `name` | `s` | Device name. |
 | `selector` | `s` | Value accepted by `SetInputDevice`. |
-| `default` | `b` | Whether the device matches the current system default name. |
+| `is_default` | `b` | Whether the device matches the current system default name. |
 
 `GetState` includes `selected_runtime_dir`, `selected_model_installed`, and
 `installing_profile`, so clients can disable start/install controls and steer

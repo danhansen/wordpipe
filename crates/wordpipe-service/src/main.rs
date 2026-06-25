@@ -1168,18 +1168,22 @@ fn enumerate_input_devices() -> Result<Vec<VariantMap>> {
         .enumerate()
     {
         let name = device.name().unwrap_or_else(|_| "unknown".to_string());
-        let mut item = VariantMap::new();
-        insert_u32(&mut item, "index", index as u32);
-        insert_str(&mut item, "name", &name);
-        insert_str(&mut item, "selector", &name);
-        insert_bool(
-            &mut item,
-            "is_default",
+        devices.push(input_device_map(
+            index as u32,
+            &name,
             default_name.as_ref() == Some(&name),
-        );
-        devices.push(item);
+        ));
     }
     Ok(devices)
+}
+
+fn input_device_map(index: u32, name: &str, is_default: bool) -> VariantMap {
+    let mut item = VariantMap::new();
+    insert_u32(&mut item, "index", index);
+    insert_str(&mut item, "name", name);
+    insert_str(&mut item, "selector", name);
+    insert_bool(&mut item, "is_default", is_default);
+    item
 }
 
 fn default_model_root() -> String {
@@ -1688,6 +1692,12 @@ fn json_to_variant_map(value: &JsonValue) -> VariantMap {
 mod tests {
     use super::*;
 
+    fn sorted_keys(map: &VariantMap) -> Vec<&str> {
+        let mut keys = map.keys().map(String::as_str).collect::<Vec<_>>();
+        keys.sort_unstable();
+        keys
+    }
+
     #[test]
     fn persisted_config_overrides_defaults() {
         let config = apply_persisted_config(
@@ -1709,6 +1719,117 @@ mod tests {
         assert_eq!(config.sample_rate, 16_000);
         assert!(!config.show_overlay);
         assert_eq!(config.backend, DEFAULT_BACKEND);
+    }
+
+    #[test]
+    fn config_map_has_contract_keys() {
+        let config = ServiceConfig::default();
+
+        assert_eq!(
+            sorted_keys(&config_map(&config)),
+            vec![
+                "backend",
+                "input_device",
+                "insert_partials",
+                "model_installer_path",
+                "model_profile",
+                "model_root",
+                "num_threads",
+                "sample_rate",
+                "shortcut",
+                "show_overlay",
+                "spoken_punctuation",
+                "stream_insert_delay_ms",
+                "worker_path",
+            ]
+        );
+    }
+
+    #[test]
+    fn state_map_has_contract_keys() {
+        let data = ServiceData::default();
+
+        assert_eq!(
+            sorted_keys(&state_map(&data)),
+            vec![
+                "backend",
+                "input_device",
+                "installing",
+                "installing_profile",
+                "last_commit_text",
+                "last_error",
+                "last_install_progress",
+                "last_metrics",
+                "listening",
+                "loading_model",
+                "model_loaded",
+                "model_profile",
+                "partial_text",
+                "selected_model_installed",
+                "selected_runtime_dir",
+                "seq",
+                "session_id",
+                "stopping",
+            ]
+        );
+    }
+
+    #[test]
+    fn list_backends_has_contract_keys() {
+        let service = WordpipeService::new(PathBuf::from("unused.json"), ServiceConfig::default());
+        let backends = service.list_backends();
+
+        assert!(!backends.is_empty());
+        assert_eq!(
+            sorted_keys(&backends[0]),
+            vec!["description", "id", "title"]
+        );
+    }
+
+    #[test]
+    fn list_model_profiles_has_contract_keys() {
+        let root = unique_temp_dir("profile-contract");
+        fs::create_dir_all(&root).unwrap();
+        let config = ServiceConfig {
+            model_root: root.to_string_lossy().to_string(),
+            ..ServiceConfig::default()
+        };
+        let service = WordpipeService::new(PathBuf::from("unused.json"), config);
+
+        let profiles = service.list_model_profiles();
+
+        assert!(!profiles.is_empty());
+        assert_eq!(
+            sorted_keys(&profiles[0]),
+            vec![
+                "build_profile",
+                "description",
+                "id",
+                "installed",
+                "ort_format",
+                "output_name",
+                "prebuilt_filename",
+                "runtime_dir",
+                "title",
+            ]
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn input_device_map_has_contract_keys() {
+        let device = input_device_map(7, "Microphone", true);
+
+        assert_eq!(
+            sorted_keys(&device),
+            vec!["index", "is_default", "name", "selector"]
+        );
+        assert_eq!(u32::try_from(device["index"].clone()).unwrap(), 7);
+        assert_eq!(
+            String::try_from(device["selector"].clone()).unwrap(),
+            "Microphone"
+        );
+        assert_eq!(bool::try_from(device["is_default"].clone()).unwrap(), true);
     }
 
     #[test]
