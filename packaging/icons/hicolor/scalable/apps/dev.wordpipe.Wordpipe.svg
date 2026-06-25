@@ -1,6 +1,38 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="24" fill="#2e7d6f"/>
-  <path d="M64 18c-12.2 0-22 9.8-22 22v24c0 12.2 9.8 22 22 22s22-9.8 22-22V40c0-12.2-9.8-22-22-22z" fill="#f6f7f8"/>
-  <path d="M31 59c0-3.3 2.7-6 6-6s6 2.7 6 6v5c0 11.6 9.4 21 21 21s21-9.4 21-21v-5c0-3.3 2.7-6 6-6s6 2.7 6 6v5c0 16.2-11.6 29.8-27 32.8V110h14c3.3 0 6 2.7 6 6s-2.7 6-6 6H44c-3.3 0-6-2.7-6-6s2.7-6 6-6h14V96.8C42.6 93.8 31 80.2 31 64v-5z" fill="#f6f7f8"/>
-  <path d="M51 43h26v8H51zm0 17h26v8H51z" fill="#2e7d6f" opacity=".8"/>
+  <defs>
+    <linearGradient id="bg" x1="18" y1="16" x2="110" y2="118" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#38a88f"/>
+      <stop offset="0.55" stop-color="#247f93"/>
+      <stop offset="1" stop-color="#315f9f"/>
+    </linearGradient>
+    <linearGradient id="mic" x1="46" y1="20" x2="82" y2="88" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e7eef3"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#0b2630" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <rect x="8" y="8" width="112" height="112" rx="26" fill="url(#bg)"/>
+
+  <g opacity="0.18" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round">
+    <path d="M23 49c7-8 14-8 21 0s14 8 21 0 14-8 21 0 14 8 21 0"/>
+    <path d="M23 66c7-8 14-8 21 0s14 8 21 0 14-8 21 0 14 8 21 0"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <path d="M64 18c-12.7 0-23 10.3-23 23v24c0 12.7 10.3 23 23 23s23-10.3 23-23V41c0-12.7-10.3-23-23-23z" fill="url(#mic)"/>
+    <path d="M31 58c0-3.3 2.7-6 6-6s6 2.7 6 6v7c0 11.6 9.4 21 21 21s21-9.4 21-21v-7c0-3.3 2.7-6 6-6s6 2.7 6 6v7c0 16.5-11.6 30.3-27 33.7V108h13c3.3 0 6 2.7 6 6s-2.7 6-6 6H45c-3.3 0-6-2.7-6-6s2.7-6 6-6h13v-9.3C42.6 95.3 31 81.5 31 65v-7z" fill="#f7fbfc"/>
+    <path d="M52 40h24v7H52zm0 16h24v7H52z" fill="#247f93" opacity="0.85"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="78" y="74" width="32" height="29" rx="8" fill="#ffffff"/>
+    <rect x="85" y="82" width="4" height="4" rx="1.2" fill="#315f9f"/>
+    <rect x="93" y="82" width="4" height="4" rx="1.2" fill="#315f9f"/>
+    <rect x="101" y="82" width="4" height="4" rx="1.2" fill="#315f9f"/>
+    <rect x="85" y="91" width="20" height="4" rx="2" fill="#247f93"/>
+    <rect x="109" y="68" width="4" height="42" rx="2" fill="#ffffff"/>
+  </g>
 </svg>
