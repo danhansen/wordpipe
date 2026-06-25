@@ -130,6 +130,9 @@ The client inserts `Commit` text when it adds text that has not already been
 streamed and cancels any delayed deltas before applying a final commit.
 `Stop()` moves state to `stopping=true` while the worker flushes. The service
 emits final `Commit` before `SessionStopped` when the worker produces one.
+`Toggle()` treats both `listening` and `stopping` as stop states, and `Start()`
+rejects requests during the stopping window so a repeated hotkey cannot restart
+dictation before the previous flush has completed.
 
 ## Migration Steps
 

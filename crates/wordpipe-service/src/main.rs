@@ -144,6 +144,12 @@ struct WorkerProcess {
     child: Child,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ToggleAction {
+    Start,
+    Stop,
+}
+
 #[derive(Clone, Default)]
 struct WordpipeService {
     data: Arc<Mutex<ServiceData>>,
@@ -170,9 +176,19 @@ impl WordpipeService {
         &self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
+        if self.lock_data()?.stopping {
+            return Err(zbus::fdo::Error::Failed(
+                "dictation is stopping".to_string(),
+            ));
+        }
         self.ensure_worker(emitter.to_owned()).await?;
         let (state, session_id, stdin) = {
             let mut data = self.lock_data()?;
+            if data.stopping {
+                return Err(zbus::fdo::Error::Failed(
+                    "dictation is stopping".to_string(),
+                ));
+            }
             if !data.listening {
                 data.listening = true;
                 data.stopping = false;
@@ -199,12 +215,17 @@ impl WordpipeService {
     ) -> zbus::fdo::Result<()> {
         let (state, stopped_session, stdin, emit_stopped) = {
             let mut data = self.lock_data()?;
+            let was_stopping = data.stopping;
             let stopped_session = data.session_id;
-            data.listening = false;
-            data.stopping = data.worker.is_some();
-            data.seq = data.seq.saturating_add(1);
-            let stdin = data.worker.as_ref().map(|worker| Arc::clone(&worker.stdin));
-            let emit_stopped = stdin.is_none();
+            let stdin = if was_stopping {
+                None
+            } else {
+                data.listening = false;
+                data.stopping = data.worker.is_some();
+                data.seq = data.seq.saturating_add(1);
+                data.worker.as_ref().map(|worker| Arc::clone(&worker.stdin))
+            };
+            let emit_stopped = !was_stopping && stdin.is_none();
             (state_map(&data), stopped_session, stdin, emit_stopped)
         };
         if let Some(stdin) = stdin {
@@ -221,10 +242,13 @@ impl WordpipeService {
         &self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        if self.lock_data()?.listening {
-            self.stop(emitter).await
-        } else {
-            self.start(emitter).await
+        let action = {
+            let data = self.lock_data()?;
+            toggle_action(&data)
+        };
+        match action {
+            ToggleAction::Stop => self.stop(emitter).await,
+            ToggleAction::Start => self.start(emitter).await,
         }
     }
 
@@ -1154,6 +1178,14 @@ fn next_session_id(current: u64) -> u64 {
     now.max(current.saturating_add(1))
 }
 
+fn toggle_action(data: &ServiceData) -> ToggleAction {
+    if data.listening || data.stopping {
+        ToggleAction::Stop
+    } else {
+        ToggleAction::Start
+    }
+}
+
 fn insert_str(map: &mut VariantMap, key: &str, value: &str) {
     map.insert(key.to_string(), owned(Value::from(value.to_string())));
 }
@@ -1692,6 +1724,28 @@ mod tests {
             u64::try_from(last_metrics["decode_calls"].clone()).unwrap(),
             3
         );
+    }
+
+    #[test]
+    fn toggle_starts_when_idle() {
+        let data = ServiceData::default();
+
+        assert_eq!(toggle_action(&data), ToggleAction::Start);
+    }
+
+    #[test]
+    fn toggle_stops_while_listening_or_stopping() {
+        let listening = ServiceData {
+            listening: true,
+            ..ServiceData::default()
+        };
+        let stopping = ServiceData {
+            stopping: true,
+            ..ServiceData::default()
+        };
+
+        assert_eq!(toggle_action(&listening), ToggleAction::Stop);
+        assert_eq!(toggle_action(&stopping), ToggleAction::Stop);
     }
 
     #[test]
