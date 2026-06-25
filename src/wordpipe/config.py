@@ -148,6 +148,14 @@ def save_input_device(device: int | str | None, path: Path | None = None) -> Pat
     return _save_root_assignment("input_device", _quote_toml_string(str(value)), path)
 
 
+def save_insert_partial_text(enabled: bool, path: Path | None = None) -> Path:
+    return _save_root_assignment("insert_partial_text", _quote_toml_bool(enabled), path)
+
+
+def save_spoken_punctuation(enabled: bool, path: Path | None = None) -> Path:
+    return _save_root_assignment("spoken_punctuation", _quote_toml_bool(enabled), path)
+
+
 def _save_root_assignment(key: str, encoded_value: str, path: Path | None = None) -> Path:
     config_path = path if path is not None else default_config_path()
     existing = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
@@ -180,6 +188,12 @@ def _save_root_assignment(key: str, encoded_value: str, path: Path | None = None
 
 def _quote_toml_string(value: str) -> str:
     return json.dumps(value)
+
+
+def _quote_toml_bool(value: bool) -> str:
+    if not isinstance(value, bool):
+        raise ValueError("value must be a boolean")
+    return "true" if value else "false"
 
 
 def _first_table_header_index(lines: list[str]) -> int:

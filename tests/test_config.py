@@ -4,7 +4,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from wordpipe.config import load_config, save_input_device, save_model_profile
+from wordpipe.config import (
+    load_config,
+    save_input_device,
+    save_insert_partial_text,
+    save_model_profile,
+    save_spoken_punctuation,
+)
 from wordpipe.models import DEFAULT_NEMO_SOURCE_REPO, default_model_root
 
 
@@ -246,6 +252,21 @@ class ConfigTests(unittest.TestCase):
             config = load_config(path)
 
         self.assertEqual(config.input_device, 'USB "Mic"')
+
+    def test_save_insertion_settings_update_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text(
+                "insert_partial_text = false\nspoken_punctuation = true\n",
+                encoding="utf-8",
+            )
+
+            save_insert_partial_text(True, path)
+            save_spoken_punctuation(False, path)
+            config = load_config(path)
+
+        self.assertTrue(config.insert_partial_text)
+        self.assertFalse(config.spoken_punctuation)
 
 
 if __name__ == "__main__":

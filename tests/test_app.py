@@ -143,6 +143,14 @@ class FakeMicrophoneDropdown:
         return self._selected
 
 
+class FakeSwitch:
+    def __init__(self, active: bool = False) -> None:
+        self._active = active
+
+    def get_active(self) -> bool:
+        return self._active
+
+
 class FakeBanner:
     def __init__(self) -> None:
         self.title = ""
@@ -330,6 +338,54 @@ class AppControllerStateTests(unittest.TestCase):
         self.assertEqual(config.input_device, "cpal:2")
         self.assertEqual(app._config.input_device, "cpal:2")
         self.assertEqual(row.subtitle, "Selected input: cpal:2")
+
+    def test_live_insert_toggle_persists_and_updates_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "config.toml"
+            app = WordpipeApp(
+                DaemonConfig(
+                    model_dir=root / "model",
+                    dry_run_insertion=True,
+                    insert_partial_text=False,
+                ),
+                model_setup=AppModelSetup(
+                    model_root=root / "models",
+                    model_profile="fast",
+                    nemo_source="nvidia/example",
+                    config_path=config_path,
+                ),
+            )
+
+            app._live_insert_changed(FakeSwitch(True), None)
+            config = load_config(config_path)
+
+        self.assertTrue(config.insert_partial_text)
+        self.assertTrue(app._config.insert_partial_text)
+
+    def test_spoken_punctuation_toggle_persists_and_updates_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "config.toml"
+            app = WordpipeApp(
+                DaemonConfig(
+                    model_dir=root / "model",
+                    dry_run_insertion=True,
+                    spoken_punctuation=True,
+                ),
+                model_setup=AppModelSetup(
+                    model_root=root / "models",
+                    model_profile="fast",
+                    nemo_source="nvidia/example",
+                    config_path=config_path,
+                ),
+            )
+
+            app._spoken_punctuation_changed(FakeSwitch(False), None)
+            config = load_config(config_path)
+
+        self.assertFalse(config.spoken_punctuation)
+        self.assertFalse(app._config.spoken_punctuation)
 
     def test_selected_microphone_index_defaults_when_missing(self) -> None:
         self.assertEqual(_selected_microphone_index([None, "cpal:0"], "cpal:0"), 1)

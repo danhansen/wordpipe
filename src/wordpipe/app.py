@@ -104,6 +104,9 @@ class WordpipeApp:
         self._microphone_refresh_button = None
         self._microphone_selectors: list[str | None] = [None]
         self._updating_microphones = False
+        self._live_insert_switch = None
+        self._punctuation_switch = None
+        self._updating_settings = False
         self._install_thread: threading.Thread | None = None
         self._last_install_progress = 0.0
         self._selected_profile = model_setup.model_profile if model_setup else "fast"
@@ -146,10 +149,6 @@ class WordpipeApp:
         toolbar = Adw.ToolbarView()
         header = Adw.HeaderBar()
         header.set_title_widget(Gtk.Label(label="Wordpipe"))
-        preferences_button = Gtk.Button.new_from_icon_name("emblem-system-symbolic")
-        preferences_button.set_tooltip_text("Preferences")
-        preferences_button.connect("clicked", self._show_preferences_placeholder)
-        header.pack_end(preferences_button)
         toolbar.add_top_bar(header)
         self._toast_overlay = Adw.ToastOverlay()
         self._toast_overlay.set_child(self._build_content(Gtk, Adw))
@@ -228,6 +227,10 @@ class WordpipeApp:
         self._build_microphone_row(audio, Gtk, Adw)
         root.append(audio)
 
+        insertion = Adw.PreferencesGroup(title="Insertion")
+        self._build_insertion_rows(insertion, Gtk, Adw)
+        root.append(insertion)
+
         transcript = Adw.PreferencesGroup(title="Transcript")
         self._partial_label = Adw.ActionRow(title="Live Transcript", subtitle="No speech yet")
         transcript.add(self._partial_label)
@@ -277,6 +280,7 @@ class WordpipeApp:
 
         self._build_profile_row(root, Gtk)
         self._build_microphone_row(root, Gtk)
+        self._build_insertion_rows(root, Gtk)
         self._partial_label = self._section(root, Gtk, "Live transcript", "No speech yet")
         self._commit_label = self._section(root, Gtk, "Last committed", "Nothing committed")
         self._error_label = Gtk.Label(label="")
@@ -349,6 +353,45 @@ class WordpipeApp:
         row.append(self._microphone_dropdown)
         row.append(self._microphone_refresh_button)
         root.append(row)
+
+    def _build_insertion_rows(self, root, Gtk, Adw=None) -> None:  # type: ignore[no-untyped-def]
+        self._live_insert_switch = Gtk.Switch()
+        self._live_insert_switch.set_valign(Gtk.Align.CENTER)
+        self._live_insert_switch.set_active(self._config_bool("insert_partial_text", False))
+        self._live_insert_switch.connect("notify::active", self._live_insert_changed)
+
+        self._punctuation_switch = Gtk.Switch()
+        self._punctuation_switch.set_valign(Gtk.Align.CENTER)
+        self._punctuation_switch.set_active(self._config_bool("spoken_punctuation", True))
+        self._punctuation_switch.connect("notify::active", self._spoken_punctuation_changed)
+
+        if Adw is not None:
+            live_row = Adw.ActionRow(title="Live Insertion")
+            live_row.add_suffix(self._live_insert_switch)
+            live_row.set_activatable_widget(self._live_insert_switch)
+            root.add(live_row)
+
+            punctuation_row = Adw.ActionRow(title="Spoken Punctuation")
+            punctuation_row.add_suffix(self._punctuation_switch)
+            punctuation_row.set_activatable_widget(self._punctuation_switch)
+            root.add(punctuation_row)
+            return
+
+        live_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        live_label = Gtk.Label(label="Live insertion")
+        live_label.set_xalign(0)
+        live_label.set_hexpand(True)
+        live_row.append(live_label)
+        live_row.append(self._live_insert_switch)
+        root.append(live_row)
+
+        punctuation_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        punctuation_label = Gtk.Label(label="Spoken punctuation")
+        punctuation_label.set_xalign(0)
+        punctuation_label.set_hexpand(True)
+        punctuation_row.append(punctuation_label)
+        punctuation_row.append(self._punctuation_switch)
+        root.append(punctuation_row)
 
     def _build_shortcut_row(self, root, Gtk, Adw=None) -> None:  # type: ignore[no-untyped-def]
         self._shortcut_button = Gtk.Button(label="Install")
@@ -631,15 +674,39 @@ class WordpipeApp:
         if self._config is not None and self._config.input_device == selector:
             return
         if self._config is not None:
-            self._config = replace(self._config, input_device=selector)
+            self._replace_config(replace(self._config, input_device=selector))
         self._persist_input_device(selector)
-        if self._controller is not None:
-            self._controller.close()
-            self._controller = None
-            self._set_button_state(False)
-            self._set_button_sensitive(False)
-            self._open_controller()
         self._set_label(self._microphone_status_label, self._microphone_status_text())
+
+    def _live_insert_changed(self, switch, _param) -> None:  # type: ignore[no-untyped-def]
+        if self._updating_settings:
+            return
+        enabled = bool(switch.get_active())
+        if self._config is not None and self._config.insert_partial_text == enabled:
+            return
+        if self._config is not None:
+            self._replace_config(replace(self._config, insert_partial_text=enabled))
+        self._persist_bool_setting("insert_partial_text", enabled)
+
+    def _spoken_punctuation_changed(self, switch, _param) -> None:  # type: ignore[no-untyped-def]
+        if self._updating_settings:
+            return
+        enabled = bool(switch.get_active())
+        if self._config is not None and self._config.spoken_punctuation == enabled:
+            return
+        if self._config is not None:
+            self._replace_config(replace(self._config, spoken_punctuation=enabled))
+        self._persist_bool_setting("spoken_punctuation", enabled)
+
+    def _replace_config(self, config: DaemonConfig) -> None:
+        self._config = config
+        if self._controller is None:
+            return
+        self._controller.close()
+        self._controller = None
+        self._set_button_state(False)
+        self._set_button_sensitive(False)
+        self._open_controller()
 
     def _persist_input_device(self, selector: str | None) -> None:
         if self._model_setup is None or self._model_setup.config_path is None:
@@ -651,10 +718,30 @@ class WordpipeApp:
         except Exception as exc:  # noqa: BLE001 - device selection should remain usable.
             self._post_event(UiEvent("error", f"Could not save microphone: {exc}"))
 
+    def _persist_bool_setting(self, name: str, enabled: bool) -> None:
+        if self._model_setup is None or self._model_setup.config_path is None:
+            return
+        try:
+            if name == "insert_partial_text":
+                from .config import save_insert_partial_text
+
+                save_insert_partial_text(enabled, self._model_setup.config_path)
+            elif name == "spoken_punctuation":
+                from .config import save_spoken_punctuation
+
+                save_spoken_punctuation(enabled, self._model_setup.config_path)
+        except Exception as exc:  # noqa: BLE001 - setting changes should remain usable.
+            self._post_event(UiEvent("error", f"Could not save setting: {exc}"))
+
     def _current_input_selector(self) -> str | None:
         if self._config is None or self._config.input_device is None:
             return None
         return str(self._config.input_device)
+
+    def _config_bool(self, name: str, default: bool) -> bool:
+        if self._config is None:
+            return default
+        return bool(getattr(self._config, name))
 
     def _microphone_status_text(self) -> str:
         selector = self._current_input_selector()
