@@ -44,12 +44,12 @@ const SERVICE_XML = `
 const WordpipeProxy = Gio.DBusProxy.makeProxyWrapper(SERVICE_XML);
 
 const PROFILES = [
-    ['fast', _('Fast'), _('FP32 projected-cache model; fastest profile, largest footprint.')],
-    ['compact', _('Compact'), _('Dynamic-int8 fixed-shape profile with ORT-format startup.')],
+    ['fast', 'Fast', 'FP32 projected-cache model; fastest profile, largest footprint.'],
+    ['compact', 'Compact', 'Dynamic-int8 fixed-shape profile with ORT-format startup.'],
 ];
 
 const BACKENDS = [
-    ['parakeet', _('Parakeet')],
+    ['parakeet', 'Parakeet'],
 ];
 
 const WordpipePage = GObject.registerClass(
