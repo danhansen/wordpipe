@@ -264,19 +264,6 @@ class WordpipePage extends Adw.PreferencesPage {
         this._insertPartialsRow = row;
         group.add(row);
 
-        row = new Adw.SwitchRow({
-            title: _('Show Overlay'),
-            active: this._settings.get_boolean('show-overlay'),
-        });
-        row.connect('notify::active', widget => {
-            if (this._syncingSettings)
-                return;
-            this._settings.set_boolean('show-overlay', widget.active);
-            this._pushInsertionOptions();
-        });
-        this._showOverlayRow = row;
-        group.add(row);
-
         this._delayRow = Adw.SpinRow.new_with_range(0, 1000, 25);
         this._delayRow.title = _('Insertion Delay');
         this._delayRow.subtitle = _('Additional delay in milliseconds before inserting streamed text.');
@@ -597,7 +584,7 @@ class WordpipePage extends Adw.PreferencesPage {
             if (typeof values.stream_insert_delay_ms === 'number')
                 this._settings.set_uint('stream-insert-delay-ms', values.stream_insert_delay_ms);
             if (typeof values.show_overlay === 'boolean')
-                this._settings.set_boolean('show-overlay', values.show_overlay);
+                this._settings.set_boolean('show-overlay', false);
 
             this._syncComboSelections();
             this._syncDeviceSelection();
@@ -631,7 +618,6 @@ class WordpipePage extends Adw.PreferencesPage {
     _syncControlValues() {
         this._spokenPunctuationRow.active = this._settings.get_boolean('spoken-punctuation');
         this._insertPartialsRow.active = this._settings.get_boolean('insert-partials');
-        this._showOverlayRow.active = this._settings.get_boolean('show-overlay');
         this._delayRow.value = this._settings.get_uint('stream-insert-delay-ms');
         this._modelRootRow.text = this._settings.get_string('model-root');
         this._workerPathRow.text = this._settings.get_string('worker-path');
@@ -775,8 +761,7 @@ class WordpipePage extends Adw.PreferencesPage {
                 this._settings.get_boolean('insert-partials')),
             stream_insert_delay_ms: new GLib.Variant('u',
                 this._settings.get_uint('stream-insert-delay-ms')),
-            show_overlay: new GLib.Variant('b',
-                this._settings.get_boolean('show-overlay')),
+            show_overlay: new GLib.Variant('b', false),
         });
     }
 

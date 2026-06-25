@@ -53,12 +53,37 @@ class Indicator extends PanelMenu.Button {
     constructor(extension) {
         super(0.0, _('Wordpipe'));
         this._extension = extension;
+        this._listening = false;
 
+        this._box = new St.BoxLayout({
+            style_class: 'wordpipe-panel-status',
+            y_align: Clutter.ActorAlign.CENTER,
+        });
         this._icon = new St.Icon({
             icon_name: 'audio-input-microphone-symbolic',
             style_class: 'system-status-icon wordpipe-panel-icon',
         });
-        this.add_child(this._icon);
+        this._icon.set_pivot_point(0.5, 0.5);
+        this._box.add_child(this._icon);
+
+        this._levelBars = [];
+        this._levelBox = new St.BoxLayout({
+            style_class: 'wordpipe-level-bars',
+            y_align: Clutter.ActorAlign.CENTER,
+            opacity: 0,
+        });
+        for (let i = 0; i < 4; i++) {
+            const bar = new St.Widget({
+                style_class: 'wordpipe-level-bar',
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            bar.set_pivot_point(0.5, 1.0);
+            bar.scale_y = 0.2;
+            this._levelBox.add_child(bar);
+            this._levelBars.push(bar);
+        }
+        this._box.add_child(this._levelBox);
+        this.add_child(this._box);
 
         this._statusItem = new PopupMenu.PopupMenuItem(_('Service unavailable'), {
             reactive: false,
@@ -91,16 +116,14 @@ class Indicator extends PanelMenu.Button {
     }
 
     setState(state, available) {
-        const listening = Boolean(state?.listening);
+        const listening = available && Boolean(state?.listening);
         const stopping = Boolean(state?.stopping);
         const installing = Boolean(state?.installing);
         const loading = Boolean(state?.loading_model);
         const selectedModelInstalled = state?.selected_model_installed !== false;
         this._installing = installing;
         this._installingProfile = state?.installing_profile ?? '';
-        this._icon.icon_name = listening || stopping
-            ? 'media-record-symbolic'
-            : 'audio-input-microphone-symbolic';
+        this._setListening(listening);
         this._toggleItem.label.text = listening || stopping
             ? _('Stop Dictation')
             : _('Start Dictation');
@@ -174,62 +197,57 @@ class Indicator extends PanelMenu.Button {
             this._statusItem.label.text = message;
     }
 
+    setVoiceLevel(rms) {
+        if (!this._listening)
+            return;
+        const level = normalizeVoiceLevel(rms);
+        this._icon.ease({
+            scale_x: 1.0 + level * 0.08,
+            scale_y: 1.0 + level * 0.16,
+            duration: 100,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        });
+
+        const multipliers = [0.55, 1.0, 0.75, 0.45];
+        this._levelBars.forEach((bar, index) => {
+            const scale = 0.25 + level * multipliers[index] * 1.35;
+            bar.ease({
+                scale_y: Math.max(0.2, Math.min(1.6, scale)),
+                duration: 100,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            });
+        });
+    }
+
     _syncInstallActions() {
         for (const item of this._installProfileItems.values())
             item.setSensitive(!this._installing);
     }
+
+    _setListening(listening) {
+        if (this._listening === listening)
+            return;
+        this._listening = listening;
+        this._levelBox.ease({
+            opacity: listening ? 255 : 0,
+            duration: 120,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        });
+        if (!listening)
+            this._resetVoiceLevel();
+    }
+
+    _resetVoiceLevel() {
+        this._icon.ease({
+            scale_x: 1.0,
+            scale_y: 1.0,
+            duration: 120,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        });
+        for (const bar of this._levelBars)
+            bar.scale_y = 0.2;
+    }
 });
-
-class DictationOverlay {
-    constructor() {
-        this._box = new St.BoxLayout({
-            style_class: 'wordpipe-overlay',
-            vertical: true,
-            visible: false,
-        });
-        this._label = new St.Label({
-            style_class: 'wordpipe-overlay-label',
-            text: _('Wordpipe listening'),
-            x_align: Clutter.ActorAlign.CENTER,
-        });
-        this._subtitle = new St.Label({
-            style_class: 'wordpipe-overlay-subtitle',
-            text: '',
-            x_align: Clutter.ActorAlign.CENTER,
-        });
-        this._box.add_child(this._label);
-        this._box.add_child(this._subtitle);
-        Main.uiGroup.add_child(this._box);
-        this._reposition();
-        this._monitorSignalId = Main.layoutManager.connect(
-            'monitors-changed', () => this._reposition());
-    }
-
-    destroy() {
-        if (this._monitorSignalId) {
-            Main.layoutManager.disconnect(this._monitorSignalId);
-            this._monitorSignalId = 0;
-        }
-        this._box.destroy();
-    }
-
-    setVisible(visible) {
-        this._box.visible = visible;
-        if (visible)
-            this._reposition();
-    }
-
-    setSubtitle(text) {
-        this._subtitle.text = text;
-    }
-
-    _reposition() {
-        const monitor = Main.layoutManager.primaryMonitor;
-        this._box.set_position(
-            Math.floor(monitor.x + monitor.width / 2 - this._box.width / 2),
-            Math.floor(monitor.y + monitor.height - 150));
-    }
-}
 
 class TextInjector {
     constructor() {
@@ -341,7 +359,6 @@ export default class WordpipeExtension extends Extension {
         this._indicator = new Indicator(this);
         Main.panel.addToStatusArea(this.uuid, this._indicator);
 
-        this._overlay = new DictationOverlay();
         this._bindShortcut();
         this._connectSettings();
         this._connectProxy();
@@ -358,8 +375,6 @@ export default class WordpipeExtension extends Extension {
             this._proxy = null;
         }
 
-        this._overlay?.destroy();
-        this._overlay = null;
         this._indicator?.destroy();
         this._indicator = null;
         this._injector = null;
@@ -426,7 +441,6 @@ export default class WordpipeExtension extends Extension {
         this._signalIds.push(this._proxy.connectSignal('SessionStarted',
             (_proxy, _sender, [sessionId]) => {
                 this._injector.reset(sessionId);
-                this._overlay?.setSubtitle(_('Starting stream'));
             }));
         this._signalIds.push(this._proxy.connectSignal('TextDelta',
             (_proxy, _sender, [sessionId, seq, text]) => {
@@ -438,34 +452,27 @@ export default class WordpipeExtension extends Extension {
                         this._settings.get_uint('stream-insert-delay-ms'));
                 }
             }));
-        this._signalIds.push(this._proxy.connectSignal('Partial',
-            (_proxy, _sender, [_sessionId, _seq, fullText]) => {
-                this._overlay?.setSubtitle(fullText);
-            }));
         this._signalIds.push(this._proxy.connectSignal('Commit',
             (_proxy, _sender, [sessionId, seq, text]) => {
                 this._injector.insertCommit(sessionId, seq, text);
-                this._overlay?.setSubtitle(text);
             }));
-        this._signalIds.push(this._proxy.connectSignal('SessionStopped',
-            () => this._overlay?.setSubtitle(_('Stopped'))));
         this._signalIds.push(this._proxy.connectSignal('InstallProgress',
             (_proxy, _sender, [profile, progress]) => {
                 const values = deepUnpackMap(progress);
-                this._overlay?.setSubtitle(`${profile}: ${values.message ?? values.phase ?? ''}`);
                 if (values.phase === 'complete' || values.phase === 'error')
                     this._refreshProfiles();
             }));
         this._signalIds.push(this._proxy.connectSignal('Metrics',
             (_proxy, _sender, [metrics]) => {
-                const summary = formatMetrics(deepUnpackMap(metrics));
+                const values = deepUnpackMap(metrics);
+                const summary = formatMetrics(values);
                 if (summary)
                     this._indicator?.setMetrics(summary);
+                this._indicator?.setVoiceLevel(numberValue(values.last_rms) ?? 0.0);
             }));
         this._signalIds.push(this._proxy.connectSignal('Error',
             (_proxy, _sender, [message]) => {
                 this._indicator?.setStatusMessage(message);
-                this._overlay?.setSubtitle(message);
                 log(`Wordpipe service error: ${message}`);
             }));
     }
@@ -525,7 +532,7 @@ export default class WordpipeExtension extends Extension {
             if (typeof config.stream_insert_delay_ms === 'number')
                 this._settings.set_uint('stream-insert-delay-ms', config.stream_insert_delay_ms);
             if (typeof config.show_overlay === 'boolean')
-                this._settings.set_boolean('show-overlay', config.show_overlay);
+                this._settings.set_boolean('show-overlay', false);
         } finally {
             this._syncingSettings = false;
         }
@@ -550,8 +557,7 @@ export default class WordpipeExtension extends Extension {
                 this._settings.get_boolean('insert-partials')),
             stream_insert_delay_ms: new GLib.Variant('u',
                 this._settings.get_uint('stream-insert-delay-ms')),
-            show_overlay: new GLib.Variant('b',
-                this._settings.get_boolean('show-overlay')),
+            show_overlay: new GLib.Variant('b', false),
         };
 
         this._callRemote('SetBackend', backend);
@@ -588,7 +594,6 @@ export default class WordpipeExtension extends Extension {
                 this._setAvailable(true);
                 const message = formatError(error);
                 this._indicator?.setStatusMessage(message);
-                this._overlay?.setSubtitle(message);
                 logError(error, `Wordpipe ${method} failed`);
                 return;
             }
@@ -607,27 +612,11 @@ export default class WordpipeExtension extends Extension {
             this._indicator?.setMetrics(installSummary);
         else if (metricsSummary)
             this._indicator?.setMetrics(metricsSummary);
-        const visible = Boolean(state.listening || state.stopping || state.loading_model) &&
-            this._settings.get_boolean('show-overlay');
-        this._overlay?.setVisible(visible);
-        if (visible) {
-            let subtitle = state.model_profile ?? '';
-            if (state.loading_model)
-                subtitle = _('Loading model');
-            else if (state.stopping)
-                subtitle = _('Stopping');
-            else if (state.partial_text)
-                subtitle = state.partial_text;
-            else if (state.selected_model_installed === false)
-                subtitle = _('Model missing');
-            this._overlay?.setSubtitle(subtitle);
-        }
+        this._indicator?.setVoiceLevel(numberValue(state.last_metrics?.last_rms) ?? 0.0);
     }
 
     _setAvailable(available) {
         this._indicator?.setState(this._state, available);
-        if (!available)
-            this._overlay?.setVisible(false);
     }
 }
 
@@ -701,6 +690,11 @@ function numberValue(value) {
     if (typeof value === 'number' && Number.isFinite(value))
         return value;
     return null;
+}
+
+function normalizeVoiceLevel(rms) {
+    const value = numberValue(rms) ?? 0.0;
+    return Math.max(0.0, Math.min(1.0, (value - 0.004) * 18.0));
 }
 
 function formatError(error) {

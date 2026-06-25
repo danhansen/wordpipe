@@ -62,9 +62,9 @@
       <description>Additional delay before inserting streaming text, in milliseconds.</description>
     </key>
     <key name="show-overlay" type="b">
-      <default>true</default>
+      <default>false</default>
       <summary>Show dictation overlay</summary>
-      <description>Show an on-screen status overlay while dictation is active.</description>
+      <description>Deprecated compatibility setting for the previous on-screen dictation overlay.</description>
     </key>
   </schema>
 </schemalist>

@@ -1,19 +1,19 @@
+.wordpipe-panel-status {
+  spacing: 3px;
+}
+
 .wordpipe-panel-icon {
   icon-size: 16px;
 }
 
-.wordpipe-overlay {
-  background-color: rgba(36, 36, 36, 0.92);
-  border-radius: 8px;
-  padding: 10px 14px;
-  spacing: 8px;
-  color: #ffffff;
+.wordpipe-level-bars {
+  spacing: 1px;
+  min-width: 11px;
 }
 
-.wordpipe-overlay-label {
-  font-weight: 600;
-}
-
-.wordpipe-overlay-subtitle {
-  color: rgba(255, 255, 255, 0.72);
+.wordpipe-level-bar {
+  background-color: rgba(255, 255, 255, 0.86);
+  border-radius: 1px;
+  height: 10px;
+  width: 2px;
 }
