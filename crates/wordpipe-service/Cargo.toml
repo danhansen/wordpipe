@@ -1,0 +1,16 @@
+[package]
+name = "wordpipe-service"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "wordpipe-service"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0.98"
+clap = { version = "4.5.38", features = ["derive"] }
+cpal = "0.16.0"
+serde = { version = "1.0.219", features = ["derive"] }
+wordpipe-protocol = { path = "../wordpipe-protocol" }
+zbus = "5.16.0"

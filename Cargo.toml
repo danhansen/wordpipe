@@ -1,5 +1,9 @@
 [workspace]
-members = ["crates/wordpipe-parakeet-worker"]
+members = [
+    "crates/wordpipe-parakeet-worker",
+    "crates/wordpipe-protocol",
+    "crates/wordpipe-service",
+]
 resolver = "2"
 
 [patch.crates-io]
