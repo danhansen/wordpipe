@@ -161,7 +161,8 @@ extensions/gnome-shell/wordpipe@dhansen.dev
 
 It currently provides:
 
-- Panel indicator and menu for start/stop and model install actions.
+- Panel indicator and menu for start/stop, service-provided model profile
+  selection, and missing-profile install actions.
 - GNOME Shell global shortcut using the extension's GSettings key.
 - Preferences UI for service-provided backend/model profile lists,
   microphone selection, streaming insertion options, runtime options, overlay,

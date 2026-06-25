@@ -69,13 +69,16 @@ class Indicator extends PanelMenu.Button {
         this._toggleItem.connect('activate', () => this._extension.toggleDictation());
         this.menu.addMenuItem(this._toggleItem);
 
-        this._installFastItem = new PopupMenu.PopupMenuItem(_('Install Fast Model'));
-        this._installFastItem.connect('activate', () => this._extension.installModel('fast'));
-        this.menu.addMenuItem(this._installFastItem);
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        this._installCompactItem = new PopupMenu.PopupMenuItem(_('Install Compact Model'));
-        this._installCompactItem.connect('activate', () => this._extension.installModel('compact'));
-        this.menu.addMenuItem(this._installCompactItem);
+        this._profileStatusItem = new PopupMenu.PopupMenuItem(_('Model unavailable'), {
+            reactive: false,
+        });
+        this.menu.addMenuItem(this._profileStatusItem);
+
+        this._profileItems = [];
+        this._profileSection = new PopupMenu.PopupMenuSection();
+        this.menu.addMenuItem(this._profileSection);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
@@ -96,6 +99,42 @@ class Indicator extends PanelMenu.Button {
         this._statusItem.label.text = available
             ? listening ? _('Listening') : stopping ? _('Stopping') : _('Ready')
             : _('Service unavailable');
+    }
+
+    setProfiles(profiles, selectedProfile) {
+        for (const item of this._profileItems)
+            item.destroy();
+        this._profileItems = [];
+
+        if (!profiles.length) {
+            this._profileStatusItem.label.text = _('No model profiles');
+            return;
+        }
+
+        const selected = profiles.find(profile => profile.id === selectedProfile);
+        this._profileStatusItem.label.text = selected
+            ? `${_('Model')}: ${selected.title}`
+            : `${_('Model')}: ${selectedProfile || _('Unknown')}`;
+
+        for (const profile of profiles) {
+            const isSelected = profile.id === selectedProfile;
+            const status = profile.installed ? _('installed') : _('not installed');
+            const selectItem = new PopupMenu.PopupMenuItem(
+                isSelected
+                    ? `${profile.title} ${_('selected')} (${status})`
+                    : `${_('Use')} ${profile.title} (${status})`);
+            selectItem.connect('activate', () => this._extension.selectModelProfile(profile.id));
+            this._profileSection.addMenuItem(selectItem);
+            this._profileItems.push(selectItem);
+
+            if (!profile.installed) {
+                const installItem = new PopupMenu.PopupMenuItem(
+                    `${_('Install')} ${profile.title}`);
+                installItem.connect('activate', () => this._extension.installModel(profile.id));
+                this._profileSection.addMenuItem(installItem);
+                this._profileItems.push(installItem);
+            }
+        }
     }
 });
 
@@ -226,6 +265,7 @@ export default class WordpipeExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
         this._state = {};
+        this._profiles = [];
         this._signalIds = [];
         this._syncingSettings = false;
         this._injector = new TextInjector();
@@ -266,6 +306,11 @@ export default class WordpipeExtension extends Extension {
         this._callRemote('InstallModel', profile);
     }
 
+    selectModelProfile(profile) {
+        this._settings.set_string('model-profile', profile);
+        this._callRemote('SetModelProfile', profile);
+    }
+
     _bindShortcut() {
         Main.wm.addKeybinding(
             'toggle-shortcut',
@@ -296,6 +341,7 @@ export default class WordpipeExtension extends Extension {
                 this._setAvailable(true);
                 this._subscribeSignals();
                 this._refreshState();
+                this._refreshProfiles();
                 this._refreshConfigFromService(() => this._pushSettings());
             });
     }
@@ -306,6 +352,7 @@ export default class WordpipeExtension extends Extension {
         this._signalIds.push(this._proxy.connectSignal('ConfigChanged',
             (_proxy, _sender, [config]) => {
                 this._syncSettingsFromConfig(deepUnpackMap(config));
+                this._syncProfileMenu();
                 this._refreshState();
             }));
         this._signalIds.push(this._proxy.connectSignal('SessionStarted',
@@ -330,6 +377,8 @@ export default class WordpipeExtension extends Extension {
             (_proxy, _sender, [profile, progress]) => {
                 const values = deepUnpackMap(progress);
                 this._overlay?.setSubtitle(`${profile}: ${values.message ?? values.phase ?? ''}`);
+                if (values.phase === 'complete' || values.phase === 'error')
+                    this._refreshProfiles();
             }));
         this._signalIds.push(this._proxy.connectSignal('Error',
             (_proxy, _sender, [message]) => {
@@ -345,8 +394,23 @@ export default class WordpipeExtension extends Extension {
     _refreshConfigFromService(callback = null) {
         this._callRemote('GetConfig', config => {
             this._syncSettingsFromConfig(deepUnpackMap(config));
+            this._syncProfileMenu();
             if (callback)
                 callback();
+        });
+    }
+
+    _refreshProfiles() {
+        this._callRemote('ListModelProfiles', profiles => {
+            this._profiles = profiles.map(profile => {
+                const values = deepUnpackMap(profile);
+                return {
+                    id: values.id ?? '',
+                    title: values.title ?? values.id ?? '',
+                    installed: Boolean(values.installed),
+                };
+            }).filter(profile => profile.id);
+            this._syncProfileMenu();
         });
     }
 
@@ -413,6 +477,12 @@ export default class WordpipeExtension extends Extension {
             sample_rate: new GLib.Variant('u',
                 this._settings.get_uint('sample-rate')),
         });
+    }
+
+    _syncProfileMenu() {
+        this._indicator?.setProfiles(
+            this._profiles,
+            this._settings.get_string('model-profile'));
     }
 
     _callRemote(method, ...args) {
