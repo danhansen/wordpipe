@@ -239,6 +239,11 @@ The Rust service persists user-facing configuration in:
 ```
 
 Use `wordpipe-service --config /path/to/service.json` for isolated testing.
+When no saved `model_profile` exists yet, the service keeps the default profile
+only if it is installed; otherwise it selects the first installed profile it can
+find under `model_root`. An explicitly saved valid profile remains authoritative
+even when its model files are not installed yet, so the UI can still drive that
+profile's install flow.
 The GNOME extension mirrors service config on startup before pushing GSettings
 changes back, so an extension reload should not overwrite the service's saved
 model profile, microphone, shortcut, model root, sample rate, thread count, or

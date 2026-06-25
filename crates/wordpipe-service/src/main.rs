@@ -937,13 +937,20 @@ fn default_config_path() -> PathBuf {
 
 fn load_service_config(path: &Path) -> Result<ServiceConfig> {
     if !path.exists() {
-        return Ok(ServiceConfig::default());
+        let mut config = ServiceConfig::default();
+        select_installed_model_profile(&mut config);
+        return Ok(config);
     }
     let persisted: PersistedConfig = serde_json::from_slice(
         &fs::read(path).with_context(|| format!("failed to read {}", path.display()))?,
     )
     .with_context(|| format!("failed to parse {}", path.display()))?;
-    apply_persisted_config(ServiceConfig::default(), persisted)
+    let has_model_profile = persisted.model_profile.is_some();
+    let mut config = apply_persisted_config(ServiceConfig::default(), persisted)?;
+    if !has_model_profile {
+        select_installed_model_profile(&mut config);
+    }
+    Ok(config)
 }
 
 fn apply_persisted_config(
@@ -1090,6 +1097,20 @@ fn profile_installed(runtime_dir: &str) -> bool {
         || path.join("encoder.ort").exists()
         || path.join("encoder.encoder.onnx").exists()
         || path.join("encoder.encoder.ort").exists()
+}
+
+fn select_installed_model_profile(config: &mut ServiceConfig) {
+    if profile_installed(&selected_runtime_dir(config)) {
+        return;
+    }
+    for profile in MODEL_PROFILES {
+        let runtime_dir =
+            profile_runtime_dir(&config.model_root, profile.output_name, profile.ort_format);
+        if profile_installed(&runtime_dir) {
+            config.model_profile = profile.id.to_string();
+            return;
+        }
+    }
 }
 
 fn next_session_id(current: u64) -> u64 {
@@ -1529,6 +1550,45 @@ mod tests {
     }
 
     #[test]
+    fn selects_installed_profile_when_default_is_missing() {
+        let root = unique_temp_dir("installed-profile");
+        let compact_runtime = root.join("nemotron-wordpipe-compact-fixed-shape-ort-format");
+        fs::create_dir_all(&compact_runtime).unwrap();
+        fs::write(compact_runtime.join("encoder.ort"), b"test").unwrap();
+        let mut config = ServiceConfig {
+            model_root: root.to_string_lossy().to_string(),
+            model_profile: "fast".to_string(),
+            ..ServiceConfig::default()
+        };
+
+        select_installed_model_profile(&mut config);
+
+        assert_eq!(config.model_profile, "compact");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn keeps_selected_profile_when_it_is_installed() {
+        let root = unique_temp_dir("selected-profile");
+        let fast_runtime = root.join("nemotron-wordpipe-fast-fp32-projected");
+        let compact_runtime = root.join("nemotron-wordpipe-compact-fixed-shape-ort-format");
+        fs::create_dir_all(&fast_runtime).unwrap();
+        fs::create_dir_all(&compact_runtime).unwrap();
+        fs::write(fast_runtime.join("encoder.onnx"), b"test").unwrap();
+        fs::write(compact_runtime.join("encoder.ort"), b"test").unwrap();
+        let mut config = ServiceConfig {
+            model_root: root.to_string_lossy().to_string(),
+            model_profile: "fast".to_string(),
+            ..ServiceConfig::default()
+        };
+
+        select_installed_model_profile(&mut config);
+
+        assert_eq!(config.model_profile, "fast");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn normalizes_spoken_punctuation_commands() {
         assert_eq!(
             normalize_spoken_punctuation(
@@ -1562,5 +1622,14 @@ mod tests {
             "hello?"
         );
         assert_eq!(normalize_spoken_punctuation_partial("new deal"), "new deal");
+    }
+
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "wordpipe-service-test-{name}-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        dir
     }
 }
