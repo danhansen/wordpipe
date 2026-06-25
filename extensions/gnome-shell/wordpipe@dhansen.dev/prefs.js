@@ -305,6 +305,12 @@ class WordpipePage extends Adw.PreferencesPage {
         });
         group.add(this._progressRow);
 
+        this._metricsRow = new Adw.ActionRow({
+            title: _('Runtime Metrics'),
+            subtitle: _('No metrics yet'),
+        });
+        group.add(this._metricsRow);
+
         const actions = new Adw.ActionRow({
             title: _('Dictation'),
         });
@@ -355,6 +361,12 @@ class WordpipePage extends Adw.PreferencesPage {
         this._signalIds.push(this._proxy.connectSignal('InstallProgress',
             (_proxy, _sender, [profile, progress]) => {
                 this._handleInstallProgress(profile, deepUnpackMap(progress));
+            }));
+        this._signalIds.push(this._proxy.connectSignal('Metrics',
+            (_proxy, _sender, [metrics]) => {
+                const summary = formatMetrics(deepUnpackMap(metrics));
+                if (summary)
+                    this._metricsRow.subtitle = summary;
             }));
         this._signalIds.push(this._proxy.connectSignal('Error',
             (_proxy, _sender, [message]) => {
@@ -644,4 +656,35 @@ function deepUnpackMap(value) {
 function clearStringList(model) {
     while (model.get_n_items() > 0)
         model.remove(0);
+}
+
+function formatMetrics(metrics) {
+    const rtf = numberValue(metrics.real_audio_real_time_factor ?? metrics.real_time_factor);
+    const audioSeconds = numberValue(metrics.audio_seconds);
+    const decodeSeconds = numberValue(metrics.decode_seconds);
+    const droppedChunks = numberValue(metrics.dropped_audio_chunks);
+    if (
+        rtf === null &&
+        audioSeconds === null &&
+        decodeSeconds === null &&
+        droppedChunks === null
+    )
+        return '';
+
+    const parts = [];
+    if (rtf !== null)
+        parts.push(`RTF ${rtf.toFixed(3)}`);
+    if (audioSeconds !== null)
+        parts.push(`${audioSeconds.toFixed(1)}s audio`);
+    if (decodeSeconds !== null)
+        parts.push(`${decodeSeconds.toFixed(1)}s decode`);
+    if (droppedChunks)
+        parts.push(`${droppedChunks} ${_('dropped')}`);
+    return parts.join(' - ');
+}
+
+function numberValue(value) {
+    if (typeof value === 'number' && Number.isFinite(value))
+        return value;
+    return null;
 }

@@ -103,13 +103,7 @@ class Indicator extends PanelMenu.Button {
             available && !installing && !loading &&
             (listening || stopping || selectedModelInstalled));
         this._statusItem.label.text = available
-            ? listening
-                ? _('Listening')
-                : stopping
-                    ? _('Stopping')
-                    : selectedModelInstalled
-                        ? _('Ready')
-                        : _('Model missing')
+            ? statusText(state, selectedModelInstalled)
             : _('Service unavailable');
     }
 
@@ -156,6 +150,11 @@ class Indicator extends PanelMenu.Button {
                 this._profileItems.push(installItem);
             }
         }
+    }
+
+    setMetrics(summary) {
+        if (summary)
+            this._statusItem.label.text = summary;
     }
 });
 
@@ -401,6 +400,12 @@ export default class WordpipeExtension extends Extension {
                 if (values.phase === 'complete' || values.phase === 'error')
                     this._refreshProfiles();
             }));
+        this._signalIds.push(this._proxy.connectSignal('Metrics',
+            (_proxy, _sender, [metrics]) => {
+                const summary = formatMetrics(deepUnpackMap(metrics));
+                if (summary)
+                    this._indicator?.setMetrics(summary);
+            }));
         this._signalIds.push(this._proxy.connectSignal('Error',
             (_proxy, _sender, [message]) => {
                 this._overlay?.setSubtitle(message);
@@ -558,4 +563,41 @@ function deepUnpackMap(value) {
     for (const [key, variant] of Object.entries(unpacked))
         result[key] = variant?.deep_unpack ? variant.deep_unpack() : variant;
     return result;
+}
+
+function statusText(state, selectedModelInstalled) {
+    if (state?.installing)
+        return _('Installing model');
+    if (state?.loading_model)
+        return _('Loading model');
+    if (state?.listening)
+        return _('Listening');
+    if (state?.stopping)
+        return _('Stopping');
+    if (!selectedModelInstalled)
+        return _('Model missing');
+    return _('Ready');
+}
+
+function formatMetrics(metrics) {
+    const rtf = numberValue(metrics.real_audio_real_time_factor ?? metrics.real_time_factor);
+    const audioSeconds = numberValue(metrics.audio_seconds);
+    const droppedChunks = numberValue(metrics.dropped_audio_chunks);
+    if (rtf === null && audioSeconds === null && droppedChunks === null)
+        return '';
+
+    const parts = [];
+    if (rtf !== null)
+        parts.push(`RTF ${rtf.toFixed(3)}`);
+    if (audioSeconds !== null)
+        parts.push(`${audioSeconds.toFixed(1)}s`);
+    if (droppedChunks)
+        parts.push(`${droppedChunks} ${_('dropped')}`);
+    return parts.join(' - ');
+}
+
+function numberValue(value) {
+    if (typeof value === 'number' && Number.isFinite(value))
+        return value;
+    return null;
 }
