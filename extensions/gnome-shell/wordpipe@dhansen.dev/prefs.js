@@ -2,13 +2,13 @@ import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
-import Gdk from 'gi://Gdk';
 import Gtk from 'gi://Gtk';
 
 import {ExtensionPreferences, gettext as _} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 const BUS_NAME = 'dev.wordpipe.Service';
 const OBJECT_PATH = '/dev/wordpipe/Service';
+const DEFAULT_TOGGLE_SHORTCUT = '<Control><Alt>space';
 
 const SERVICE_XML = `
 <node>
@@ -276,20 +276,34 @@ class WordpipePage extends Adw.PreferencesPage {
         });
         group.add(this._delayRow);
 
-        const shortcutRow = new Adw.ActionRow({
+        const shortcutRow = new Adw.EntryRow({
             title: _('Shortcut'),
-            subtitle: _('Press a key combination to change the global toggle shortcut.'),
+            text: this._settings.get_strv('toggle-shortcut')[0] ?? '',
         });
-        this._shortcutValue = new Adw.ShortcutLabel({
-            accelerator: this._settings.get_strv('toggle-shortcut')[0] ?? '',
-            disabled_text: _('Set shortcut'),
+        shortcutRow.connect('changed', row => {
+            if (this._syncingSettings)
+                return;
+            const accelerator = normalizeAcceleratorText(row.text.trim());
+            if (accelerator === null)
+                return;
+            this._setShortcut(accelerator);
         });
-        this._shortcutButton = new Gtk.Button({
-            child: this._shortcutValue,
+        const clearButton = new Gtk.Button({
+            icon_name: 'edit-clear-symbolic',
+            valign: Gtk.Align.CENTER,
             css_classes: ['flat'],
+            tooltip_text: _('Clear shortcut'),
         });
-        this._shortcutButton.connect('clicked', () => this._captureShortcut());
-        shortcutRow.add_suffix(this._shortcutButton);
+        clearButton.connect('clicked', () => this._setShortcut(''));
+        shortcutRow.add_suffix(clearButton);
+        const resetButton = new Gtk.Button({
+            icon_name: 'edit-undo-symbolic',
+            valign: Gtk.Align.CENTER,
+            css_classes: ['flat'],
+            tooltip_text: _('Reset shortcut'),
+        });
+        resetButton.connect('clicked', () => this._setShortcut(DEFAULT_TOGGLE_SHORTCUT));
+        shortcutRow.add_suffix(resetButton);
         this._shortcutsHelpButton = new Gtk.Button({
             icon_name: 'help-browser-symbolic',
             valign: Gtk.Align.CENTER,
@@ -298,10 +312,8 @@ class WordpipePage extends Adw.PreferencesPage {
         });
         this._shortcutsHelpButton.connect('clicked', () => this._showShortcutsDialog());
         shortcutRow.add_suffix(this._shortcutsHelpButton);
-        shortcutRow.set_activatable_widget(this._shortcutButton);
         this._shortcutRow = shortcutRow;
         group.add(shortcutRow);
-        this._syncShortcutValue();
     }
 
     _buildAdvancedGroup(section) {
@@ -778,96 +790,8 @@ class WordpipePage extends Adw.PreferencesPage {
 
     _syncShortcutValue() {
         const accelerator = this._settings.get_strv('toggle-shortcut')[0] ?? '';
-        this._shortcutValue.accelerator = accelerator;
-    }
-
-    _captureShortcut() {
-        const previousAccelerator = this._settings.get_strv('toggle-shortcut')[0] ?? '';
-        let handled = false;
-        this._settings.set_strv('toggle-shortcut', []);
-        this._syncShortcutValue();
-        const root = this.get_root();
-        const dialog = new Gtk.Window({
-            title: _('Set Shortcut'),
-            modal: true,
-            default_width: 360,
-            default_height: 160,
-        });
-        if (root instanceof Gtk.Window)
-            dialog.transient_for = root;
-        dialog.set_hide_on_close(true);
-
-        const box = new Gtk.Box({
-            orientation: Gtk.Orientation.VERTICAL,
-            spacing: 12,
-            margin_top: 24,
-            margin_bottom: 24,
-            margin_start: 24,
-            margin_end: 24,
-        });
-        dialog.set_child(box);
-
-        const title = new Gtk.Label({
-            label: _('Press a key combination'),
-            halign: Gtk.Align.CENTER,
-        });
-        const subtitle = new Gtk.Label({
-            label: _('Esc cancels. Backspace clears the shortcut.'),
-            halign: Gtk.Align.CENTER,
-            wrap: true,
-        });
-        box.append(title);
-        box.append(subtitle);
-
-        const preview = new Gtk.Label({
-            label: _('Waiting for shortcut'),
-            halign: Gtk.Align.CENTER,
-        });
-        box.append(preview);
-
-        const captureEntry = new Gtk.Entry({
-            opacity: 0,
-            height_request: 1,
-            can_focus: true,
-            focusable: true,
-        });
-        box.append(captureEntry);
-
-        const controller = new Gtk.EventControllerKey();
-        controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
-        controller.connect('key-pressed', (_controller, keyval, _keycode, state) => {
-            if (keyval === Gdk.KEY_Escape) {
-                handled = true;
-                this._setShortcut(previousAccelerator);
-                dialog.close();
-                return true;
-            }
-            if (keyval === Gdk.KEY_BackSpace) {
-                handled = true;
-                this._setShortcut('');
-                dialog.close();
-                return true;
-            }
-            const accelerator = shortcutFromKey(keyval, state);
-            if (!accelerator)
-                return false;
-            preview.label = accelerator;
-            handled = true;
-            this._setShortcut(accelerator);
-            dialog.close();
-            return true;
-        });
-        dialog.connect('close-request', () => {
-            if (!handled)
-                this._setShortcut(previousAccelerator);
-            return false;
-        });
-        captureEntry.add_controller(controller);
-        dialog.present();
-        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-            dialog.set_focus(captureEntry);
-            captureEntry.grab_focus();
-            return GLib.SOURCE_REMOVE;
+        this._withSyncing(() => {
+            this._shortcutRow.text = accelerator;
         });
     }
 
@@ -993,11 +917,11 @@ function formatError(error) {
     return message.replace(/^GDBus\.Error:[^:]+:\s*/, '');
 }
 
-function shortcutFromKey(keyval, state) {
-    const mods = state & Gtk.accelerator_get_default_mod_mask();
-    if (!mods)
+function normalizeAcceleratorText(text) {
+    if (!text)
         return '';
-    if (!Gtk.accelerator_valid(keyval, mods))
-        return '';
-    return Gtk.accelerator_name(keyval, mods);
+    const [_ok, key, mods] = Gtk.accelerator_parse(text);
+    if (!Gtk.accelerator_valid(key, mods))
+        return null;
+    return Gtk.accelerator_name(key, mods);
 }
