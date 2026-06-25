@@ -317,6 +317,13 @@ Open preferences after install:
 gnome-extensions prefs wordpipe@dhansen.dev
 ```
 
+Check the installed extension files, Shell discovery, service state, config,
+and model profile list with:
+
+```bash
+scripts/wordpipe-gnome-status
+```
+
 In the current GNOME Shell session, newly copied extensions may not be
 discovered until logging out and back in. This is expected on Wayland because
 GNOME Shell cannot be reliably reloaded in place. If `gnome-extensions info

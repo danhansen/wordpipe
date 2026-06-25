@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -u
+
+UUID="wordpipe@dhansen.dev"
+SERVICE_NAME="dev.wordpipe.Service"
+OBJECT_PATH="/dev/wordpipe/Service"
+INTERFACE="dev.wordpipe.Service1"
+PREFIX="${XDG_DATA_HOME:-$HOME/.local/share}"
+EXTENSION_DIR="$PREFIX/gnome-shell/extensions/$UUID"
+
+status=0
+
+section() {
+    printf '\n== %s ==\n' "$1"
+}
+
+run_checked() {
+    local label="$1"
+    shift
+    printf '%s\n' "$label"
+    if ! "$@"; then
+        status=1
+    fi
+}
+
+section "Extension Files"
+if [ -d "$EXTENSION_DIR" ]; then
+    printf 'installed: %s\n' "$EXTENSION_DIR"
+    for file in metadata.json extension.js prefs.js schemas/gschemas.compiled; do
+        if [ -e "$EXTENSION_DIR/$file" ]; then
+            printf '  ok: %s\n' "$file"
+        else
+            printf '  missing: %s\n' "$file"
+            status=1
+        fi
+    done
+else
+    printf 'missing: %s\n' "$EXTENSION_DIR"
+    status=1
+fi
+
+section "GNOME Shell"
+if command -v gnome-shell >/dev/null 2>&1; then
+    gnome-shell --version
+else
+    printf 'gnome-shell: not found\n'
+    status=1
+fi
+
+if command -v gnome-extensions >/dev/null 2>&1; then
+    if gnome-extensions info "$UUID"; then
+        :
+    else
+        printf '%s\n' \
+            "GNOME Shell has not discovered $UUID in this session." \
+            "On Wayland, log out/in and then run: gnome-extensions enable $UUID"
+        status=1
+    fi
+else
+    printf 'gnome-extensions: not found\n'
+    status=1
+fi
+
+section "Service State"
+run_checked "GetState:" \
+    gdbus call --session \
+    --dest "$SERVICE_NAME" \
+    --object-path "$OBJECT_PATH" \
+    --method "$INTERFACE.GetState"
+
+section "Config"
+run_checked "GetConfig:" \
+    gdbus call --session \
+    --dest "$SERVICE_NAME" \
+    --object-path "$OBJECT_PATH" \
+    --method "$INTERFACE.GetConfig"
+
+section "Model Profiles"
+run_checked "ListModelProfiles:" \
+    gdbus call --session \
+    --dest "$SERVICE_NAME" \
+    --object-path "$OBJECT_PATH" \
+    --method "$INTERFACE.ListModelProfiles"
+
+exit "$status"
