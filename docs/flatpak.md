@@ -168,9 +168,11 @@ The app also shows shortcut status and can try to repair it, but the host helper
 above is the reliable path if the Flatpak sandbox cannot write GNOME's host
 custom-keybinding settings.
 
-Successful builds remove intermediate export files under
-`~/.var/app/dev.wordpipe.Wordpipe/data/wordpipe/models/build/` by default. Pass
-`--keep-build-dir` to `model-install` when debugging the export pipeline.
+Default profile installation downloads a prebuilt optimized ONNX profile
+archive and installs it under
+`~/.var/app/dev.wordpipe.Wordpipe/data/wordpipe/models/`. Profiles that use ORT
+startup, currently `compact`, convert that ONNX profile into a local ORT-format
+runtime cache after download.
 
 `model-install --source` also accepts a `.tar`, `.tar.gz`, `.tgz`, or `.zip`
 archive containing a built Wordpipe profile directory with `tokenizer.model`,
@@ -178,4 +180,7 @@ archive containing a built Wordpipe profile directory with `tokenizer.model`,
 `decoder_joint.ort`.
 
 The non-Flatpak development environment can still build profiles directly from a
-local `.nemo` file or Hugging Face NeMo repo id.
+local `.nemo` file or Hugging Face NeMo repo id with
+`model-install --build-from-nemo`. Successful source builds remove intermediate
+export files under `model_root/build/` by default. Pass `--keep-build-dir` when
+debugging the export pipeline.

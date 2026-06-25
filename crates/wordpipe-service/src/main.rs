@@ -1,11 +1,14 @@
 use std::collections::HashMap;
+use std::io::{BufRead, Write};
 use std::path::PathBuf;
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait};
+use serde_json::{json, Value as JsonValue};
 use wordpipe_protocol::{
     is_backend, is_model_profile, BACKENDS, BUS_NAME, DEFAULT_BACKEND, DEFAULT_MODEL_PROFILE,
     DEFAULT_NUM_THREADS, DEFAULT_SAMPLE_RATE, DEFAULT_SHORTCUT, MODEL_PROFILES, OBJECT_PATH,
@@ -31,6 +34,8 @@ struct ServiceConfig {
     input_device: String,
     shortcut: String,
     model_root: String,
+    worker_path: String,
+    model_installer_path: String,
     sample_rate: u32,
     num_threads: u32,
     spoken_punctuation: bool,
@@ -47,6 +52,8 @@ impl Default for ServiceConfig {
             input_device: String::new(),
             shortcut: DEFAULT_SHORTCUT.to_string(),
             model_root: default_model_root(),
+            worker_path: default_worker_path(),
+            model_installer_path: default_model_installer_path(),
             sample_rate: DEFAULT_SAMPLE_RATE,
             num_threads: DEFAULT_NUM_THREADS,
             spoken_punctuation: true,
@@ -57,14 +64,17 @@ impl Default for ServiceConfig {
     }
 }
 
-#[derive(Clone, Debug)]
 struct ServiceData {
     config: ServiceConfig,
     listening: bool,
     installing: bool,
+    loading_model: bool,
+    model_loaded: bool,
     session_id: u64,
     seq: u64,
+    partial_text: String,
     last_error: String,
+    worker: Option<WorkerProcess>,
 }
 
 impl Default for ServiceData {
@@ -73,16 +83,26 @@ impl Default for ServiceData {
             config: ServiceConfig::default(),
             listening: false,
             installing: false,
+            loading_model: false,
+            model_loaded: false,
             session_id: 0,
             seq: 0,
+            partial_text: String::new(),
             last_error: String::new(),
+            worker: None,
         }
     }
+}
+
+struct WorkerProcess {
+    stdin: Arc<Mutex<ChildStdin>>,
+    child: Child,
 }
 
 #[derive(Clone, Default)]
 struct WordpipeService {
     data: Arc<Mutex<ServiceData>>,
+    emitter: Arc<Mutex<Option<SignalEmitter<'static>>>>,
 }
 
 #[interface(interface = "dev.wordpipe.Service1")]
@@ -91,15 +111,23 @@ impl WordpipeService {
         &self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        let (state, session_id) = {
+        self.ensure_worker(emitter.to_owned()).await?;
+        let (state, session_id, stdin) = {
             let mut data = self.lock_data()?;
             if !data.listening {
                 data.listening = true;
                 data.session_id = next_session_id(data.session_id);
                 data.seq = 0;
+                data.partial_text.clear();
             }
-            (state_map(&data), data.session_id)
+            let stdin = data
+                .worker
+                .as_ref()
+                .map(|worker| Arc::clone(&worker.stdin))
+                .ok_or_else(|| zbus::fdo::Error::Failed("ASR worker is not running".to_string()))?;
+            (state_map(&data), data.session_id, stdin)
         };
+        send_worker_command(&stdin, "start").map_err(fdo_failed)?;
         Self::session_started(&emitter, session_id).await?;
         Self::state_changed(&emitter, state).await?;
         Ok(())
@@ -109,13 +137,17 @@ impl WordpipeService {
         &self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        let (state, stopped_session) = {
+        let (state, stopped_session, stdin) = {
             let mut data = self.lock_data()?;
             let stopped_session = data.session_id;
             data.listening = false;
             data.seq = data.seq.saturating_add(1);
-            (state_map(&data), stopped_session)
+            let stdin = data.worker.as_ref().map(|worker| Arc::clone(&worker.stdin));
+            (state_map(&data), stopped_session, stdin)
         };
+        if let Some(stdin) = stdin {
+            send_worker_command(&stdin, "stop").map_err(fdo_failed)?;
+        }
         Self::session_stopped(&emitter, stopped_session).await?;
         Self::state_changed(&emitter, state).await?;
         Ok(())
@@ -172,6 +204,7 @@ impl WordpipeService {
                 insert_str(&mut item, "description", profile.description);
                 insert_str(&mut item, "build_profile", profile.build_profile);
                 insert_str(&mut item, "output_name", profile.output_name);
+                insert_str(&mut item, "prebuilt_filename", profile.prebuilt_filename);
                 insert_bool(&mut item, "ort_format", profile.ort_format);
                 insert_str(&mut item, "runtime_dir", &runtime_dir);
                 insert_bool(&mut item, "installed", profile_installed(&runtime_dir));
@@ -197,6 +230,7 @@ impl WordpipeService {
         let config = {
             let mut data = self.lock_data()?;
             data.config.backend = backend.to_string();
+            shutdown_worker(&mut data);
             config_map(&data.config)
         };
         Self::config_changed(&emitter, config).await?;
@@ -215,7 +249,10 @@ impl WordpipeService {
         }
         let config = {
             let mut data = self.lock_data()?;
-            data.config.model_profile = profile.to_string();
+            if data.config.model_profile != profile {
+                data.config.model_profile = profile.to_string();
+                shutdown_worker(&mut data);
+            }
             config_map(&data.config)
         };
         Self::config_changed(&emitter, config).await?;
@@ -229,7 +266,10 @@ impl WordpipeService {
     ) -> zbus::fdo::Result<()> {
         let config = {
             let mut data = self.lock_data()?;
-            data.config.input_device = selector.to_string();
+            if data.config.input_device != selector {
+                data.config.input_device = selector.to_string();
+                shutdown_worker(&mut data);
+            }
             config_map(&data.config)
         };
         Self::config_changed(&emitter, config).await?;
@@ -285,26 +325,34 @@ impl WordpipeService {
                 "unknown model profile: {profile}"
             )));
         }
-        {
+        let (installer_path, model_root) = {
             let mut data = self.lock_data()?;
+            if data.installing {
+                return Err(zbus::fdo::Error::Failed(
+                    "model installation is already running".to_string(),
+                ));
+            }
             data.installing = true;
-        }
+            (
+                data.config.model_installer_path.clone(),
+                data.config.model_root.clone(),
+            )
+        };
         let mut progress = VariantMap::new();
-        insert_str(&mut progress, "phase", "queued");
-        insert_str(
-            &mut progress,
-            "message",
-            "model export is not yet wired into the Rust service on this branch",
-        );
+        insert_str(&mut progress, "phase", "starting");
+        insert_str(&mut progress, "message", "starting model installer");
         insert_f64(&mut progress, "fraction", 0.0);
         Self::install_progress(&emitter, profile, progress).await?;
 
-        let state = {
-            let mut data = self.lock_data()?;
-            data.installing = false;
-            state_map(&data)
-        };
-        Self::state_changed(&emitter, state).await?;
+        let service = self.clone();
+        let profile = profile.to_string();
+        let emitter = emitter.to_owned();
+        std::thread::Builder::new()
+            .name("wordpipe-model-install".to_string())
+            .spawn(move || {
+                service.run_model_installer(installer_path, model_root, profile, emitter);
+            })
+            .map_err(|err| zbus::fdo::Error::Failed(err.to_string()))?;
         Ok(())
     }
 
@@ -315,6 +363,7 @@ impl WordpipeService {
         let state = {
             let mut data = self.lock_data()?;
             data.listening = false;
+            shutdown_worker(&mut data);
             state_map(&data)
         };
         Self::state_changed(&emitter, state).await?;
@@ -377,6 +426,282 @@ impl WordpipeService {
             .lock()
             .map_err(|_| zbus::fdo::Error::Failed("service state lock poisoned".to_string()))
     }
+
+    async fn ensure_worker(&self, emitter: SignalEmitter<'static>) -> zbus::fdo::Result<()> {
+        let spawn = {
+            let data = self.lock_data()?;
+            data.worker.is_none()
+        };
+        if !spawn {
+            return Ok(());
+        }
+
+        let (worker, stdout) = {
+            let mut data = self.lock_data()?;
+            let config = data.config.clone();
+            let runtime_dir = selected_runtime_dir(&config);
+            if !profile_installed(&runtime_dir) {
+                return Err(zbus::fdo::Error::Failed(format!(
+                    "model profile '{}' is not installed at {runtime_dir}",
+                    config.model_profile
+                )));
+            }
+            data.loading_model = true;
+            data.model_loaded = false;
+            data.last_error.clear();
+            spawn_worker(&config, &runtime_dir).map_err(fdo_failed)?
+        };
+
+        {
+            let mut data = self.lock_data()?;
+            data.worker = Some(worker);
+        }
+
+        let service = self.clone();
+        std::thread::Builder::new()
+            .name("wordpipe-asr-events".to_string())
+            .spawn(move || service.read_worker_events(stdout, emitter))
+            .map_err(|err| zbus::fdo::Error::Failed(err.to_string()))?;
+        Ok(())
+    }
+
+    fn read_worker_events(
+        &self,
+        stdout: std::process::ChildStdout,
+        emitter: SignalEmitter<'static>,
+    ) {
+        let reader = std::io::BufReader::new(stdout);
+        for line in reader.lines() {
+            let Ok(line) = line else {
+                break;
+            };
+            if line.trim().is_empty() {
+                continue;
+            }
+            match serde_json::from_str::<JsonValue>(&line) {
+                Ok(value) => self.handle_worker_event(value, &emitter),
+                Err(err) => {
+                    let _ = zbus::block_on(Self::error(
+                        &emitter,
+                        &format!("invalid ASR worker event: {err}"),
+                    ));
+                }
+            }
+        }
+        let state = {
+            let mut data = match self.data.lock() {
+                Ok(data) => data,
+                Err(_) => return,
+            };
+            data.listening = false;
+            data.loading_model = false;
+            data.model_loaded = false;
+            data.worker = None;
+            state_map(&data)
+        };
+        let _ = zbus::block_on(Self::state_changed(&emitter, state));
+    }
+
+    fn handle_worker_event(&self, value: JsonValue, emitter: &SignalEmitter<'static>) {
+        let event = value
+            .get("event")
+            .and_then(JsonValue::as_str)
+            .unwrap_or_default();
+        match event {
+            "loading_model" => {
+                let state = {
+                    let mut data = match self.data.lock() {
+                        Ok(data) => data,
+                        Err(_) => return,
+                    };
+                    data.loading_model = true;
+                    data.model_loaded = false;
+                    state_map(&data)
+                };
+                let _ = zbus::block_on(Self::state_changed(emitter, state));
+            }
+            "model_loaded" => {
+                let (state, metrics) = {
+                    let mut data = match self.data.lock() {
+                        Ok(data) => data,
+                        Err(_) => return,
+                    };
+                    data.loading_model = false;
+                    data.model_loaded = true;
+                    let metrics = value
+                        .get("data")
+                        .map(json_to_variant_map)
+                        .unwrap_or_default();
+                    (state_map(&data), metrics)
+                };
+                let _ = zbus::block_on(Self::state_changed(emitter, state));
+                let _ = zbus::block_on(Self::metrics(emitter, metrics));
+            }
+            "ready" => {
+                let state = {
+                    let mut data = match self.data.lock() {
+                        Ok(data) => data,
+                        Err(_) => return,
+                    };
+                    data.loading_model = false;
+                    data.model_loaded = true;
+                    state_map(&data)
+                };
+                let _ = zbus::block_on(Self::state_changed(emitter, state));
+            }
+            "listening" => {
+                let state = {
+                    let mut data = match self.data.lock() {
+                        Ok(data) => data,
+                        Err(_) => return,
+                    };
+                    data.listening = true;
+                    state_map(&data)
+                };
+                let _ = zbus::block_on(Self::state_changed(emitter, state));
+            }
+            "partial" => self.forward_partial(value, emitter),
+            "commit" => self.forward_commit(value, emitter),
+            "stats" => {
+                let metrics = value
+                    .get("data")
+                    .map(json_to_variant_map)
+                    .unwrap_or_default();
+                let _ = zbus::block_on(Self::metrics(emitter, metrics));
+            }
+            "stopped" => {
+                let (state, session_id) = {
+                    let mut data = match self.data.lock() {
+                        Ok(data) => data,
+                        Err(_) => return,
+                    };
+                    data.listening = false;
+                    (state_map(&data), data.session_id)
+                };
+                let _ = zbus::block_on(Self::session_stopped(emitter, session_id));
+                let _ = zbus::block_on(Self::state_changed(emitter, state));
+            }
+            "error" => {
+                let message = value
+                    .get("message")
+                    .and_then(JsonValue::as_str)
+                    .unwrap_or("ASR worker error")
+                    .to_string();
+                let state = {
+                    let mut data = match self.data.lock() {
+                        Ok(data) => data,
+                        Err(_) => return,
+                    };
+                    data.last_error = message.clone();
+                    state_map(&data)
+                };
+                let _ = zbus::block_on(Self::error(emitter, &message));
+                let _ = zbus::block_on(Self::state_changed(emitter, state));
+            }
+            _ => {}
+        }
+    }
+
+    fn forward_partial(&self, value: JsonValue, emitter: &SignalEmitter<'static>) {
+        let text = value
+            .get("text")
+            .and_then(JsonValue::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let metrics = value
+            .get("data")
+            .map(json_to_variant_map)
+            .unwrap_or_default();
+        let (session_id, seq, delta) = {
+            let mut data = match self.data.lock() {
+                Ok(data) => data,
+                Err(_) => return,
+            };
+            data.seq = data.seq.saturating_add(1);
+            let delta = text
+                .strip_prefix(&data.partial_text)
+                .unwrap_or(&text)
+                .to_string();
+            data.partial_text = text.clone();
+            (data.session_id, data.seq, delta)
+        };
+        let _ = zbus::block_on(Self::partial(emitter, session_id, seq, &text));
+        if !delta.is_empty() {
+            let _ = zbus::block_on(Self::text_delta(emitter, session_id, seq, &delta));
+        }
+        let _ = zbus::block_on(Self::metrics(emitter, metrics));
+    }
+
+    fn forward_commit(&self, value: JsonValue, emitter: &SignalEmitter<'static>) {
+        let text = value
+            .get("text")
+            .and_then(JsonValue::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let metrics = value
+            .get("data")
+            .map(json_to_variant_map)
+            .unwrap_or_default();
+        let (session_id, seq) = {
+            let mut data = match self.data.lock() {
+                Ok(data) => data,
+                Err(_) => return,
+            };
+            data.seq = data.seq.saturating_add(1);
+            (data.session_id, data.seq)
+        };
+        if !text.is_empty() {
+            let _ = zbus::block_on(Self::commit(emitter, session_id, seq, &text));
+        }
+        let _ = zbus::block_on(Self::metrics(emitter, metrics));
+    }
+
+    fn run_model_installer(
+        &self,
+        installer_path: String,
+        model_root: String,
+        profile: String,
+        emitter: SignalEmitter<'static>,
+    ) {
+        let mut command = Command::new(&installer_path);
+        command
+            .arg("--profile")
+            .arg(&profile)
+            .arg("--model-root")
+            .arg(&model_root)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let result = run_progress_command(command, &profile, &emitter);
+        let state = {
+            let mut data = match self.data.lock() {
+                Ok(data) => data,
+                Err(_) => return,
+            };
+            data.installing = false;
+            match result {
+                Ok(()) => {
+                    data.last_error.clear();
+                    let mut progress = VariantMap::new();
+                    insert_str(&mut progress, "phase", "complete");
+                    insert_str(&mut progress, "message", "model profile installed");
+                    insert_f64(&mut progress, "fraction", 1.0);
+                    let _ = zbus::block_on(Self::install_progress(&emitter, &profile, progress));
+                }
+                Err(err) => {
+                    data.last_error = err.to_string();
+                    let mut progress = VariantMap::new();
+                    insert_str(&mut progress, "phase", "error");
+                    insert_str(&mut progress, "message", &err.to_string());
+                    insert_f64(&mut progress, "fraction", 0.0);
+                    let _ = zbus::block_on(Self::install_progress(&emitter, &profile, progress));
+                    let _ = zbus::block_on(Self::error(&emitter, &err.to_string()));
+                }
+            }
+            state_map(&data)
+        };
+        let _ = zbus::block_on(Self::state_changed(&emitter, state));
+    }
 }
 
 fn main() -> Result<()> {
@@ -389,12 +714,18 @@ async fn run(args: Args) -> Result<()> {
         eprintln!("wordpipe-service: --replace requested; D-Bus will replace an existing name if the bus allows it");
     }
     let service = WordpipeService::default();
+    let service_handle = service.clone();
     let _connection = connection::Builder::session()?
         .serve_at(OBJECT_PATH, service)?
         .name(BUS_NAME)?
         .build()
         .await
         .with_context(|| format!("failed to own D-Bus name {BUS_NAME}"))?;
+    let emitter = SignalEmitter::new(&_connection, OBJECT_PATH)?.to_owned();
+    *service_handle
+        .emitter
+        .lock()
+        .expect("service emitter lock should not be poisoned") = Some(emitter);
     eprintln!("wordpipe-service: listening on {BUS_NAME} {OBJECT_PATH}");
     std::future::pending::<()>().await;
     Ok(())
@@ -404,6 +735,8 @@ fn state_map(data: &ServiceData) -> VariantMap {
     let mut map = VariantMap::new();
     insert_bool(&mut map, "listening", data.listening);
     insert_bool(&mut map, "installing", data.installing);
+    insert_bool(&mut map, "loading_model", data.loading_model);
+    insert_bool(&mut map, "model_loaded", data.model_loaded);
     insert_u64(&mut map, "session_id", data.session_id);
     insert_u64(&mut map, "seq", data.seq);
     insert_str(&mut map, "backend", &data.config.backend);
@@ -420,6 +753,12 @@ fn config_map(config: &ServiceConfig) -> VariantMap {
     insert_str(&mut map, "input_device", &config.input_device);
     insert_str(&mut map, "shortcut", &config.shortcut);
     insert_str(&mut map, "model_root", &config.model_root);
+    insert_str(&mut map, "worker_path", &config.worker_path);
+    insert_str(
+        &mut map,
+        "model_installer_path",
+        &config.model_installer_path,
+    );
     insert_u32(&mut map, "sample_rate", config.sample_rate);
     insert_u32(&mut map, "num_threads", config.num_threads);
     insert_bool(&mut map, "spoken_punctuation", config.spoken_punctuation);
@@ -477,9 +816,22 @@ fn profile_runtime_dir(model_root: &str, output_name: &str, ort_format: bool) ->
     }
 }
 
+fn selected_runtime_dir(config: &ServiceConfig) -> String {
+    let Some(profile) = MODEL_PROFILES
+        .iter()
+        .find(|profile| profile.id == config.model_profile)
+    else {
+        return config.model_root.clone();
+    };
+    profile_runtime_dir(&config.model_root, profile.output_name, profile.ort_format)
+}
+
 fn profile_installed(runtime_dir: &str) -> bool {
     let path = std::path::Path::new(runtime_dir);
-    path.join("encoder.onnx").exists() || path.join("encoder.ort").exists()
+    path.join("encoder.onnx").exists()
+        || path.join("encoder.ort").exists()
+        || path.join("encoder.encoder.onnx").exists()
+        || path.join("encoder.encoder.ort").exists()
 }
 
 fn next_session_id(current: u64) -> u64 {
@@ -510,6 +862,10 @@ fn insert_f64(map: &mut VariantMap, key: &str, value: f64) {
     map.insert(key.to_string(), owned(Value::from(value)));
 }
 
+fn insert_i64(map: &mut VariantMap, key: &str, value: i64) {
+    map.insert(key.to_string(), owned(Value::from(value)));
+}
+
 fn owned(value: Value<'_>) -> OwnedValue {
     OwnedValue::try_from(value).expect("primitive D-Bus variant value should be valid")
 }
@@ -526,4 +882,177 @@ fn get_u32(map: &VariantMap, key: &str) -> Option<u32> {
 
 fn fdo_failed(err: anyhow::Error) -> zbus::fdo::Error {
     zbus::fdo::Error::Failed(err.to_string())
+}
+
+fn default_worker_path() -> String {
+    if let Ok(value) = std::env::var("WORDPIPE_WORKER") {
+        return value;
+    }
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(parent) = current_exe.parent() {
+            let sibling = parent.join("wordpipe-parakeet-worker");
+            if sibling.exists() {
+                return sibling.to_string_lossy().to_string();
+            }
+        }
+    }
+    "wordpipe-parakeet-worker".to_string()
+}
+
+fn default_model_installer_path() -> String {
+    if let Ok(value) = std::env::var("WORDPIPE_MODEL_INSTALLER") {
+        return value;
+    }
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(parent) = current_exe.parent() {
+            let sibling = parent.join("wordpipe-model-install");
+            if sibling.exists() {
+                return sibling.to_string_lossy().to_string();
+            }
+        }
+    }
+    "wordpipe-model-install".to_string()
+}
+
+fn spawn_worker(
+    config: &ServiceConfig,
+    runtime_dir: &str,
+) -> Result<(WorkerProcess, std::process::ChildStdout)> {
+    let mut command = Command::new(&config.worker_path);
+    command
+        .arg("--model-dir")
+        .arg(runtime_dir)
+        .arg("--num-threads")
+        .arg(config.num_threads.to_string())
+        .arg("--sample-rate")
+        .arg(config.sample_rate.to_string())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit());
+    if !config.input_device.is_empty() {
+        command.arg("--input-device").arg(&config.input_device);
+    }
+    let mut child = command.spawn().with_context(|| {
+        format!(
+            "failed to start ASR worker '{}'; build/install wordpipe-parakeet-worker or set WORDPIPE_WORKER",
+            config.worker_path
+        )
+    })?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| anyhow!("ASR worker stdin was not piped"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("ASR worker stdout was not piped"))?;
+    Ok((
+        WorkerProcess {
+            stdin: Arc::new(Mutex::new(stdin)),
+            child,
+        },
+        stdout,
+    ))
+}
+
+fn send_worker_command(stdin: &Arc<Mutex<ChildStdin>>, command: &str) -> Result<()> {
+    let mut stdin = stdin
+        .lock()
+        .map_err(|_| anyhow!("ASR worker stdin lock poisoned"))?;
+    serde_json::to_writer(&mut *stdin, &json!({ "command": command }))?;
+    writeln!(stdin)?;
+    stdin.flush()?;
+    Ok(())
+}
+
+fn shutdown_worker(data: &mut ServiceData) {
+    if let Some(mut worker) = data.worker.take() {
+        let _ = send_worker_command(&worker.stdin, "shutdown");
+        let _ = worker.child.kill();
+        let _ = worker.child.wait();
+    }
+    data.listening = false;
+    data.loading_model = false;
+    data.model_loaded = false;
+    data.partial_text.clear();
+}
+
+fn run_progress_command(
+    mut command: Command,
+    profile: &str,
+    emitter: &SignalEmitter<'static>,
+) -> Result<()> {
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("failed to start model installer {:?}", command))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| anyhow!("model installer stdout was not piped"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| anyhow!("model installer stderr was not piped"))?;
+
+    let stdout_profile = profile.to_string();
+    let stdout_emitter = emitter.clone();
+    let stdout_thread =
+        std::thread::spawn(move || stream_progress_lines(stdout, &stdout_profile, &stdout_emitter));
+
+    let stderr_profile = profile.to_string();
+    let stderr_emitter = emitter.clone();
+    let stderr_thread =
+        std::thread::spawn(move || stream_progress_lines(stderr, &stderr_profile, &stderr_emitter));
+
+    let status = child.wait()?;
+    let _ = stdout_thread.join();
+    let _ = stderr_thread.join();
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow!("model installer exited with {status}"))
+    }
+}
+
+fn stream_progress_lines<R>(reader: R, profile: &str, emitter: &SignalEmitter<'static>)
+where
+    R: std::io::Read,
+{
+    let reader = std::io::BufReader::new(reader);
+    for line in reader.lines().map_while(Result::ok) {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let mut progress = VariantMap::new();
+        insert_str(&mut progress, "phase", "running");
+        insert_str(&mut progress, "message", line.trim());
+        insert_f64(&mut progress, "fraction", 0.0);
+        let _ = zbus::block_on(WordpipeService::install_progress(
+            emitter, profile, progress,
+        ));
+    }
+}
+
+fn json_to_variant_map(value: &JsonValue) -> VariantMap {
+    let mut map = VariantMap::new();
+    let Some(object) = value.as_object() else {
+        return map;
+    };
+    for (key, value) in object {
+        match value {
+            JsonValue::Bool(value) => insert_bool(&mut map, key, *value),
+            JsonValue::Number(number) => {
+                if let Some(value) = number.as_u64() {
+                    insert_u64(&mut map, key, value);
+                } else if let Some(value) = number.as_i64() {
+                    insert_i64(&mut map, key, value);
+                } else if let Some(value) = number.as_f64() {
+                    insert_f64(&mut map, key, value);
+                }
+            }
+            JsonValue::String(value) => insert_str(&mut map, key, value),
+            _ => {}
+        }
+    }
+    map
 }

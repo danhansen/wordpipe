@@ -126,9 +126,9 @@ crates/wordpipe-protocol
   Shared D-Bus constants and model/backend profile metadata.
 
 crates/wordpipe-service
-  Session D-Bus service skeleton. It owns config/state, lists CPAL input
-  devices, exposes model/backend setup methods, and emits the planned
-  streaming signals.
+  Session D-Bus service. It owns config/state, lists CPAL input devices,
+  exposes model/backend setup methods, supervises the Rust ASR worker, and
+  translates worker JSON events into the planned streaming signals.
 
 crates/wordpipe-parakeet-worker
   Existing JSON-line ASR worker retained for benchmarks and as the code source
@@ -164,7 +164,10 @@ scripts/install-wordpipe-gnome
 The installer:
 
 - Builds `wordpipe-service` in release mode.
-- Installs it to `~/.local/libexec/wordpipe/wordpipe-service`.
+- Builds `wordpipe-parakeet-worker` in release mode.
+- Installs both Rust binaries to `~/.local/libexec/wordpipe/`.
+- Installs a `wordpipe-model-install` wrapper next to the service. The wrapper
+  calls the Python model installer from this checkout for local development.
 - Installs a session D-Bus activation file for `dev.wordpipe.Service`.
 - Installs a systemd user unit at
   `~/.config/systemd/user/wordpipe-service.service`.
@@ -193,7 +196,7 @@ Or let D-Bus activate it when the extension first calls the service.
   machine is expected to be GNOME 50-era, but the extension should not claim
   unsupported future versions.
 - Which GNOME Shell internal OSK API is stable enough for a first experiment?
-- Should model export/install live entirely in the Rust service, or should the
-  first service call existing Python export scripts as a temporary bridge?
+- Should release packaging keep the Python model installer as the ORT
+  conversion bridge, or should download/extract/ORT conversion move into Rust?
 - Should the service be D-Bus activated only, systemd-user managed only, or
   support both?

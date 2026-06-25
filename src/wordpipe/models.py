@@ -26,6 +26,7 @@ DEFAULT_MODEL_FILES = (
 )
 DEFAULT_NEMO_SOURCE_REPO = "nvidia/nemotron-3.5-asr-streaming-0.6b"
 DEFAULT_NEMO_SOURCE_FILENAME = "nemotron-3.5-asr-streaming-0.6b.nemo"
+DEFAULT_PREBUILT_PROFILE_REPO = "danhansen/wordpipe-nemotron-3.5-asr-streaming-0.6b"
 ModelProfile = Literal["fast", "compact"]
 ProgressCallback = Callable[[str], None]
 
@@ -48,6 +49,7 @@ class ModelProfileSpec:
     description: str
     build_profile: str
     output_name: str
+    prebuilt_filename: str
     emit_ort_format: bool = False
 
     def output_dir(self, model_root: Path) -> Path:
@@ -73,6 +75,7 @@ MODEL_PROFILES: dict[ModelProfile, ModelProfileSpec] = {
         description="FP32 projected-cache model; fastest validated profile, largest footprint.",
         build_profile="fp32-projected",
         output_name="nemotron-wordpipe-fast-fp32-projected",
+        prebuilt_filename="wordpipe-nemotron-fast-fp32-projected.tar.gz",
     ),
     "compact": ModelProfileSpec(
         name="compact",
@@ -80,6 +83,7 @@ MODEL_PROFILES: dict[ModelProfile, ModelProfileSpec] = {
         description="Dynamic-int8 projected-cache model with fixed shapes and ORT-format startup.",
         build_profile="compact-fixed-shape",
         output_name="nemotron-wordpipe-compact-fixed-shape",
+        prebuilt_filename="wordpipe-nemotron-compact-fixed-shape.tar.gz",
         emit_ort_format=True,
     ),
 }
@@ -209,6 +213,117 @@ def install_built_profile(
         if prepared_source.cleanup_dir is not None:
             shutil.rmtree(prepared_source.cleanup_dir, ignore_errors=True)
     return destination
+
+
+def download_prebuilt_profile_archive(
+    *,
+    profile: str,
+    model_root: Path,
+    repo_id: str = DEFAULT_PREBUILT_PROFILE_REPO,
+    force: bool = False,
+    progress: ProgressCallback | None = None,
+) -> Path:
+    spec = profile_spec(profile)
+    output_dir = model_root.expanduser() / "downloads" / repo_id.replace("/", "--")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    destination = output_dir / spec.prebuilt_filename
+    if destination.exists() and not force:
+        _progress(progress, f"Using cached prebuilt profile: {destination}")
+        return destination
+
+    try:
+        from huggingface_hub import hf_hub_download
+
+        _progress(progress, f"Downloading {spec.title} profile from {repo_id}")
+        env_value = os.environ.get("HF_HUB_ENABLE_HF_TRANSFER")
+        try:
+            import hf_transfer  # noqa: F401
+        except ImportError:
+            enable_hf_transfer = False
+        else:
+            enable_hf_transfer = True
+            os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
+        try:
+            downloaded = hf_hub_download(
+                repo_id=repo_id,
+                filename=spec.prebuilt_filename,
+                local_dir=output_dir,
+                local_dir_use_symlinks=False,
+                force_download=force,
+            )
+        finally:
+            if enable_hf_transfer:
+                if env_value is None:
+                    os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
+                else:
+                    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = env_value
+        path = Path(downloaded)
+        _progress(progress, f"Prebuilt profile archive ready: {path}")
+        return path
+    except ImportError as exc:
+        raise RuntimeError(
+            "huggingface_hub is required to download prebuilt Wordpipe model profiles. "
+            "Install it with hf_transfer support, or pass --source with a local profile archive."
+        ) from exc
+
+
+def install_prebuilt_profile(
+    *,
+    source: Path,
+    model_root: Path,
+    profile: str,
+    python: Path = Path(sys.executable),
+    force: bool = False,
+    progress: ProgressCallback | None = None,
+) -> Path:
+    spec = profile_spec(profile)
+    prepared_source = _prepare_built_profile_source(source)
+    try:
+        onnx_dir = spec.output_dir(model_root)
+        _install_prepared_profile(prepared_source.path, onnx_dir, force=force)
+    finally:
+        if prepared_source.cleanup_dir is not None:
+            shutil.rmtree(prepared_source.cleanup_dir, ignore_errors=True)
+
+    if not spec.emit_ort_format:
+        _progress(progress, f"Model profile ready: {onnx_dir}")
+        return onnx_dir
+
+    runtime_dir = spec.runtime_dir(model_root)
+    if runtime_dir.exists() and not force and model_runtime_dir_valid(runtime_dir):
+        _progress(progress, f"Using cached ORT runtime profile: {runtime_dir}")
+        return runtime_dir
+
+    command = [
+        str(python.expanduser()),
+        str(wordpipe_scripts_dir() / "convert_nemotron_to_ort_format.py"),
+        str(onnx_dir),
+        str(runtime_dir),
+        "--force",
+    ]
+    _progress(progress, " ".join(command))
+    _run_with_progress(command, progress)
+    _progress(progress, f"Model profile ready: {runtime_dir}")
+    return runtime_dir
+
+
+def _install_prepared_profile(source: Path, destination: Path, *, force: bool) -> None:
+    if destination.exists():
+        if not force:
+            raise RuntimeError(
+                f"profile output already exists at {destination}; pass --force to overwrite it"
+            )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(f".{destination.name}.tmp-{os.getpid()}")
+    if temporary.exists():
+        shutil.rmtree(temporary)
+    try:
+        shutil.copytree(source, temporary)
+        if destination.exists():
+            shutil.rmtree(destination)
+        temporary.replace(destination)
+    finally:
+        shutil.rmtree(temporary, ignore_errors=True)
 
 
 def _prepare_built_profile_source(source: Path) -> _PreparedProfileSource:

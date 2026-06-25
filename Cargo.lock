@@ -2325,6 +2325,7 @@ dependencies = [
  "clap",
  "cpal 0.16.0",
  "serde",
+ "serde_json",
  "wordpipe-protocol",
  "zbus",
 ]

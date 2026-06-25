@@ -505,32 +505,40 @@ PYTHONPATH=src python3 -m wordpipe model-profiles
 ```
 
 The app window can install these profiles interactively. The CLI command below
-performs the same download/export pipeline for unattended setup or debugging.
+downloads a prebuilt optimized ONNX profile archive from Hugging Face, validates
+it, and for `compact` converts/caches the local ORT-format runtime directory.
 
-Download the source `.nemo` checkpoint if needed and build a profile:
+Install the compact profile:
+
+```sh
+PYTHONPATH=src python3 -m wordpipe model-install \
+  --profile compact
+```
+
+Wordpipe uses `huggingface_hub` and enables `HF_HUB_ENABLE_HF_TRANSFER=1` when
+`hf_transfer` is installed. Run `model-install` again with the other profile
+when you want to try it; both artifacts can coexist under `model_root`.
+
+`model-install --source` can also import an already-built Wordpipe profile
+directory or archive. The app Flatpak can run the same install pipeline inside
+its canonical app-data model directory, so normal Flatpak runtime commands do
+not need model directory flags after `model-install` completes.
+Imported profile sources must contain `tokenizer.model`, `encoder.onnx` or
+`encoder.ort`, and `decoder_joint.onnx` or `decoder_joint.ort`.
+
+For release/developer work, keep the reproducible NeMo export pipeline explicit:
 
 ```sh
 PYTHONPATH=src python3 -m wordpipe model-install \
   --profile compact \
+  --build-from-nemo \
   --source models/nemotron-3.5-asr-streaming-0.6b-source/nemotron-3.5-asr-streaming-0.6b.nemo \
   --python .venv-nemo-export/bin/python
 ```
 
-If `--source` is a Hugging Face repo id instead of a local `.nemo` path,
-Wordpipe uses `huggingface_hub` and enables `HF_HUB_ENABLE_HF_TRANSFER=1` for
-the download. Building `compact` emits the ORT-format runtime directory
-automatically. Building `fast` emits the FP32 projected-cache runtime directory.
-Run `model-install` again with the other profile when you want to try it; both
-artifacts can coexist under `model_root`. After a successful source build,
-Wordpipe removes `model_root/build/<profile>` intermediates by default; pass
-`--keep-build-dir` when you need to inspect or reuse those files.
-
-`model-install --source` can also import an already-built Wordpipe profile
-directory or archive. The app Flatpak can run the same download/export pipeline
-inside its canonical app-data model directory, so normal Flatpak runtime
-commands do not need model directory flags after `model-install` completes.
-Imported profile sources must contain `tokenizer.model`, `encoder.onnx` or
-`encoder.ort`, and `decoder_joint.onnx` or `decoder_joint.ort`.
+After a successful source build, Wordpipe removes `model_root/build/<profile>`
+intermediates by default; pass `--keep-build-dir` when you need to inspect or
+reuse those files.
 
 Select the default profile in `~/.config/wordpipe/config.toml`:
 
