@@ -54,6 +54,9 @@ class Indicator extends PanelMenu.Button {
         super(0.0, _('Wordpipe'));
         this._extension = extension;
         this._listening = false;
+        this._lastVoiceLevel = 0.0;
+        this._animationPhase = 0;
+        this._animationSourceId = 0;
 
         this._box = new St.BoxLayout({
             style_class: 'wordpipe-panel-status',
@@ -75,6 +78,8 @@ class Indicator extends PanelMenu.Button {
         for (let i = 0; i < 4; i++) {
             const bar = new St.Widget({
                 style_class: 'wordpipe-level-bar',
+                width: 2,
+                height: 10,
                 y_align: Clutter.ActorAlign.CENTER,
             });
             bar.set_pivot_point(0.5, 1.0);
@@ -123,6 +128,7 @@ class Indicator extends PanelMenu.Button {
         const selectedModelInstalled = state?.selected_model_installed !== false;
         this._installing = installing;
         this._installingProfile = state?.installing_profile ?? '';
+        this._icon.icon_name = 'audio-input-microphone-symbolic';
         this._setListening(listening);
         this._toggleItem.label.text = listening || stopping
             ? _('Stop Dictation')
@@ -200,23 +206,13 @@ class Indicator extends PanelMenu.Button {
     setVoiceLevel(rms) {
         if (!this._listening)
             return;
-        const level = normalizeVoiceLevel(rms);
-        this._icon.ease({
-            scale_x: 1.0 + level * 0.08,
-            scale_y: 1.0 + level * 0.16,
-            duration: 100,
-            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-        });
+        this._lastVoiceLevel = normalizeVoiceLevel(rms);
+        this._renderVoiceLevel();
+    }
 
-        const multipliers = [0.55, 1.0, 0.75, 0.45];
-        this._levelBars.forEach((bar, index) => {
-            const scale = 0.25 + level * multipliers[index] * 1.35;
-            bar.ease({
-                scale_y: Math.max(0.2, Math.min(1.6, scale)),
-                duration: 100,
-                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-            });
-        });
+    destroy() {
+        this._stopVoiceAnimation();
+        super.destroy();
     }
 
     _syncInstallActions() {
@@ -233,11 +229,65 @@ class Indicator extends PanelMenu.Button {
             duration: 120,
             mode: Clutter.AnimationMode.EASE_OUT_QUAD,
         });
-        if (!listening)
+        if (listening)
+            this._startVoiceAnimation();
+        else {
+            this._stopVoiceAnimation();
             this._resetVoiceLevel();
+        }
+    }
+
+    _startVoiceAnimation() {
+        if (this._animationSourceId)
+            return;
+        this._animationSourceId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            120,
+            () => {
+                if (!this._listening) {
+                    this._animationSourceId = 0;
+                    return GLib.SOURCE_REMOVE;
+                }
+                this._animationPhase += 1;
+                this._renderVoiceLevel();
+                return GLib.SOURCE_CONTINUE;
+            });
+    }
+
+    _stopVoiceAnimation() {
+        if (!this._animationSourceId)
+            return;
+        GLib.Source.remove(this._animationSourceId);
+        this._animationSourceId = 0;
+    }
+
+    _renderVoiceLevel() {
+        if (!this._listening)
+            return;
+        const level = Math.max(this._lastVoiceLevel, 0.18);
+        const iconLevel = level * (0.75 + 0.25 * Math.sin(this._animationPhase * 0.8));
+        this._icon.ease({
+            scale_x: 1.0 + iconLevel * 0.08,
+            scale_y: 1.0 + iconLevel * 0.16,
+            duration: 100,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        });
+
+        const multipliers = [0.55, 1.0, 0.75, 0.45];
+        this._levelBars.forEach((bar, index) => {
+            const wave = 0.5 + 0.5 * Math.sin(this._animationPhase * 0.9 + index * 1.35);
+            const scale = 0.25 + level * multipliers[index] * (0.65 + wave);
+            bar.ease({
+                scale_y: Math.max(0.2, Math.min(1.6, scale)),
+                duration: 100,
+                mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+            });
+        });
     }
 
     _resetVoiceLevel() {
+        this._lastVoiceLevel = 0.0;
+        this._animationPhase = 0;
         this._icon.ease({
             scale_x: 1.0,
             scale_y: 1.0,

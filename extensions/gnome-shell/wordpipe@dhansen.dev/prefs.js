@@ -782,12 +782,19 @@ class WordpipePage extends Adw.PreferencesPage {
     }
 
     _captureShortcut() {
+        const previousAccelerator = this._settings.get_strv('toggle-shortcut')[0] ?? '';
+        let handled = false;
+        this._settings.set_strv('toggle-shortcut', []);
+        this._syncShortcutValue();
+        const root = this.get_root();
         const dialog = new Gtk.Window({
             title: _('Set Shortcut'),
             modal: true,
             default_width: 360,
             default_height: 160,
         });
+        if (root instanceof Gtk.Window)
+            dialog.transient_for = root;
         dialog.set_hide_on_close(true);
 
         const box = new Gtk.Box({
@@ -797,7 +804,6 @@ class WordpipePage extends Adw.PreferencesPage {
             margin_bottom: 24,
             margin_start: 24,
             margin_end: 24,
-            focusable: true,
         });
         dialog.set_child(box);
 
@@ -819,14 +825,25 @@ class WordpipePage extends Adw.PreferencesPage {
         });
         box.append(preview);
 
+        const captureEntry = new Gtk.Entry({
+            opacity: 0,
+            height_request: 1,
+            can_focus: true,
+            focusable: true,
+        });
+        box.append(captureEntry);
+
         const controller = new Gtk.EventControllerKey();
         controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
         controller.connect('key-pressed', (_controller, keyval, _keycode, state) => {
             if (keyval === Gdk.KEY_Escape) {
+                handled = true;
+                this._setShortcut(previousAccelerator);
                 dialog.close();
                 return true;
             }
             if (keyval === Gdk.KEY_BackSpace) {
+                handled = true;
                 this._setShortcut('');
                 dialog.close();
                 return true;
@@ -835,14 +852,21 @@ class WordpipePage extends Adw.PreferencesPage {
             if (!accelerator)
                 return false;
             preview.label = accelerator;
+            handled = true;
             this._setShortcut(accelerator);
             dialog.close();
             return true;
         });
-        box.add_controller(controller);
+        dialog.connect('close-request', () => {
+            if (!handled)
+                this._setShortcut(previousAccelerator);
+            return false;
+        });
+        captureEntry.add_controller(controller);
         dialog.present();
         GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
-            box.grab_focus();
+            dialog.set_focus(captureEntry);
+            captureEntry.grab_focus();
             return GLib.SOURCE_REMOVE;
         });
     }
