@@ -499,7 +499,7 @@ impl WordpipeService {
         insert_str(&mut progress, "phase", "starting");
         insert_str(&mut progress, "message", "starting model installer");
         insert_f64(&mut progress, "fraction", 0.0);
-        let (installer_path, model_root) = {
+        let (installer_path, model_root, state) = {
             let mut data = self.lock_data()?;
             if data.installing {
                 return Err(zbus::fdo::Error::Failed(
@@ -512,9 +512,11 @@ impl WordpipeService {
             (
                 data.config.model_installer_path.clone(),
                 data.config.model_root.clone(),
+                state_map(&data),
             )
         };
         Self::install_progress(&emitter, profile, progress).await?;
+        Self::state_changed(&emitter, state).await?;
 
         let service = self.clone();
         let profile = profile.to_string();

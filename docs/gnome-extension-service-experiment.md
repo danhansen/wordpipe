@@ -124,6 +124,8 @@ preferences and clients that connect after the corresponding transcript signal.
 Configuration setters emit `ConfigChanged` followed by `StateChanged`; this is
 important when a setting change stops the current worker or changes selected
 model readiness.
+`InstallModel` emits initial `InstallProgress` and `StateChanged` when the
+installer starts, so clients can disable start/install controls immediately.
 GNOME clients treat D-Bus proxy/connection failures as service-unavailable, but
 ordinary method failures remain in the connected state and are surfaced as
 status text.
