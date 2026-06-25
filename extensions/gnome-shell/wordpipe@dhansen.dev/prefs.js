@@ -2,13 +2,13 @@ import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Gdk from 'gi://Gdk';
 import Gtk from 'gi://Gtk';
 
 import {ExtensionPreferences, gettext as _} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
 
 const BUS_NAME = 'dev.wordpipe.Service';
 const OBJECT_PATH = '/dev/wordpipe/Service';
-const DEFAULT_TOGGLE_SHORTCUT = '<Control><Alt>space';
 
 const SERVICE_XML = `
 <node>
@@ -52,6 +52,167 @@ const PROFILES = [
 const BACKENDS = [
     ['parakeet', 'Parakeet'],
 ];
+
+const ShortcutSettingButton = GObject.registerClass({
+    Properties: {
+        shortcut: GObject.ParamSpec.string(
+            'shortcut',
+            'shortcut',
+            'The shortcut',
+            GObject.ParamFlags.READWRITE,
+            ''),
+    },
+    Signals: {
+        changed: {param_types: [GObject.TYPE_STRING]},
+    },
+}, class ShortcutSettingButton extends Gtk.Button {
+    constructor(settingsKey, settings) {
+        super({
+            halign: Gtk.Align.CENTER,
+            hexpand: false,
+            vexpand: false,
+            has_frame: false,
+        });
+        this._settingsKey = settingsKey;
+        this._settings = settings;
+        this._editor = null;
+        this._shortcut = '';
+        this._label = new Gtk.ShortcutLabel({
+            disabled_text: _('New accelerator...'),
+            valign: Gtk.Align.CENTER,
+            hexpand: false,
+            vexpand: false,
+        });
+
+        this.connect('clicked', this._onActivated.bind(this));
+        this._settings.connect(`changed::${this._settingsKey}`, () => this.syncFromSettings());
+        this.set_child(this._label);
+        this.syncFromSettings();
+    }
+
+    set shortcut(value) {
+        this._shortcut = value;
+    }
+
+    get shortcut() {
+        return this._shortcut;
+    }
+
+    syncFromSettings() {
+        [this.shortcut] = this._settings.get_strv(this._settingsKey);
+        this._label.set_accelerator(this.shortcut ?? '');
+    }
+
+    _onActivated(widget) {
+        const controller = new Gtk.EventControllerKey();
+        const content = new Adw.StatusPage({
+            title: _('New accelerator...'),
+            icon_name: 'preferences-desktop-keyboard-shortcuts-symbolic',
+            description: _('Use Backspace to clear'),
+        });
+        this._editor = new Adw.Window({
+            modal: true,
+            hide_on_close: true,
+            transient_for: widget.get_root(),
+            width_request: 480,
+            height_request: 320,
+            content,
+        });
+        this._editor.add_controller(controller);
+        controller.connect('key-pressed', this._onKeyPressed.bind(this));
+        this._editor.present();
+    }
+
+    _onKeyPressed(_controller, keyval, keycode, state) {
+        let mask = state & Gtk.accelerator_get_default_mod_mask();
+        mask &= ~Gdk.ModifierType.LOCK_MASK;
+
+        if (!mask && keyval === Gdk.KEY_Escape) {
+            this._editor?.close();
+            return true;
+        }
+
+        if (keyval === Gdk.KEY_BackSpace) {
+            this._updateShortcut('');
+            this._editor?.close();
+            return true;
+        }
+
+        if (!this._isValidBinding(mask, keycode, keyval) ||
+            !this._isValidAccel(mask, keyval))
+            return true;
+
+        if (!keyval && !keycode) {
+            this._editor?.destroy();
+            return true;
+        }
+
+        const accelerator = Gtk.accelerator_name_with_keycode(
+            null,
+            keyval,
+            keycode,
+            mask);
+        this._updateShortcut(accelerator);
+        this._editor?.destroy();
+        return true;
+    }
+
+    _updateShortcut(accelerator) {
+        this.shortcut = accelerator;
+        this._label.set_accelerator(this.shortcut);
+        this._settings.set_strv(this._settingsKey, [this.shortcut]);
+        this.emit('changed', this.shortcut);
+    }
+
+    _keyvalIsForbidden(keyval) {
+        return [
+            Gdk.KEY_Home,
+            Gdk.KEY_Left,
+            Gdk.KEY_Up,
+            Gdk.KEY_Right,
+            Gdk.KEY_Down,
+            Gdk.KEY_Page_Up,
+            Gdk.KEY_Page_Down,
+            Gdk.KEY_End,
+            Gdk.KEY_Tab,
+            Gdk.KEY_KP_Enter,
+            Gdk.KEY_Return,
+            Gdk.KEY_Mode_switch,
+        ].includes(keyval);
+    }
+
+    _isValidBinding(mask, keycode, keyval) {
+        return !(
+            mask === 0 ||
+            (mask === Gdk.ModifierType.SHIFT_MASK &&
+                keycode !== 0 &&
+                ((keyval >= Gdk.KEY_a && keyval <= Gdk.KEY_z) ||
+                    (keyval >= Gdk.KEY_A && keyval <= Gdk.KEY_Z) ||
+                    (keyval >= Gdk.KEY_0 && keyval <= Gdk.KEY_9) ||
+                    (keyval >= Gdk.KEY_kana_fullstop &&
+                        keyval <= Gdk.KEY_semivoicedsound) ||
+                    (keyval >= Gdk.KEY_Arabic_comma &&
+                        keyval <= Gdk.KEY_Arabic_sukun) ||
+                    (keyval >= Gdk.KEY_Serbian_dje &&
+                        keyval <= Gdk.KEY_Cyrillic_HARDSIGN) ||
+                    (keyval >= Gdk.KEY_Greek_ALPHAaccent &&
+                        keyval <= Gdk.KEY_Greek_omega) ||
+                    (keyval >= Gdk.KEY_hebrew_doublelowline &&
+                        keyval <= Gdk.KEY_hebrew_taf) ||
+                    (keyval >= Gdk.KEY_Thai_kokai &&
+                        keyval <= Gdk.KEY_Thai_lekkao) ||
+                    (keyval >= Gdk.KEY_Hangul_Kiyeog &&
+                        keyval <= Gdk.KEY_Hangul_J_YeorinHieuh) ||
+                    (keyval === Gdk.KEY_space && mask === 0) ||
+                    this._keyvalIsForbidden(keyval)))
+        );
+    }
+
+    _isValidAccel(mask, keyval) {
+        return Gtk.accelerator_valid(keyval, mask) ||
+            (keyval === Gdk.KEY_Tab && mask !== 0);
+    }
+});
 
 const WordpipePage = GObject.registerClass(
 class WordpipePage extends Adw.PreferencesPage {
@@ -276,42 +437,18 @@ class WordpipePage extends Adw.PreferencesPage {
         });
         group.add(this._delayRow);
 
-        const shortcutRow = new Adw.EntryRow({
+        const shortcutButton = new ShortcutSettingButton('toggle-shortcut', this._settings);
+        shortcutButton.connect('changed',
+            (_button, accelerator) => this._callRemote('SetShortcut', accelerator));
+        shortcutButton.set_vexpand(false);
+        shortcutButton.set_valign(Gtk.Align.CENTER);
+        const shortcutRow = new Adw.ActionRow({
             title: _('Shortcut'),
-            text: this._settings.get_strv('toggle-shortcut')[0] ?? '',
+            subtitle: _('Click to record a shortcut. Use Backspace to clear.'),
         });
-        shortcutRow.connect('changed', row => {
-            if (this._syncingSettings)
-                return;
-            const accelerator = normalizeAcceleratorText(row.text.trim());
-            if (accelerator === null)
-                return;
-            this._setShortcut(accelerator);
-        });
-        const clearButton = new Gtk.Button({
-            icon_name: 'edit-clear-symbolic',
-            valign: Gtk.Align.CENTER,
-            css_classes: ['flat'],
-            tooltip_text: _('Clear shortcut'),
-        });
-        clearButton.connect('clicked', () => this._setShortcut(''));
-        shortcutRow.add_suffix(clearButton);
-        const resetButton = new Gtk.Button({
-            icon_name: 'edit-undo-symbolic',
-            valign: Gtk.Align.CENTER,
-            css_classes: ['flat'],
-            tooltip_text: _('Reset shortcut'),
-        });
-        resetButton.connect('clicked', () => this._setShortcut(DEFAULT_TOGGLE_SHORTCUT));
-        shortcutRow.add_suffix(resetButton);
-        this._shortcutsHelpButton = new Gtk.Button({
-            icon_name: 'help-browser-symbolic',
-            valign: Gtk.Align.CENTER,
-            css_classes: ['flat'],
-            tooltip_text: _('Show keyboard shortcuts'),
-        });
-        this._shortcutsHelpButton.connect('clicked', () => this._showShortcutsDialog());
-        shortcutRow.add_suffix(this._shortcutsHelpButton);
+        shortcutRow.add_suffix(shortcutButton);
+        shortcutRow.set_activatable_widget(shortcutButton);
+        this._shortcutButton = shortcutButton;
         this._shortcutRow = shortcutRow;
         group.add(shortcutRow);
     }
@@ -789,33 +926,7 @@ class WordpipePage extends Adw.PreferencesPage {
     }
 
     _syncShortcutValue() {
-        const accelerator = this._settings.get_strv('toggle-shortcut')[0] ?? '';
-        this._withSyncing(() => {
-            this._shortcutRow.text = accelerator;
-        });
-    }
-
-    _setShortcut(accelerator) {
-        if (this._syncingSettings)
-            return;
-        this._settings.set_strv('toggle-shortcut', accelerator ? [accelerator] : []);
-        this._callRemote('SetShortcut', accelerator);
-        this._syncShortcutValue();
-    }
-
-    _showShortcutsDialog() {
-        const dialog = new Adw.ShortcutsDialog();
-        dialog.title = _('Wordpipe Keyboard Shortcuts');
-
-        const accelerator = this._settings.get_strv('toggle-shortcut')[0] ?? '';
-        if (accelerator) {
-            const section = Adw.ShortcutsSection.new(_('Dictation'));
-            section.add(Adw.ShortcutsItem.new(
-                _('Toggle dictation'),
-                accelerator));
-            dialog.add(section);
-        }
-        dialog.present(this.get_root());
+        this._shortcutButton?.syncFromSettings();
     }
 
     _callRemote(method, ...args) {
@@ -915,13 +1026,4 @@ function numberValue(value) {
 function formatError(error) {
     const message = error?.message ?? String(error);
     return message.replace(/^GDBus\.Error:[^:]+:\s*/, '');
-}
-
-function normalizeAcceleratorText(text) {
-    if (!text)
-        return '';
-    const [_ok, key, mods] = Gtk.accelerator_parse(text);
-    if (!Gtk.accelerator_valid(key, mods))
-        return null;
-    return Gtk.accelerator_name(key, mods);
 }
