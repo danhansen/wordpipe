@@ -455,6 +455,7 @@ impl WordpipeService {
             let mut data = self.lock_data()?;
             let mut restart_worker = false;
             if let Some(value) = get_string(&options, "model_root") {
+                let value = normalize_model_root(value);
                 restart_worker |= data.config.model_root != value;
                 data.config.model_root = value;
             }
@@ -1094,7 +1095,7 @@ fn apply_persisted_config(
         config.shortcut = value;
     }
     if let Some(value) = persisted.model_root {
-        config.model_root = value;
+        config.model_root = normalize_model_root(value);
     }
     if let Some(value) = persisted.worker_path {
         config.worker_path = value;
@@ -1188,6 +1189,14 @@ fn default_model_root() -> String {
         format!("{}/.local/share/wordpipe/models", value.to_string_lossy())
     } else {
         "wordpipe/models".to_string()
+    }
+}
+
+fn normalize_model_root(value: String) -> String {
+    if value.trim().is_empty() {
+        default_model_root()
+    } else {
+        value
     }
 }
 
@@ -1700,6 +1709,20 @@ mod tests {
         assert_eq!(config.sample_rate, 16_000);
         assert!(!config.show_overlay);
         assert_eq!(config.backend, DEFAULT_BACKEND);
+    }
+
+    #[test]
+    fn empty_persisted_model_root_uses_default() {
+        let config = apply_persisted_config(
+            ServiceConfig::default(),
+            PersistedConfig {
+                model_root: Some("  ".to_string()),
+                ..PersistedConfig::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(config.model_root, default_model_root());
     }
 
     #[test]

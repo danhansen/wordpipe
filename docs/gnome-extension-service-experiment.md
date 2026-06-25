@@ -290,7 +290,8 @@ SetRuntimeOptions(a{sv})
 Supported keys are `model_root`, `worker_path`, `model_installer_path`,
 `sample_rate`, and `num_threads`. Changes that affect the active worker stop the
 current worker so the next dictation session starts with the new runtime
-settings.
+settings. Empty or whitespace-only `model_root` values are normalized to the
+service default model root.
 
 ## Open Questions
 
