@@ -129,6 +129,9 @@ installer starts, so clients can disable start/install controls immediately.
 GNOME clients treat D-Bus proxy/connection failures as service-unavailable, but
 ordinary method failures remain in the connected state and are surfaced as
 status text.
+Start-time failures such as a missing selected model profile or worker spawn
+failure are also recorded in `last_error` and emitted through `Error` plus
+`StateChanged`, so clients other than the caller see the failure.
 The service applies spoken-punctuation normalization before computing
 `TextDelta` when `spoken_punctuation` is enabled. Partial normalization holds
 ambiguous trailing command prefixes such as `new`, `question`, `full`, and

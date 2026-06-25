@@ -187,19 +187,25 @@ impl WordpipeService {
         &self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        if self.lock_data()?.stopping {
-            return Err(zbus::fdo::Error::Failed(
-                "dictation is stopping".to_string(),
-            ));
+        let is_stopping = { self.lock_data()?.stopping };
+        if is_stopping {
+            let message = "dictation is stopping".to_string();
+            self.record_error(&emitter, &message).await?;
+            return Err(zbus::fdo::Error::Failed(message));
         }
-        self.ensure_worker(emitter.to_owned()).await?;
+        if let Err(err) = self.ensure_worker(emitter.to_owned()).await {
+            let message = fdo_error_message(&err);
+            self.record_error(&emitter, &message).await?;
+            return Err(err);
+        }
+        let is_stopping = { self.lock_data()?.stopping };
+        if is_stopping {
+            let message = "dictation is stopping".to_string();
+            self.record_error(&emitter, &message).await?;
+            return Err(zbus::fdo::Error::Failed(message));
+        }
         let (state, session_id, stdin) = {
             let mut data = self.lock_data()?;
-            if data.stopping {
-                return Err(zbus::fdo::Error::Failed(
-                    "dictation is stopping".to_string(),
-                ));
-            }
             if !data.listening {
                 data.listening = true;
                 data.stopping = false;
@@ -617,6 +623,23 @@ impl WordpipeService {
         save_service_config(&self.config_path, config).map_err(fdo_failed)
     }
 
+    async fn record_error(
+        &self,
+        emitter: &SignalEmitter<'_>,
+        message: &str,
+    ) -> zbus::fdo::Result<()> {
+        let state = {
+            let mut data = self.lock_data()?;
+            data.last_error = message.to_string();
+            data.loading_model = false;
+            data.model_loaded = false;
+            state_map(&data)
+        };
+        Self::error(emitter, message).await?;
+        Self::state_changed(emitter, state).await?;
+        Ok(())
+    }
+
     async fn ensure_worker(&self, emitter: SignalEmitter<'static>) -> zbus::fdo::Result<()> {
         let spawn = {
             let data = self.lock_data()?;
@@ -639,7 +662,15 @@ impl WordpipeService {
             data.loading_model = true;
             data.model_loaded = false;
             data.last_error.clear();
-            spawn_worker(&config, &runtime_dir).map_err(fdo_failed)?
+            match spawn_worker(&config, &runtime_dir) {
+                Ok(worker) => worker,
+                Err(err) => {
+                    data.loading_model = false;
+                    data.model_loaded = false;
+                    data.last_error = err.to_string();
+                    return Err(fdo_failed(err));
+                }
+            }
         };
 
         {
@@ -1284,6 +1315,14 @@ fn fdo_failed(err: anyhow::Error) -> zbus::fdo::Error {
     zbus::fdo::Error::Failed(err.to_string())
 }
 
+fn fdo_error_message(err: &zbus::fdo::Error) -> String {
+    let message = err.to_string();
+    message
+        .strip_prefix("org.freedesktop.DBus.Error.Failed: ")
+        .unwrap_or(&message)
+        .to_string()
+}
+
 fn default_worker_path() -> String {
     if let Ok(value) = std::env::var("WORDPIPE_WORKER") {
         return value;
@@ -1898,6 +1937,13 @@ mod tests {
         );
         assert!(!data.stopping);
         assert!(data.last_error.is_empty());
+    }
+
+    #[test]
+    fn fdo_error_message_strips_failed_prefix() {
+        let err = zbus::fdo::Error::Failed("model missing".to_string());
+
+        assert_eq!(fdo_error_message(&err), "model missing");
     }
 
     #[test]
