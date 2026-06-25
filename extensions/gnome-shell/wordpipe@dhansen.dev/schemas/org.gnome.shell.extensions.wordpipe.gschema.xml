@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.wordpipe" path="/org/gnome/shell/extensions/wordpipe/">
+    <key name="toggle-shortcut" type="as">
+      <default>['&lt;Control&gt;&lt;Alt&gt;space']</default>
+      <summary>Toggle dictation shortcut</summary>
+      <description>Keyboard shortcut handled by GNOME Shell to start or stop Wordpipe dictation.</description>
+    </key>
+    <key name="backend" type="s">
+      <default>'parakeet'</default>
+      <summary>ASR backend</summary>
+      <description>Selected ASR backend exposed by the Wordpipe service.</description>
+    </key>
+    <key name="model-profile" type="s">
+      <default>'fast'</default>
+      <summary>Model profile</summary>
+      <description>Wordpipe model profile, such as fast or compact.</description>
+    </key>
+    <key name="input-device" type="s">
+      <default>''</default>
+      <summary>Input device selector</summary>
+      <description>CPAL input device selector. Empty means the system default input device.</description>
+    </key>
+    <key name="spoken-punctuation" type="b">
+      <default>true</default>
+      <summary>Spoken punctuation</summary>
+      <description>Enable spoken punctuation handling in the service.</description>
+    </key>
+    <key name="insert-partials" type="b">
+      <default>true</default>
+      <summary>Insert streaming partials</summary>
+      <description>Insert append-only streaming deltas as soon as they are emitted by the service.</description>
+    </key>
+    <key name="stream-insert-delay-ms" type="u">
+      <default>0</default>
+      <summary>Stream insertion delay</summary>
+      <description>Additional delay before inserting streaming text, in milliseconds.</description>
+    </key>
+    <key name="show-overlay" type="b">
+      <default>true</default>
+      <summary>Show dictation overlay</summary>
+      <description>Show an on-screen status overlay while dictation is active.</description>
+    </key>
+  </schema>
+</schemalist>

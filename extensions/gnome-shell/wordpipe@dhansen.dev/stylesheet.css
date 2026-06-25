@@ -1,0 +1,19 @@
+.wordpipe-panel-icon {
+  icon-size: 16px;
+}
+
+.wordpipe-overlay {
+  background-color: rgba(36, 36, 36, 0.92);
+  border-radius: 8px;
+  padding: 10px 14px;
+  spacing: 8px;
+  color: #ffffff;
+}
+
+.wordpipe-overlay-label {
+  font-weight: 600;
+}
+
+.wordpipe-overlay-subtitle {
+  color: rgba(255, 255, 255, 0.72);
+}

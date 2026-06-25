@@ -104,15 +104,88 @@ stale events after toggles, restarts, or extension reloads.
 
 ## Migration Steps
 
-1. Add a Rust crate for the service protocol and D-Bus server.
-2. Move the current Rust worker loop into long-lived service state.
+1. Add a Rust crate for the service protocol and D-Bus server. Done.
+2. Move the current Rust worker loop into long-lived service state. Next.
 3. Preserve the current JSON-line worker mode for benchmarks during migration.
+   Done.
 4. Add a minimal GNOME Shell extension that can connect to D-Bus and show
-   service state.
+   service state. Done.
 5. Add extension preferences for model profile, mic, and insertion options.
-6. Replace portal keyboard insertion with GNOME Shell insertion adapter.
-7. Add local installer script for the service plus extension.
+   Done.
+6. Replace portal keyboard insertion with GNOME Shell insertion adapter. Next.
+7. Add local installer script for the service plus extension. Done.
 8. Keep KDE/other desktop clients as separate adapters using the same D-Bus API.
+   Ongoing.
+
+## Current Experiment State
+
+The branch now has three Rust workspace crates:
+
+```text
+crates/wordpipe-protocol
+  Shared D-Bus constants and model/backend profile metadata.
+
+crates/wordpipe-service
+  Session D-Bus service skeleton. It owns config/state, lists CPAL input
+  devices, exposes model/backend setup methods, and emits the planned
+  streaming signals.
+
+crates/wordpipe-parakeet-worker
+  Existing JSON-line ASR worker retained for benchmarks and as the code source
+  for the upcoming service runtime migration.
+```
+
+The GNOME Shell extension lives at:
+
+```text
+extensions/gnome-shell/wordpipe@dhansen.dev
+```
+
+It currently provides:
+
+- Panel indicator and menu for start/stop and model install actions.
+- GNOME Shell global shortcut using the extension's GSettings key.
+- Preferences UI for backend, model profile, microphone, streaming insertion
+  options, overlay, and shortcut.
+- Overlay/status updates driven by D-Bus state and transcript signals.
+
+The `TextInjector` in `extension.js` is intentionally isolated. It currently
+logs append-only text deltas. The next GNOME-specific step is replacing that
+method with the validated GNOME Shell 50 OSK/internal text injection call.
+
+## Local Install
+
+Install the service and extension for the current user:
+
+```bash
+scripts/install-wordpipe-gnome
+```
+
+The installer:
+
+- Builds `wordpipe-service` in release mode.
+- Installs it to `~/.local/libexec/wordpipe/wordpipe-service`.
+- Installs a session D-Bus activation file for `dev.wordpipe.Service`.
+- Installs a systemd user unit at
+  `~/.config/systemd/user/wordpipe-service.service`.
+- Copies the extension to
+  `~/.local/share/gnome-shell/extensions/wordpipe@dhansen.dev`.
+- Runs `glib-compile-schemas` for the installed extension.
+- Enables the extension with `gnome-extensions enable`.
+
+Open preferences after install:
+
+```bash
+gnome-extensions prefs wordpipe@dhansen.dev
+```
+
+Start the service explicitly for development:
+
+```bash
+systemctl --user start wordpipe-service.service
+```
+
+Or let D-Bus activate it when the extension first calls the service.
 
 ## Open Questions
 

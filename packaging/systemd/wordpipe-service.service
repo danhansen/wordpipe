@@ -1,0 +1,12 @@
+[Unit]
+Description=Wordpipe Rust dictation service
+Documentation=https://github.com/danhansen/wordpipe
+
+[Service]
+Type=simple
+ExecStart=%h/.local/libexec/wordpipe/wordpipe-service
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

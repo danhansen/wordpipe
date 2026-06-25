@@ -18,3 +18,4 @@ target/
 *.egg-info/
 
 models/
+extensions/**/schemas/gschemas.compiled
