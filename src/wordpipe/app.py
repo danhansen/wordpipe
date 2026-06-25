@@ -10,6 +10,7 @@ from typing import Callable
 from .daemon import DaemonConfig, DictationController
 from .insertion import DryRunKeyboardBackend, PortalKeyboardBackend
 from .models import MODEL_PROFILES, profile_installed, profile_runtime_dir
+from .shortcuts import flatpak_shortcut_spec, install_shortcut, read_shortcut_status
 
 
 @dataclass(frozen=True)
@@ -95,6 +96,8 @@ class WordpipeApp:
         self._profile_dropdown = None
         self._profile_status_label = None
         self._install_button = None
+        self._shortcut_status_label = None
+        self._shortcut_button = None
         self._install_thread: threading.Thread | None = None
         self._last_install_progress = 0.0
         self._selected_profile = model_setup.model_profile if model_setup else "fast"
@@ -164,6 +167,7 @@ class WordpipeApp:
         window.connect("close-request", self._close_request)
         window.present()
         assert self._glib is not None
+        self._glib.idle_add(self._refresh_shortcut_state)
         self._glib.idle_add(self._open_controller)
 
     def _build_content(self, Gtk, Adw=None):  # type: ignore[no-untyped-def]
@@ -224,6 +228,10 @@ class WordpipeApp:
         self._error_label = Adw.ActionRow(title="Last Error", subtitle="")
         diagnostics.add(self._error_label)
         root.append(diagnostics)
+
+        system = Adw.PreferencesGroup(title="System")
+        self._build_shortcut_row(system, Gtk, Adw)
+        root.append(system)
         return scrolled
 
     def _build_gtk_content(self, Gtk):  # type: ignore[no-untyped-def]
@@ -264,6 +272,7 @@ class WordpipeApp:
         self._error_label.set_wrap(True)
         self._error_label.add_css_class("error")
         root.append(self._error_label)
+        self._build_shortcut_row(root, Gtk)
         return root
 
     def _build_profile_row(self, root, Gtk, Adw=None) -> None:  # type: ignore[no-untyped-def]
@@ -299,6 +308,30 @@ class WordpipeApp:
             row.append(self._install_button)
             root.append(row)
         self._refresh_profile_state()
+
+    def _build_shortcut_row(self, root, Gtk, Adw=None) -> None:  # type: ignore[no-untyped-def]
+        self._shortcut_button = Gtk.Button(label="Install")
+        self._shortcut_button.set_tooltip_text("Install or repair the GNOME dictation shortcut")
+        self._shortcut_button.connect("clicked", self._install_gnome_shortcut)
+
+        if Adw is not None:
+            row = Adw.ActionRow(title="Keyboard Shortcut", subtitle="Checking")
+            row.add_prefix(Gtk.Image.new_from_icon_name("preferences-desktop-keyboard-shortcuts-symbolic"))
+            row.add_suffix(self._shortcut_button)
+            self._shortcut_status_label = row
+            root.add(row)
+            return
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        row.set_valign(Gtk.Align.CENTER)
+        row.append(Gtk.Image.new_from_icon_name("preferences-desktop-keyboard-shortcuts-symbolic"))
+        self._shortcut_status_label = Gtk.Label(label="Checking shortcut")
+        self._shortcut_status_label.set_xalign(0)
+        self._shortcut_status_label.set_hexpand(True)
+        self._shortcut_status_label.set_wrap(True)
+        row.append(self._shortcut_status_label)
+        row.append(self._shortcut_button)
+        root.append(row)
 
     def _section(self, root, Gtk, title: str, body: str):  # type: ignore[no-untyped-def]
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -514,9 +547,46 @@ class WordpipeApp:
     def _show_preferences_placeholder(self, _button) -> None:  # type: ignore[no-untyped-def]
         self._show_toast("Preferences are not available yet")
 
+    def _refresh_shortcut_state(self) -> bool:
+        if self._shortcut_status_label is None:
+            return False
+        try:
+            status = read_shortcut_status(flatpak_shortcut_spec())
+        except Exception as exc:  # noqa: BLE001 - desktop integration failures belong in the UI.
+            self._set_label(self._shortcut_status_label, f"Shortcut status unavailable: {exc}")
+            self._set_shortcut_button_label("Retry")
+            return False
+        self._set_label(self._shortcut_status_label, status.summary)
+        self._set_shortcut_button_label("Repair" if status.present else "Install")
+        return False
+
+    def _install_gnome_shortcut(self, _button) -> None:  # type: ignore[no-untyped-def]
+        self._set_shortcut_sensitive(False)
+        try:
+            status = install_shortcut(flatpak_shortcut_spec())
+        except Exception as exc:  # noqa: BLE001 - show actionable setup failures.
+            self._set_label(self._shortcut_status_label, f"Shortcut install failed: {exc}")
+            self._set_error_text(f"Shortcut install failed: {exc}")
+            self._set_shortcut_button_label("Retry")
+        else:
+            self._set_error_text("")
+            self._set_label(self._shortcut_status_label, status.summary)
+            self._set_shortcut_button_label("Repair" if status.present else "Install")
+            self._show_toast("Keyboard shortcut installed")
+        finally:
+            self._set_shortcut_sensitive(True)
+
     def _set_button_sensitive(self, sensitive: bool) -> None:
         if self._toggle_button is not None:
             self._toggle_button.set_sensitive(sensitive)
+
+    def _set_shortcut_sensitive(self, sensitive: bool) -> None:
+        if self._shortcut_button is not None:
+            self._shortcut_button.set_sensitive(sensitive)
+
+    def _set_shortcut_button_label(self, text: str) -> None:
+        if self._shortcut_button is not None:
+            self._shortcut_button.set_label(text)
 
     def _set_install_sensitive(self, sensitive: bool) -> None:
         if self._install_button is not None:

@@ -126,6 +126,13 @@ shortcut that starts and toggles the resident Flatpak voice keyboard:
 scripts/install-wordpipe-flatpak-gnome-shortcut
 ```
 
+The helper wraps the same implementation exposed by the development CLI:
+
+```sh
+scripts/wordpipe-dev shortcut-status --target flatpak
+scripts/wordpipe-dev shortcut-install --target flatpak
+```
+
 Then focus a text field and press `Ctrl+Alt+Space` to start or stop dictation.
 The first press starts `voice-keyboard --signal-hotkey` inside the Flatpak when
 needed, waits for the ready pid file, and then toggles dictation. For visible
@@ -151,6 +158,9 @@ Flatpak cache at
 
 The app profile selector writes `model_profile` into the Flatpak config, so the
 resident daemon uses the selected profile unless `--model-profile` is passed.
+The app also shows shortcut status and can try to repair it, but the host helper
+above is the reliable path if the Flatpak sandbox cannot write GNOME's host
+custom-keybinding settings.
 
 Successful builds remove intermediate export files under
 `~/.var/app/dev.wordpipe.Wordpipe/data/wordpipe/models/build/` by default. Pass

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import unittest
 from pathlib import Path
+import subprocess
 import tempfile
+from typing import Sequence
 from unittest import mock
 
 from wordpipe.app import (
@@ -16,6 +18,7 @@ from wordpipe.app import (
 from wordpipe.config import load_config
 from wordpipe.daemon import DaemonConfig
 from wordpipe.models import profile_runtime_dir
+from wordpipe.shortcuts import flatpak_shortcut_spec, install_shortcut
 
 
 class UiTranscriptSinkTests(unittest.TestCase):
@@ -81,12 +84,16 @@ class FakeButton:
     def __init__(self) -> None:
         self.sensitive_values: list[bool] = []
         self.active_values: list[bool] = []
+        self.labels: list[str] = []
 
     def set_sensitive(self, sensitive: bool) -> None:
         self.sensitive_values.append(sensitive)
 
     def set_active(self, active: bool) -> None:
         self.active_values.append(active)
+
+    def set_label(self, label: str) -> None:
+        self.labels.append(label)
 
 
 class FakeLabel:
@@ -135,6 +142,26 @@ class FakeAdw:
             return cls(text)
 
 
+def _shortcut_runner():
+    values: dict[tuple[str, str], str] = {
+        (
+            "org.gnome.settings-daemon.plugins.media-keys",
+            "custom-keybindings",
+        ): "@as []",
+    }
+
+    def run(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        args = list(command)
+        if args[1] == "get":
+            return subprocess.CompletedProcess(args, 0, values.get((args[2], args[3]), "''"), "")
+        if args[1] == "set":
+            values[(args[2], args[3])] = args[4]
+            return subprocess.CompletedProcess(args, 0, "", "")
+        return subprocess.CompletedProcess(args, 2, "", "unsupported")
+
+    return run
+
+
 class FakeDropdown:
     def __init__(self, selected: int) -> None:
         self._selected = selected
@@ -175,6 +202,58 @@ class AppControllerStateTests(unittest.TestCase):
         app._show_toast("Compact model installed")
 
         self.assertEqual(overlay.toasts, ["Compact model installed"])
+
+    def test_refresh_shortcut_state_updates_status_and_repair_action(self) -> None:
+        app = WordpipeApp(None)
+        row = FakeActionRow()
+        button = FakeButton()
+        app._shortcut_status_label = row
+        app._shortcut_button = button
+        spec = flatpak_shortcut_spec(binding="<Super>d")
+        status = install_shortcut(spec, runner=_shortcut_runner())
+
+        with mock.patch("wordpipe.app.flatpak_shortcut_spec", return_value=spec):
+            with mock.patch("wordpipe.app.read_shortcut_status", return_value=status):
+                self.assertFalse(app._refresh_shortcut_state())
+
+        self.assertIn("installed: <Super>d", row.subtitle)
+        self.assertEqual(button.labels, ["Repair"])
+
+    def test_refresh_shortcut_state_reports_gsettings_failure(self) -> None:
+        app = WordpipeApp(None)
+        row = FakeActionRow()
+        button = FakeButton()
+        app._shortcut_status_label = row
+        app._shortcut_button = button
+
+        with mock.patch("wordpipe.app.read_shortcut_status", side_effect=RuntimeError("no dconf")):
+            self.assertFalse(app._refresh_shortcut_state())
+
+        self.assertIn("Shortcut status unavailable: no dconf", row.subtitle)
+        self.assertEqual(button.labels, ["Retry"])
+
+    def test_install_gnome_shortcut_surfaces_success_toast(self) -> None:
+        app = WordpipeApp(None)
+        row = FakeActionRow()
+        banner = FakeBanner()
+        button = FakeButton()
+        overlay = FakeToastOverlay()
+        app._adw = FakeAdw
+        app._shortcut_status_label = row
+        app._shortcut_button = button
+        app._error_banner = banner
+        app._error_label = FakeActionRow()
+        app._toast_overlay = overlay
+        spec = flatpak_shortcut_spec(binding="<Super>d")
+        status = install_shortcut(spec, runner=_shortcut_runner())
+
+        with mock.patch("wordpipe.app.flatpak_shortcut_spec", return_value=spec):
+            with mock.patch("wordpipe.app.install_shortcut", return_value=status):
+                app._install_gnome_shortcut(button)
+
+        self.assertIn("installed: <Super>d", row.subtitle)
+        self.assertEqual(button.sensitive_values, [False, True])
+        self.assertEqual(overlay.toasts, ["Keyboard shortcut installed"])
 
     def test_open_controller_reenables_dictate_button_after_setup_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -420,6 +420,51 @@ def _cmd_type_text(args: argparse.Namespace) -> int:
     return 0
 
 
+def _shortcut_spec_from_args(args: argparse.Namespace):
+    from .shortcuts import flatpak_shortcut_spec, local_shortcut_spec
+
+    if args.target == "local":
+        root = Path(args.root).expanduser() if args.root else Path(__file__).resolve().parents[2]
+        return local_shortcut_spec(root, binding=args.binding)
+    return flatpak_shortcut_spec(app_id=args.app_id, binding=args.binding)
+
+
+def _cmd_shortcut_status(args: argparse.Namespace) -> int:
+    from .shortcuts import read_shortcut_status
+
+    status = read_shortcut_status(_shortcut_spec_from_args(args))
+    if args.json:
+        _print_json(
+            {
+                "present": status.present,
+                "matches": status.matches,
+                "name": status.name,
+                "command": status.command,
+                "binding": status.binding,
+                "expected": {
+                    "name": status.spec.name,
+                    "command": status.spec.command,
+                    "binding": status.spec.binding,
+                    "path": status.spec.path,
+                },
+                "configured_paths": list(status.configured_paths),
+            }
+        )
+    else:
+        print(status.summary)
+        if not status.matches:
+            print(f"expected: {status.spec.binding} -> {status.spec.command}")
+    return 0 if status.matches else 2
+
+
+def _cmd_shortcut_install(args: argparse.Namespace) -> int:
+    from .shortcuts import install_shortcut
+
+    status = install_shortcut(_shortcut_spec_from_args(args))
+    print(status.summary)
+    return 0 if status.matches else 2
+
+
 def _load_cli_config(args: argparse.Namespace) -> WordpipeConfig:
     path = Path(args.config).expanduser() if getattr(args, "config", None) else None
     return load_config(path)
@@ -826,6 +871,31 @@ def _add_insertion_mode_args(parser: argparse.ArgumentParser, *, partials_defaul
     )
 
 
+def _add_shortcut_args(parser: argparse.ArgumentParser) -> None:
+    from .shortcuts import DEFAULT_FLATPAK_APP_ID, DEFAULT_SHORTCUT_BINDING
+
+    parser.add_argument(
+        "--target",
+        choices=("flatpak", "local"),
+        default="flatpak",
+        help="Use the Flatpak shortcut or the local development shortcut.",
+    )
+    parser.add_argument(
+        "--binding",
+        default=DEFAULT_SHORTCUT_BINDING,
+        help="GNOME accelerator string to bind.",
+    )
+    parser.add_argument(
+        "--app-id",
+        default=os.environ.get("WORDPIPE_FLATPAK_APP_ID", DEFAULT_FLATPAK_APP_ID),
+        help="Flatpak app id used when --target=flatpak.",
+    )
+    parser.add_argument(
+        "--root",
+        help="Project root used when --target=local. Defaults to this source checkout.",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="wordpipe",
@@ -1083,6 +1153,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print generated keysyms instead of opening a portal session.",
     )
     type_text.set_defaults(func=_cmd_type_text)
+
+    shortcut_status = subparsers.add_parser(
+        "shortcut-status",
+        help="Check the GNOME custom shortcut used to toggle dictation.",
+    )
+    _add_shortcut_args(shortcut_status)
+    shortcut_status.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    shortcut_status.set_defaults(func=_cmd_shortcut_status)
+
+    shortcut_install = subparsers.add_parser(
+        "shortcut-install",
+        help="Install or repair the GNOME custom shortcut used to toggle dictation.",
+    )
+    _add_shortcut_args(shortcut_install)
+    shortcut_install.set_defaults(func=_cmd_shortcut_install)
 
     config_example = subparsers.add_parser(
         "config-example",

@@ -1,23 +1,11 @@
 #!/usr/bin/env sh
 set -eu
 
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 APP_ID="${WORDPIPE_FLATPAK_APP_ID:-dev.wordpipe.Wordpipe}"
-PATH_KEY="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/wordpipe-flatpak/"
-SCHEMA="org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$PATH_KEY"
-COMMAND="flatpak run $APP_ID voice-keyboard-toggle --start-if-needed"
 BINDING="${1:-<Control><Alt>space}"
 
-current="$(gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings)"
-case "$current" in
-  *"$PATH_KEY"*) next="$current" ;;
-  "@as []") next="['$PATH_KEY']" ;;
-  "[]") next="['$PATH_KEY']" ;;
-  *) next="$(printf '%s' "$current" | sed "s/]$/, '$PATH_KEY']/")" ;;
-esac
-
-gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "$next"
-gsettings set "$SCHEMA" name "Wordpipe Dictation"
-gsettings set "$SCHEMA" command "$COMMAND"
-gsettings set "$SCHEMA" binding "$BINDING"
-
-printf 'Installed GNOME shortcut %s -> %s\n' "$BINDING" "$COMMAND"
+exec "$ROOT/scripts/wordpipe-dev" shortcut-install \
+  --target flatpak \
+  --app-id "$APP_ID" \
+  --binding "$BINDING"

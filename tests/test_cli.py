@@ -149,6 +149,21 @@ class CliModelResolutionTests(unittest.TestCase):
         self.assertEqual(args.backend, "parakeet")
         self.assertEqual(args.asr_worker_path, "/tmp/worker")
 
+    def test_shortcut_parsers_accept_binding_target_and_json(self) -> None:
+        status_args = build_parser().parse_args(
+            ["shortcut-status", "--binding", "<Super>d", "--json"]
+        )
+        install_args = build_parser().parse_args(
+            ["shortcut-install", "--target", "local", "--root", "/repo"]
+        )
+
+        self.assertEqual(status_args.command, "shortcut-status")
+        self.assertEqual(status_args.binding, "<Super>d")
+        self.assertTrue(status_args.json)
+        self.assertEqual(install_args.command, "shortcut-install")
+        self.assertEqual(install_args.target, "local")
+        self.assertEqual(install_args.root, "/repo")
+
     def test_render_parakeet_input_devices_uses_worker_json_events(self) -> None:
         output = "\n".join(
             [
