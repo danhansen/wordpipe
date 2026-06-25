@@ -154,6 +154,13 @@ enum ToggleAction {
     Stop,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WorkerExit {
+    session_id: u64,
+    was_active: bool,
+    was_expected_shutdown: bool,
+}
+
 #[derive(Clone, Default)]
 struct WordpipeService {
     data: Arc<Mutex<ServiceData>>,
@@ -671,18 +678,20 @@ impl WordpipeService {
                 }
             }
         }
-        let state = {
+        let (state, exit) = {
             let mut data = match self.data.lock() {
                 Ok(data) => data,
                 Err(_) => return,
             };
-            data.listening = false;
-            data.stopping = false;
-            data.loading_model = false;
-            data.model_loaded = false;
-            data.worker = None;
-            state_map(&data)
+            let exit = apply_worker_exit(&mut data);
+            (state_map(&data), exit)
         };
+        if exit.was_active {
+            let _ = zbus::block_on(Self::session_stopped(&emitter, exit.session_id));
+        }
+        if exit.was_active && !exit.was_expected_shutdown {
+            let _ = zbus::block_on(Self::error(&emitter, "ASR worker exited unexpectedly"));
+        }
         let _ = zbus::block_on(Self::state_changed(&emitter, state));
     }
 
@@ -1205,6 +1214,23 @@ fn toggle_action(data: &ServiceData) -> ToggleAction {
     } else {
         ToggleAction::Start
     }
+}
+
+fn apply_worker_exit(data: &mut ServiceData) -> WorkerExit {
+    let event = WorkerExit {
+        session_id: data.session_id,
+        was_active: data.listening || data.stopping || data.loading_model,
+        was_expected_shutdown: data.stopping,
+    };
+    if data.listening || data.loading_model {
+        data.last_error = "ASR worker exited unexpectedly".to_string();
+    }
+    data.listening = false;
+    data.stopping = false;
+    data.loading_model = false;
+    data.model_loaded = false;
+    data.worker = None;
+    event
 }
 
 fn insert_str(map: &mut VariantMap, key: &str, value: &str) {
@@ -1825,6 +1851,53 @@ mod tests {
 
         assert_eq!(toggle_action(&listening), ToggleAction::Stop);
         assert_eq!(toggle_action(&stopping), ToggleAction::Stop);
+    }
+
+    #[test]
+    fn worker_exit_marks_active_session_stopped_with_error() {
+        let mut data = ServiceData {
+            listening: true,
+            session_id: 42,
+            model_loaded: true,
+            ..ServiceData::default()
+        };
+
+        let exit = apply_worker_exit(&mut data);
+
+        assert_eq!(
+            exit,
+            WorkerExit {
+                session_id: 42,
+                was_active: true,
+                was_expected_shutdown: false,
+            }
+        );
+        assert!(!data.listening);
+        assert!(!data.model_loaded);
+        assert_eq!(data.last_error, "ASR worker exited unexpectedly");
+    }
+
+    #[test]
+    fn worker_exit_during_stopping_is_expected() {
+        let mut data = ServiceData {
+            stopping: true,
+            session_id: 43,
+            model_loaded: true,
+            ..ServiceData::default()
+        };
+
+        let exit = apply_worker_exit(&mut data);
+
+        assert_eq!(
+            exit,
+            WorkerExit {
+                session_id: 43,
+                was_active: true,
+                was_expected_shutdown: true,
+            }
+        );
+        assert!(!data.stopping);
+        assert!(data.last_error.is_empty());
     }
 
     #[test]

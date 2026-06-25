@@ -143,6 +143,10 @@ emits final `Commit` before `SessionStopped` when the worker produces one.
 `Toggle()` treats both `listening` and `stopping` as stop states, and `Start()`
 rejects requests during the stopping window so a repeated hotkey cannot restart
 dictation before the previous flush has completed.
+If the ASR worker exits while a session is active, the service emits
+`SessionStopped`, records `last_error`, emits `Error`, and then publishes
+`StateChanged` with all active/loading flags cleared. An exit while already
+`stopping` is treated as expected shutdown.
 
 ## Migration Steps
 
