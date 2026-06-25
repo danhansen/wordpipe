@@ -460,10 +460,12 @@ impl WordpipeService {
                 data.config.model_root = value;
             }
             if let Some(value) = get_string(&options, "worker_path") {
+                let value = normalize_worker_path(value);
                 restart_worker |= data.config.worker_path != value;
                 data.config.worker_path = value;
             }
             if let Some(value) = get_string(&options, "model_installer_path") {
+                let value = normalize_model_installer_path(value);
                 data.config.model_installer_path = value;
             }
             if let Some(value) = get_u32(&options, "sample_rate") {
@@ -1098,10 +1100,10 @@ fn apply_persisted_config(
         config.model_root = normalize_model_root(value);
     }
     if let Some(value) = persisted.worker_path {
-        config.worker_path = value;
+        config.worker_path = normalize_worker_path(value);
     }
     if let Some(value) = persisted.model_installer_path {
-        config.model_installer_path = value;
+        config.model_installer_path = normalize_model_installer_path(value);
     }
     if let Some(value) = persisted.sample_rate {
         if value == 0 {
@@ -1199,6 +1201,22 @@ fn default_model_root() -> String {
 fn normalize_model_root(value: String) -> String {
     if value.trim().is_empty() {
         default_model_root()
+    } else {
+        value
+    }
+}
+
+fn normalize_worker_path(value: String) -> String {
+    if value.trim().is_empty() {
+        default_worker_path()
+    } else {
+        value
+    }
+}
+
+fn normalize_model_installer_path(value: String) -> String {
+    if value.trim().is_empty() {
+        default_model_installer_path()
     } else {
         value
     }
@@ -1844,6 +1862,22 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.model_root, default_model_root());
+    }
+
+    #[test]
+    fn empty_persisted_runtime_paths_use_defaults() {
+        let config = apply_persisted_config(
+            ServiceConfig::default(),
+            PersistedConfig {
+                worker_path: Some(String::new()),
+                model_installer_path: Some("  ".to_string()),
+                ..PersistedConfig::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(config.worker_path, default_worker_path());
+        assert_eq!(config.model_installer_path, default_model_installer_path());
     }
 
     #[test]

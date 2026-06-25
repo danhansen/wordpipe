@@ -508,6 +508,10 @@ export default class WordpipeExtension extends Extension {
                 this._settings.set_string('input-device', config.input_device);
             if (typeof config.model_root === 'string')
                 this._settings.set_string('model-root', config.model_root);
+            if (typeof config.worker_path === 'string')
+                this._settings.set_string('worker-path', config.worker_path);
+            if (typeof config.model_installer_path === 'string')
+                this._settings.set_string('model-installer-path', config.model_installer_path);
             if (typeof config.shortcut === 'string')
                 this._settings.set_strv('toggle-shortcut', config.shortcut ? [config.shortcut] : []);
             if (typeof config.num_threads === 'number')
@@ -535,6 +539,8 @@ export default class WordpipeExtension extends Extension {
         const profile = this._settings.get_string('model-profile');
         const inputDevice = this._settings.get_string('input-device');
         const modelRoot = this._settings.get_string('model-root');
+        const workerPath = this._settings.get_string('worker-path');
+        const modelInstallerPath = this._settings.get_string('model-installer-path');
         const shortcuts = this._settings.get_strv('toggle-shortcut');
         const shortcut = shortcuts.length > 0 ? shortcuts[0] : '';
         const options = {
@@ -555,6 +561,8 @@ export default class WordpipeExtension extends Extension {
         this._callRemote('SetInsertionOptions', options);
         this._callRemote('SetRuntimeOptions', {
             model_root: new GLib.Variant('s', modelRoot),
+            worker_path: new GLib.Variant('s', workerPath),
+            model_installer_path: new GLib.Variant('s', modelInstallerPath),
             num_threads: new GLib.Variant('u',
                 this._settings.get_uint('num-threads')),
             sample_rate: new GLib.Variant('u',

@@ -26,6 +26,16 @@
       <summary>Model root</summary>
       <description>Directory containing installed Wordpipe model profiles. Empty means the service default.</description>
     </key>
+    <key name="worker-path" type="s">
+      <default>''</default>
+      <summary>Worker path</summary>
+      <description>Path to the Wordpipe ASR worker binary. Empty means the service default.</description>
+    </key>
+    <key name="model-installer-path" type="s">
+      <default>''</default>
+      <summary>Model installer path</summary>
+      <description>Path to the Wordpipe model installer wrapper. Empty means the service default.</description>
+    </key>
     <key name="num-threads" type="u">
       <default>2</default>
       <summary>ASR worker threads</summary>

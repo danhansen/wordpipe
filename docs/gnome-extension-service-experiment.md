@@ -142,8 +142,8 @@ stale events after toggles, restarts, or extension reloads.
 | `input_device` | `s` | CPAL input-device selector, or empty for default. |
 | `shortcut` | `s` | GNOME accelerator string mirrored from extension settings. |
 | `model_root` | `s` | Root directory for installed model profiles. Empty input is normalized to the service default. |
-| `worker_path` | `s` | Path to `wordpipe-parakeet-worker`. |
-| `model_installer_path` | `s` | Path to the model install/export wrapper. |
+| `worker_path` | `s` | Path to `wordpipe-parakeet-worker`. Empty input is normalized to the service default. |
+| `model_installer_path` | `s` | Path to the model install/export wrapper. Empty input is normalized to the service default. |
 | `sample_rate` | `u` | Capture/ASR sample rate. Must be positive. |
 | `num_threads` | `u` | Worker ORT thread count. Must be positive. |
 | `spoken_punctuation` | `b` | Enable spoken punctuation normalization before text events. |
@@ -378,8 +378,9 @@ SetRuntimeOptions(a{sv})
 Supported keys are `model_root`, `worker_path`, `model_installer_path`,
 `sample_rate`, and `num_threads`. Changes that affect the active worker stop the
 current worker so the next dictation session starts with the new runtime
-settings. Empty or whitespace-only `model_root` values are normalized to the
-service default model root.
+settings. Empty or whitespace-only `model_root`, `worker_path`, and
+`model_installer_path` values are normalized to the corresponding service
+defaults.
 
 ## Open Questions
 

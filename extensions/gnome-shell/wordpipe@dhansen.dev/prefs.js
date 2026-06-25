@@ -267,6 +267,30 @@ class WordpipePage extends Adw.PreferencesPage {
         });
         group.add(this._modelRootRow);
 
+        this._workerPathRow = new Adw.EntryRow({
+            title: _('Worker Binary'),
+            text: this._settings.get_string('worker-path'),
+        });
+        this._workerPathRow.connect('changed', row => {
+            if (this._syncingSettings)
+                return;
+            this._settings.set_string('worker-path', row.text.trim());
+            this._pushRuntimeOptions();
+        });
+        group.add(this._workerPathRow);
+
+        this._modelInstallerPathRow = new Adw.EntryRow({
+            title: _('Model Installer'),
+            text: this._settings.get_string('model-installer-path'),
+        });
+        this._modelInstallerPathRow.connect('changed', row => {
+            if (this._syncingSettings)
+                return;
+            this._settings.set_string('model-installer-path', row.text.trim());
+            this._pushRuntimeOptions();
+        });
+        group.add(this._modelInstallerPathRow);
+
         this._threadsRow = Adw.SpinRow.new_with_range(1, 16, 1);
         this._threadsRow.title = _('Worker Threads');
         this._threadsRow.value = this._settings.get_uint('num-threads');
@@ -488,6 +512,10 @@ class WordpipePage extends Adw.PreferencesPage {
                 this._settings.set_string('input-device', values.input_device);
             if (typeof values.model_root === 'string')
                 this._settings.set_string('model-root', values.model_root);
+            if (typeof values.worker_path === 'string')
+                this._settings.set_string('worker-path', values.worker_path);
+            if (typeof values.model_installer_path === 'string')
+                this._settings.set_string('model-installer-path', values.model_installer_path);
             if (typeof values.shortcut === 'string')
                 this._settings.set_strv('toggle-shortcut', values.shortcut ? [values.shortcut] : []);
             if (typeof values.num_threads === 'number')
@@ -539,6 +567,8 @@ class WordpipePage extends Adw.PreferencesPage {
         this._delayRow.value = this._settings.get_uint('stream-insert-delay-ms');
         this._shortcutRow.text = this._settings.get_strv('toggle-shortcut')[0] ?? '';
         this._modelRootRow.text = this._settings.get_string('model-root');
+        this._workerPathRow.text = this._settings.get_string('worker-path');
+        this._modelInstallerPathRow.text = this._settings.get_string('model-installer-path');
         this._threadsRow.value = this._settings.get_uint('num-threads');
         this._sampleRateRow.value = this._settings.get_uint('sample-rate');
     }
@@ -685,6 +715,9 @@ class WordpipePage extends Adw.PreferencesPage {
     _pushRuntimeOptions() {
         this._callRemote('SetRuntimeOptions', {
             model_root: new GLib.Variant('s', this._settings.get_string('model-root')),
+            worker_path: new GLib.Variant('s', this._settings.get_string('worker-path')),
+            model_installer_path: new GLib.Variant('s',
+                this._settings.get_string('model-installer-path')),
             num_threads: new GLib.Variant('u', this._settings.get_uint('num-threads')),
             sample_rate: new GLib.Variant('u', this._settings.get_uint('sample-rate')),
         });

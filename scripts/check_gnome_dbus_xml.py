@@ -13,6 +13,26 @@ GNOME_CLIENTS = [
     ROOT / "extensions/gnome-shell/wordpipe@dhansen.dev/extension.js",
     ROOT / "extensions/gnome-shell/wordpipe@dhansen.dev/prefs.js",
 ]
+GNOME_SCHEMA = (
+    ROOT
+    / "extensions/gnome-shell/wordpipe@dhansen.dev/schemas"
+    / "org.gnome.shell.extensions.wordpipe.gschema.xml"
+)
+EXPECTED_SETTINGS_KEYS = {
+    "toggle-shortcut": "as",
+    "backend": "s",
+    "model-profile": "s",
+    "input-device": "s",
+    "model-root": "s",
+    "worker-path": "s",
+    "model-installer-path": "s",
+    "num-threads": "u",
+    "sample-rate": "u",
+    "spoken-punctuation": "b",
+    "insert-partials": "b",
+    "stream-insert-delay-ms": "u",
+    "show-overlay": "b",
+}
 
 
 def main() -> int:
@@ -22,6 +42,15 @@ def main() -> int:
         actual = interface_shape(extract_js_xml(path))
         if actual != expected:
             errors.append(format_difference(path, expected, actual))
+        missing_keys = settings_keys_missing_from_js(path)
+        if missing_keys:
+            errors.append(
+                f"{path.relative_to(ROOT)} does not reference settings keys: "
+                + ", ".join(missing_keys)
+            )
+    schema_errors = settings_schema_errors(GNOME_SCHEMA)
+    if schema_errors:
+        errors.append("\n".join(schema_errors))
     if errors:
         print("\n\n".join(errors), file=sys.stderr)
         return 1
@@ -50,6 +79,38 @@ def extract_js_xml(path: Path) -> str:
     if not match:
         raise RuntimeError(f"could not find SERVICE_XML in {path}")
     return match.group("xml")
+
+
+def settings_schema_errors(path: Path) -> list[str]:
+    root = ET.parse(path).getroot()
+    actual = {
+        key.attrib["name"]: key.attrib["type"]
+        for key in root.findall("./schema/key")
+    }
+    errors: list[str] = []
+    missing = sorted(set(EXPECTED_SETTINGS_KEYS) - set(actual))
+    extra = sorted(set(actual) - set(EXPECTED_SETTINGS_KEYS))
+    if missing:
+        errors.append(
+            f"{path.relative_to(ROOT)} missing GSettings keys: {', '.join(missing)}"
+        )
+    if extra:
+        errors.append(
+            f"{path.relative_to(ROOT)} has extra GSettings keys: {', '.join(extra)}"
+        )
+    for key, expected_type in EXPECTED_SETTINGS_KEYS.items():
+        actual_type = actual.get(key)
+        if actual_type is not None and actual_type != expected_type:
+            errors.append(
+                f"{path.relative_to(ROOT)} key {key} has type {actual_type}, "
+                f"expected {expected_type}"
+            )
+    return errors
+
+
+def settings_keys_missing_from_js(path: Path) -> list[str]:
+    text = path.read_text(encoding="utf-8")
+    return sorted(key for key in EXPECTED_SETTINGS_KEYS if f"'{key}'" not in text)
 
 
 Signature = tuple[str, tuple[tuple[str, str, str], ...]]
