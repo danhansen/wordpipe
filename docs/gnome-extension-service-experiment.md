@@ -76,18 +76,26 @@ Methods:
 Start() -> ()
 Stop() -> ()
 Toggle() -> ()
+Shutdown() -> ()
 GetState() -> a{sv}
+GetConfig() -> a{sv}
+ListBackends() -> aa{sv}
+ListModelProfiles() -> aa{sv}
 ListInputDevices() -> aa{sv}
+SetBackend(s backend) -> ()
 SetInputDevice(s selector) -> ()
 SetModelProfile(s profile) -> ()
+SetShortcut(s accelerator) -> ()
 InstallModel(s profile) -> ()
 SetInsertionOptions(a{sv} options) -> ()
+SetRuntimeOptions(a{sv} options) -> ()
 ```
 
 Signals:
 
 ```text
 StateChanged(a{sv} state)
+ConfigChanged(a{sv} config)
 SessionStarted(t session_id)
 TextDelta(t session_id, t seq, s text)
 Partial(t session_id, t seq, s full_text)
@@ -112,7 +120,8 @@ stale events after toggles, restarts, or extension reloads.
    service state. Done.
 5. Add extension preferences for model profile, mic, and insertion options.
    Done.
-6. Replace portal keyboard insertion with GNOME Shell insertion adapter. Next.
+6. Replace portal keyboard insertion with GNOME Shell insertion adapter. Done
+   for append-only `TextDelta` commits; live cross-app validation remains.
 7. Add local installer script for the service plus extension. Done.
 8. Keep KDE/other desktop clients as separate adapters using the same D-Bus API.
    Ongoing.
@@ -145,9 +154,12 @@ It currently provides:
 
 - Panel indicator and menu for start/stop and model install actions.
 - GNOME Shell global shortcut using the extension's GSettings key.
-- Preferences UI for backend, model profile, microphone, streaming insertion
-  options, overlay, and shortcut.
+- Preferences UI for service-provided backend/model profile lists,
+  microphone selection, streaming insertion options, runtime options, overlay,
+  shortcut, service status, and model setup progress.
 - Overlay/status updates driven by D-Bus state and transcript signals.
+- Config synchronization from `ConfigChanged`, so preferences and the shell
+  client stay aligned with service-side changes.
 
 The `TextInjector` in `extension.js` is intentionally isolated. The first
 GNOME Shell 50 implementation commits append-only text deltas through
@@ -182,6 +194,15 @@ Open preferences after install:
 
 ```bash
 gnome-extensions prefs wordpipe@dhansen.dev
+```
+
+In the current GNOME Shell session, newly copied extensions may not be
+discovered until logging out and back in. If `gnome-extensions info
+wordpipe@dhansen.dev` reports that the extension does not exist immediately
+after install, log out/in and then run:
+
+```bash
+gnome-extensions enable wordpipe@dhansen.dev
 ```
 
 Start the service explicitly for development:
