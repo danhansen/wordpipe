@@ -151,12 +151,14 @@ class TextInjector {
     constructor() {
         this._lastSession = 0;
         this._lastSeq = 0;
+        this._insertedText = '';
         this._inputMethod = null;
     }
 
     reset(sessionId) {
         this._lastSession = Number(sessionId);
         this._lastSeq = 0;
+        this._insertedText = '';
     }
 
     insertDelta(sessionId, seq, text) {
@@ -174,6 +176,37 @@ class TextInjector {
             return;
         }
         inputMethod.commit(text);
+        this._insertedText += text;
+    }
+
+    insertCommit(sessionId, seq, text) {
+        const numericSession = Number(sessionId);
+        const numericSeq = Number(seq);
+        if (numericSession !== this._lastSession)
+            this.reset(numericSession);
+        if (numericSeq <= this._lastSeq || !text)
+            return;
+        this._lastSeq = numericSeq;
+
+        let textToInsert = text;
+        if (this._insertedText) {
+            if (text === this._insertedText || this._insertedText.startsWith(text))
+                return;
+            if (text.startsWith(this._insertedText))
+                textToInsert = text.slice(this._insertedText.length);
+            else {
+                log(`Wordpipe commit differs from streamed text; keeping streamed text: ${text}`);
+                return;
+            }
+        }
+
+        const inputMethod = this._getInputMethod();
+        if (!inputMethod) {
+            log(`Wordpipe commit without input method: ${textToInsert}`);
+            return;
+        }
+        inputMethod.commit(textToInsert);
+        this._insertedText += textToInsert;
     }
 
     _getInputMethod() {
@@ -279,11 +312,13 @@ export default class WordpipeExtension extends Extension {
             }));
         this._signalIds.push(this._proxy.connectSignal('TextDelta',
             (_proxy, _sender, [sessionId, seq, text]) => {
-                this._injector.insertDelta(sessionId, seq, text);
+                if (this._settings.get_boolean('insert-partials'))
+                    this._injector.insertDelta(sessionId, seq, text);
                 this._overlay?.setSubtitle(text);
             }));
         this._signalIds.push(this._proxy.connectSignal('Commit',
-            (_proxy, _sender, [_sessionId, _seq, text]) => {
+            (_proxy, _sender, [sessionId, seq, text]) => {
+                this._injector.insertCommit(sessionId, seq, text);
                 this._overlay?.setSubtitle(text);
             }));
         this._signalIds.push(this._proxy.connectSignal('SessionStopped',

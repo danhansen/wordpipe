@@ -737,10 +737,15 @@ impl WordpipeService {
             .get("data")
             .map(json_to_variant_map)
             .unwrap_or_default();
-        let (session_id, seq, delta) = {
+        let (session_id, seq, delta, text) = {
             let mut data = match self.data.lock() {
                 Ok(data) => data,
                 Err(_) => return,
+            };
+            let text = if data.config.spoken_punctuation {
+                normalize_spoken_punctuation_partial(&text)
+            } else {
+                text
             };
             data.seq = data.seq.saturating_add(1);
             let delta = text
@@ -748,7 +753,7 @@ impl WordpipeService {
                 .unwrap_or(&text)
                 .to_string();
             data.partial_text = text.clone();
-            (data.session_id, data.seq, delta)
+            (data.session_id, data.seq, delta, text)
         };
         let _ = zbus::block_on(Self::partial(emitter, session_id, seq, &text));
         if !delta.is_empty() {
@@ -767,13 +772,18 @@ impl WordpipeService {
             .get("data")
             .map(json_to_variant_map)
             .unwrap_or_default();
-        let (session_id, seq) = {
+        let (session_id, seq, text) = {
             let mut data = match self.data.lock() {
                 Ok(data) => data,
                 Err(_) => return,
             };
+            let text = if data.config.spoken_punctuation {
+                normalize_spoken_punctuation(&text)
+            } else {
+                text
+            };
             data.seq = data.seq.saturating_add(1);
-            (data.session_id, data.seq)
+            (data.session_id, data.seq, text)
         };
         if !text.is_empty() {
             let _ = zbus::block_on(Self::commit(emitter, session_id, seq, &text));
@@ -1294,6 +1304,96 @@ fn shutdown_worker(data: &mut ServiceData) {
     data.partial_text.clear();
 }
 
+fn normalize_spoken_punctuation(text: &str) -> String {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    normalize_spoken_words(&words)
+}
+
+fn normalize_spoken_punctuation_partial(text: &str) -> String {
+    let mut words: Vec<&str> = text.split_whitespace().collect();
+    if words
+        .last()
+        .is_some_and(|word| is_incomplete_command_prefix(word))
+    {
+        words.pop();
+    }
+    normalize_spoken_words(&words)
+}
+
+fn normalize_spoken_words(words: &[&str]) -> String {
+    let mut output = String::new();
+    let mut index = 0;
+    while index < words.len() {
+        if let Some((command, consumed)) = match_spoken_command(&words, index) {
+            if matches!(command, "," | "." | "?" | "!" | ":" | ";") {
+                while output.ends_with(' ') {
+                    output.pop();
+                }
+                output.push_str(command);
+                output.push(' ');
+            } else {
+                while output.ends_with(' ') {
+                    output.pop();
+                }
+                output.push_str(command);
+            }
+            index += consumed;
+            continue;
+        }
+        append_spoken_word(&mut output, words[index]);
+        index += 1;
+    }
+    output.trim_end_matches(' ').to_string()
+}
+
+fn is_incomplete_command_prefix(word: &str) -> bool {
+    matches!(
+        word.to_ascii_lowercase().as_str(),
+        "full" | "question" | "exclamation" | "new"
+    )
+}
+
+fn match_spoken_command(words: &[&str], index: usize) -> Option<(&'static str, usize)> {
+    let remaining = words.len().saturating_sub(index);
+    for size in (1..=remaining.min(2)).rev() {
+        let first = words[index].to_ascii_lowercase();
+        let second = if size == 2 {
+            Some(words[index + 1].to_ascii_lowercase())
+        } else {
+            None
+        };
+        let command = match (first.as_str(), second.as_deref()) {
+            ("comma", None) => Some(","),
+            ("period", None) => Some("."),
+            ("full", Some("stop")) => Some("."),
+            ("question", Some("mark")) => Some("?"),
+            ("exclamation", Some("point")) => Some("!"),
+            ("exclamation", Some("mark")) => Some("!"),
+            ("colon", None) => Some(":"),
+            ("semicolon", None) => Some(";"),
+            ("new", Some("line")) => Some("\n"),
+            ("newline", None) => Some("\n"),
+            ("new", Some("paragraph")) => Some("\n\n"),
+            _ => None,
+        };
+        if let Some(command) = command {
+            return Some((command, size));
+        }
+    }
+    None
+}
+
+fn append_spoken_word(output: &mut String, word: &str) {
+    if output.is_empty() || output.ends_with('\n') || output.ends_with(' ') {
+        output.push_str(word);
+        output.push(' ');
+    } else {
+        output.push(' ');
+        output.push_str(word);
+        output.push(' ');
+    }
+}
+
 fn run_progress_command(
     mut command: Command,
     profile: &str,
@@ -1413,5 +1513,41 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("unknown model profile"));
+    }
+
+    #[test]
+    fn normalizes_spoken_punctuation_commands() {
+        assert_eq!(
+            normalize_spoken_punctuation(
+                "hello comma world period new line second paragraph question mark"
+            ),
+            "hello, world.\nsecond paragraph?"
+        );
+        assert_eq!(
+            normalize_spoken_punctuation("wait full stop no exclamation point"),
+            "wait. no!"
+        );
+    }
+
+    #[test]
+    fn normalizes_spoken_punctuation_without_touching_unknown_words() {
+        assert_eq!(
+            normalize_spoken_punctuation("new deal comma newline done"),
+            "new deal,\ndone"
+        );
+    }
+
+    #[test]
+    fn partial_normalization_holds_incomplete_commands() {
+        assert_eq!(normalize_spoken_punctuation_partial("new"), "");
+        assert_eq!(
+            normalize_spoken_punctuation_partial("hello question"),
+            "hello"
+        );
+        assert_eq!(
+            normalize_spoken_punctuation_partial("hello question mark"),
+            "hello?"
+        );
+        assert_eq!(normalize_spoken_punctuation_partial("new deal"), "new deal");
     }
 }
