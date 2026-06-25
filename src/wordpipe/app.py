@@ -628,9 +628,6 @@ class WordpipeApp:
             return
         self._toast_overlay.add_toast(self._adw.Toast.new(text))
 
-    def _show_preferences_placeholder(self, _button) -> None:  # type: ignore[no-untyped-def]
-        self._show_toast("Preferences are not available yet")
-
     def _refresh_microphones_clicked(self, _button) -> None:  # type: ignore[no-untyped-def]
         self._refresh_microphones()
 
