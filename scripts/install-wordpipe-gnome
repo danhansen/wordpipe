@@ -62,8 +62,12 @@ if gnome-extensions info "$UUID" >/dev/null 2>&1; then
     echo "Enabled $UUID"
 else
     echo "GNOME Shell has not discovered $UUID in this running session yet."
-    echo "Log out/in, then run: gnome-extensions enable $UUID"
+    echo "On Wayland, log out/in so GNOME Shell rescans user extensions, then run:"
+    echo "  gnome-extensions enable $UUID"
 fi
 
 echo "Installed $UUID"
-echo "Run preferences with: gnome-extensions prefs $UUID"
+echo "Verify service state with:"
+echo "  gdbus call --session --dest $SERVICE_NAME --object-path /dev/wordpipe/Service --method dev.wordpipe.Service1.GetState"
+echo "Run preferences with:"
+echo "  gnome-extensions prefs $UUID"

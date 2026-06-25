@@ -246,12 +246,21 @@ gnome-extensions prefs wordpipe@dhansen.dev
 ```
 
 In the current GNOME Shell session, newly copied extensions may not be
-discovered until logging out and back in. If `gnome-extensions info
+discovered until logging out and back in. This is expected on Wayland because
+GNOME Shell cannot be reliably reloaded in place. If `gnome-extensions info
 wordpipe@dhansen.dev` reports that the extension does not exist immediately
-after install, log out/in and then run:
+after install, log out/in so Shell rescans user extensions, then run:
 
 ```bash
 gnome-extensions enable wordpipe@dhansen.dev
+```
+
+Verify the service side independently:
+
+```bash
+gdbus call --session --dest dev.wordpipe.Service \
+  --object-path /dev/wordpipe/Service \
+  --method dev.wordpipe.Service1.GetState
 ```
 
 Start the service explicitly for development:
