@@ -169,6 +169,11 @@ class Indicator extends PanelMenu.Button {
             this._statusItem.label.text = summary;
     }
 
+    setStatusMessage(message) {
+        if (message)
+            this._statusItem.label.text = message;
+    }
+
     _syncInstallActions() {
         for (const item of this._installProfileItems.values())
             item.setSensitive(!this._installing);
@@ -459,6 +464,7 @@ export default class WordpipeExtension extends Extension {
             }));
         this._signalIds.push(this._proxy.connectSignal('Error',
             (_proxy, _sender, [message]) => {
+                this._indicator?.setStatusMessage(message);
                 this._overlay?.setSubtitle(message);
                 log(`Wordpipe service error: ${message}`);
             }));
@@ -571,7 +577,10 @@ export default class WordpipeExtension extends Extension {
         }
         remote.call(this._proxy, ...args, (result, error) => {
             if (error) {
-                this._setAvailable(false);
+                this._setAvailable(true);
+                const message = formatError(error);
+                this._indicator?.setStatusMessage(message);
+                this._overlay?.setSubtitle(message);
                 logError(error, `Wordpipe ${method} failed`);
                 return;
             }
@@ -684,4 +693,9 @@ function numberValue(value) {
     if (typeof value === 'number' && Number.isFinite(value))
         return value;
     return null;
+}
+
+function formatError(error) {
+    const message = error?.message ?? String(error);
+    return message.replace(/^GDBus\.Error:[^:]+:\s*/, '');
 }

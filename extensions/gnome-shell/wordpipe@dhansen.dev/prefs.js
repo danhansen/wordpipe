@@ -697,7 +697,7 @@ class WordpipePage extends Adw.PreferencesPage {
             return;
         remote.call(this._proxy, ...args, (result, error) => {
             if (error) {
-                this._statusRow.subtitle = _('Service unavailable');
+                this._statusRow.subtitle = formatError(error);
                 logError(error, `Wordpipe ${method} failed`);
                 return;
             }
@@ -782,4 +782,9 @@ function numberValue(value) {
     if (typeof value === 'number' && Number.isFinite(value))
         return value;
     return null;
+}
+
+function formatError(error) {
+    const message = error?.message ?? String(error);
+    return message.replace(/^GDBus\.Error:[^:]+:\s*/, '');
 }

@@ -124,6 +124,9 @@ preferences and clients that connect after the corresponding transcript signal.
 Configuration setters emit `ConfigChanged` followed by `StateChanged`; this is
 important when a setting change stops the current worker or changes selected
 model readiness.
+GNOME clients treat D-Bus proxy/connection failures as service-unavailable, but
+ordinary method failures remain in the connected state and are surfaced as
+status text.
 The service applies spoken-punctuation normalization before computing
 `TextDelta` when `spoken_punctuation` is enabled. Partial normalization holds
 ambiguous trailing command prefixes such as `new`, `question`, `full`, and
