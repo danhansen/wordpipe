@@ -23,6 +23,7 @@ const SERVICE_XML = `
     <method name="SetInputDevice"><arg name="selector" type="s" direction="in"/></method>
     <method name="SetShortcut"><arg name="accelerator" type="s" direction="in"/></method>
     <method name="SetInsertionOptions"><arg name="options" type="a{sv}" direction="in"/></method>
+    <method name="SetRuntimeOptions"><arg name="options" type="a{sv}" direction="in"/></method>
     <method name="InstallModel"><arg name="profile" type="s" direction="in"/></method>
   </interface>
 </node>`;
@@ -51,6 +52,7 @@ class WordpipePage extends Adw.PreferencesPage {
         this._buildModelGroup();
         this._buildInputGroup();
         this._buildBehaviorGroup();
+        this._buildAdvancedGroup();
         this._buildServiceGroup();
         this._connectProxy();
     }
@@ -198,6 +200,42 @@ class WordpipePage extends Adw.PreferencesPage {
         group.add(shortcutRow);
     }
 
+    _buildAdvancedGroup() {
+        const group = new Adw.PreferencesGroup({
+            title: _('Advanced'),
+        });
+        this.add(group);
+
+        const modelRootRow = new Adw.EntryRow({
+            title: _('Model Directory'),
+            text: this._settings.get_string('model-root'),
+        });
+        modelRootRow.connect('changed', row => {
+            this._settings.set_string('model-root', row.text.trim());
+            this._pushRuntimeOptions();
+        });
+        group.add(modelRootRow);
+
+        const threadsRow = Adw.SpinRow.new_with_range(1, 16, 1);
+        threadsRow.title = _('Worker Threads');
+        threadsRow.value = this._settings.get_uint('num-threads');
+        threadsRow.connect('notify::value', row => {
+            this._settings.set_uint('num-threads', Math.max(1, Math.round(row.value)));
+            this._pushRuntimeOptions();
+        });
+        group.add(threadsRow);
+
+        const sampleRateRow = Adw.SpinRow.new_with_range(8000, 48000, 1000);
+        sampleRateRow.title = _('Sample Rate');
+        sampleRateRow.value = this._settings.get_uint('sample-rate');
+        sampleRateRow.connect('notify::value', row => {
+            this._settings.set_uint('sample-rate', Math.max(1, Math.round(row.value)));
+            this._pushRuntimeOptions();
+        });
+        group.add(sampleRateRow);
+    }
+
+
     _buildServiceGroup() {
         const group = new Adw.PreferencesGroup({
             title: _('Service'),
@@ -241,6 +279,7 @@ class WordpipePage extends Adw.PreferencesPage {
                     return;
                 }
                 this._statusRow.subtitle = _('Connected');
+                this._refreshConfig();
                 this._refreshState();
                 this._refreshInputDevices();
                 this._pushInsertionOptions();
@@ -253,6 +292,27 @@ class WordpipePage extends Adw.PreferencesPage {
             this._statusRow.subtitle = values.listening ? _('Listening') : _('Ready');
         });
     }
+
+    _refreshConfig() {
+        this._callRemote('GetConfig', config => {
+            const values = deepUnpackMap(config);
+            if (typeof values.backend === 'string')
+                this._settings.set_string('backend', values.backend);
+            if (typeof values.model_profile === 'string')
+                this._settings.set_string('model-profile', values.model_profile);
+            if (typeof values.input_device === 'string')
+                this._settings.set_string('input-device', values.input_device);
+            if (typeof values.model_root === 'string')
+                this._settings.set_string('model-root', values.model_root);
+            if (typeof values.shortcut === 'string')
+                this._settings.set_strv('toggle-shortcut', values.shortcut ? [values.shortcut] : []);
+            if (typeof values.num_threads === 'number')
+                this._settings.set_uint('num-threads', values.num_threads);
+            if (typeof values.sample_rate === 'number')
+                this._settings.set_uint('sample-rate', values.sample_rate);
+        });
+    }
+
 
     _refreshInputDevices() {
         this._callRemote('ListInputDevices', devices => {
@@ -286,6 +346,14 @@ class WordpipePage extends Adw.PreferencesPage {
                 this._settings.get_uint('stream-insert-delay-ms')),
             show_overlay: new GLib.Variant('b',
                 this._settings.get_boolean('show-overlay')),
+        });
+    }
+
+    _pushRuntimeOptions() {
+        this._callRemote('SetRuntimeOptions', {
+            model_root: new GLib.Variant('s', this._settings.get_string('model-root')),
+            num_threads: new GLib.Variant('u', this._settings.get_uint('num-threads')),
+            sample_rate: new GLib.Variant('u', this._settings.get_uint('sample-rate')),
         });
     }
 

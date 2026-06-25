@@ -57,8 +57,13 @@ rsync -a --delete \
 glib-compile-schemas "$EXTENSION_DIR/schemas"
 
 echo "Enabling GNOME Shell extension"
-gnome-extensions enable "$UUID" || true
+if gnome-extensions info "$UUID" >/dev/null 2>&1; then
+    gnome-extensions enable "$UUID"
+    echo "Enabled $UUID"
+else
+    echo "GNOME Shell has not discovered $UUID in this running session yet."
+    echo "Log out/in, then run: gnome-extensions enable $UUID"
+fi
 
 echo "Installed $UUID"
-echo "Restart GNOME Shell or log out/in if the extension is not visible yet."
 echo "Run preferences with: gnome-extensions prefs $UUID"

@@ -21,6 +21,21 @@
       <summary>Input device selector</summary>
       <description>CPAL input device selector. Empty means the system default input device.</description>
     </key>
+    <key name="model-root" type="s">
+      <default>''</default>
+      <summary>Model root</summary>
+      <description>Directory containing installed Wordpipe model profiles. Empty means the service default.</description>
+    </key>
+    <key name="num-threads" type="u">
+      <default>2</default>
+      <summary>ASR worker threads</summary>
+      <description>Number of intra-op threads used by the ASR worker.</description>
+    </key>
+    <key name="sample-rate" type="u">
+      <default>16000</default>
+      <summary>Audio sample rate</summary>
+      <description>Input sample rate requested from the capture backend.</description>
+    </key>
     <key name="spoken-punctuation" type="b">
       <default>true</default>
       <summary>Spoken punctuation</summary>

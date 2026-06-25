@@ -192,6 +192,31 @@ systemctl --user start wordpipe-service.service
 
 Or let D-Bus activate it when the extension first calls the service.
 
+## Service Configuration
+
+The Rust service persists user-facing configuration in:
+
+```text
+~/.config/wordpipe/service.json
+```
+
+Use `wordpipe-service --config /path/to/service.json` for isolated testing.
+The GNOME extension mirrors service config on startup before pushing GSettings
+changes back, so an extension reload should not overwrite the service's saved
+model profile, microphone, shortcut, model root, sample rate, thread count, or
+insertion options with schema defaults.
+
+Runtime options that affect the worker process are updated through:
+
+```text
+SetRuntimeOptions(a{sv})
+```
+
+Supported keys are `model_root`, `worker_path`, `model_installer_path`,
+`sample_rate`, and `num_threads`. Changes that affect the active worker stop the
+current worker so the next dictation session starts with the new runtime
+settings.
+
 ## Open Questions
 
 - Which GNOME Shell versions should the first extension target? The current dev

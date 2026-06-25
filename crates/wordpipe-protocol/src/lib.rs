@@ -98,6 +98,9 @@ pub const INTROSPECTION_XML: &str = r#"
     <method name="SetInsertionOptions">
       <arg name="options" type="a{sv}" direction="in"/>
     </method>
+    <method name="SetRuntimeOptions">
+      <arg name="options" type="a{sv}" direction="in"/>
+    </method>
     <method name="InstallModel">
       <arg name="profile" type="s" direction="in"/>
     </method>

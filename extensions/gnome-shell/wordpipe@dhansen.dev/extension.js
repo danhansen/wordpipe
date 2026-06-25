@@ -31,6 +31,7 @@ const SERVICE_XML = `
     <method name="SetInputDevice"><arg name="selector" type="s" direction="in"/></method>
     <method name="SetShortcut"><arg name="accelerator" type="s" direction="in"/></method>
     <method name="SetInsertionOptions"><arg name="options" type="a{sv}" direction="in"/></method>
+    <method name="SetRuntimeOptions"><arg name="options" type="a{sv}" direction="in"/></method>
     <method name="InstallModel"><arg name="profile" type="s" direction="in"/></method>
     <signal name="StateChanged"><arg name="state" type="a{sv}"/></signal>
     <signal name="ConfigChanged"><arg name="config" type="a{sv}"/></signal>
@@ -190,6 +191,7 @@ export default class WordpipeExtension extends Extension {
         this._settings = this.getSettings();
         this._state = {};
         this._signalIds = [];
+        this._syncingSettings = false;
         this._injector = new TextInjector();
 
         this._indicator = new Indicator(this);
@@ -238,7 +240,10 @@ export default class WordpipeExtension extends Extension {
     }
 
     _connectSettings() {
-        this._settings.connectObject('changed', () => this._pushSettings(), this);
+        this._settings.connectObject('changed', () => {
+            if (!this._syncingSettings)
+                this._pushSettings();
+        }, this);
     }
 
     _connectProxy() {
@@ -255,7 +260,7 @@ export default class WordpipeExtension extends Extension {
                 this._setAvailable(true);
                 this._subscribeSignals();
                 this._refreshState();
-                this._pushSettings();
+                this._refreshConfigFromService(() => this._pushSettings());
             });
     }
 
@@ -296,6 +301,44 @@ export default class WordpipeExtension extends Extension {
         this._callRemote('GetState', (state) => this._handleState(deepUnpackMap(state)));
     }
 
+    _refreshConfigFromService(callback = null) {
+        this._callRemote('GetConfig', config => {
+            this._syncSettingsFromConfig(deepUnpackMap(config));
+            if (callback)
+                callback();
+        });
+    }
+
+    _syncSettingsFromConfig(config) {
+        this._syncingSettings = true;
+        try {
+            if (typeof config.backend === 'string')
+                this._settings.set_string('backend', config.backend);
+            if (typeof config.model_profile === 'string')
+                this._settings.set_string('model-profile', config.model_profile);
+            if (typeof config.input_device === 'string')
+                this._settings.set_string('input-device', config.input_device);
+            if (typeof config.model_root === 'string')
+                this._settings.set_string('model-root', config.model_root);
+            if (typeof config.shortcut === 'string')
+                this._settings.set_strv('toggle-shortcut', config.shortcut ? [config.shortcut] : []);
+            if (typeof config.num_threads === 'number')
+                this._settings.set_uint('num-threads', config.num_threads);
+            if (typeof config.sample_rate === 'number')
+                this._settings.set_uint('sample-rate', config.sample_rate);
+            if (typeof config.spoken_punctuation === 'boolean')
+                this._settings.set_boolean('spoken-punctuation', config.spoken_punctuation);
+            if (typeof config.insert_partials === 'boolean')
+                this._settings.set_boolean('insert-partials', config.insert_partials);
+            if (typeof config.stream_insert_delay_ms === 'number')
+                this._settings.set_uint('stream-insert-delay-ms', config.stream_insert_delay_ms);
+            if (typeof config.show_overlay === 'boolean')
+                this._settings.set_boolean('show-overlay', config.show_overlay);
+        } finally {
+            this._syncingSettings = false;
+        }
+    }
+
     _pushSettings() {
         if (!this._proxy)
             return;
@@ -303,6 +346,7 @@ export default class WordpipeExtension extends Extension {
         const backend = this._settings.get_string('backend');
         const profile = this._settings.get_string('model-profile');
         const inputDevice = this._settings.get_string('input-device');
+        const modelRoot = this._settings.get_string('model-root');
         const shortcuts = this._settings.get_strv('toggle-shortcut');
         const shortcut = shortcuts.length > 0 ? shortcuts[0] : '';
         const options = {
@@ -321,6 +365,13 @@ export default class WordpipeExtension extends Extension {
         this._callRemote('SetInputDevice', inputDevice);
         this._callRemote('SetShortcut', shortcut);
         this._callRemote('SetInsertionOptions', options);
+        this._callRemote('SetRuntimeOptions', {
+            model_root: new GLib.Variant('s', modelRoot),
+            num_threads: new GLib.Variant('u',
+                this._settings.get_uint('num-threads')),
+            sample_rate: new GLib.Variant('u',
+                this._settings.get_uint('sample-rate')),
+        });
     }
 
     _callRemote(method, ...args) {

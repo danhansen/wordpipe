@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fs;
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
@@ -8,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use cpal::traits::{DeviceTrait, HostTrait};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use wordpipe_protocol::{
     is_backend, is_model_profile, BACKENDS, BUS_NAME, DEFAULT_BACKEND, DEFAULT_MODEL_PROFILE,
@@ -27,7 +29,7 @@ struct Args {
     config: Option<PathBuf>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 struct ServiceConfig {
     backend: String,
     model_profile: String,
@@ -42,6 +44,43 @@ struct ServiceConfig {
     insert_partials: bool,
     stream_insert_delay_ms: u32,
     show_overlay: bool,
+}
+
+#[derive(Default, Deserialize, Serialize)]
+struct PersistedConfig {
+    backend: Option<String>,
+    model_profile: Option<String>,
+    input_device: Option<String>,
+    shortcut: Option<String>,
+    model_root: Option<String>,
+    worker_path: Option<String>,
+    model_installer_path: Option<String>,
+    sample_rate: Option<u32>,
+    num_threads: Option<u32>,
+    spoken_punctuation: Option<bool>,
+    insert_partials: Option<bool>,
+    stream_insert_delay_ms: Option<u32>,
+    show_overlay: Option<bool>,
+}
+
+impl From<&ServiceConfig> for PersistedConfig {
+    fn from(config: &ServiceConfig) -> Self {
+        Self {
+            backend: Some(config.backend.clone()),
+            model_profile: Some(config.model_profile.clone()),
+            input_device: Some(config.input_device.clone()),
+            shortcut: Some(config.shortcut.clone()),
+            model_root: Some(config.model_root.clone()),
+            worker_path: Some(config.worker_path.clone()),
+            model_installer_path: Some(config.model_installer_path.clone()),
+            sample_rate: Some(config.sample_rate),
+            num_threads: Some(config.num_threads),
+            spoken_punctuation: Some(config.spoken_punctuation),
+            insert_partials: Some(config.insert_partials),
+            stream_insert_delay_ms: Some(config.stream_insert_delay_ms),
+            show_overlay: Some(config.show_overlay),
+        }
+    }
 }
 
 impl Default for ServiceConfig {
@@ -103,6 +142,20 @@ struct WorkerProcess {
 struct WordpipeService {
     data: Arc<Mutex<ServiceData>>,
     emitter: Arc<Mutex<Option<SignalEmitter<'static>>>>,
+    config_path: PathBuf,
+}
+
+impl WordpipeService {
+    fn new(config_path: PathBuf, config: ServiceConfig) -> Self {
+        Self {
+            data: Arc::new(Mutex::new(ServiceData {
+                config,
+                ..ServiceData::default()
+            })),
+            emitter: Arc::default(),
+            config_path,
+        }
+    }
 }
 
 #[interface(interface = "dev.wordpipe.Service1")]
@@ -227,12 +280,15 @@ impl WordpipeService {
                 "unknown backend: {backend}"
             )));
         }
-        let config = {
+        let (config_data, config) = {
             let mut data = self.lock_data()?;
             data.config.backend = backend.to_string();
             shutdown_worker(&mut data);
-            config_map(&data.config)
+            let config_data = data.config.clone();
+            let config = config_map(&data.config);
+            (config_data, config)
         };
+        self.persist_config(&config_data)?;
         Self::config_changed(&emitter, config).await?;
         Ok(())
     }
@@ -247,14 +303,17 @@ impl WordpipeService {
                 "unknown model profile: {profile}"
             )));
         }
-        let config = {
+        let (config_data, config) = {
             let mut data = self.lock_data()?;
             if data.config.model_profile != profile {
                 data.config.model_profile = profile.to_string();
                 shutdown_worker(&mut data);
             }
-            config_map(&data.config)
+            let config_data = data.config.clone();
+            let config = config_map(&data.config);
+            (config_data, config)
         };
+        self.persist_config(&config_data)?;
         Self::config_changed(&emitter, config).await?;
         Ok(())
     }
@@ -264,14 +323,17 @@ impl WordpipeService {
         selector: &str,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        let config = {
+        let (config_data, config) = {
             let mut data = self.lock_data()?;
             if data.config.input_device != selector {
                 data.config.input_device = selector.to_string();
                 shutdown_worker(&mut data);
             }
-            config_map(&data.config)
+            let config_data = data.config.clone();
+            let config = config_map(&data.config);
+            (config_data, config)
         };
+        self.persist_config(&config_data)?;
         Self::config_changed(&emitter, config).await?;
         Ok(())
     }
@@ -281,11 +343,14 @@ impl WordpipeService {
         accelerator: &str,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        let config = {
+        let (config_data, config) = {
             let mut data = self.lock_data()?;
             data.config.shortcut = accelerator.to_string();
-            config_map(&data.config)
+            let config_data = data.config.clone();
+            let config = config_map(&data.config);
+            (config_data, config)
         };
+        self.persist_config(&config_data)?;
         Self::config_changed(&emitter, config).await?;
         Ok(())
     }
@@ -295,7 +360,7 @@ impl WordpipeService {
         options: VariantMap,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        let config = {
+        let (config_data, config) = {
             let mut data = self.lock_data()?;
             if let Some(value) = get_bool(&options, "spoken_punctuation") {
                 data.config.spoken_punctuation = value;
@@ -309,8 +374,60 @@ impl WordpipeService {
             if let Some(value) = get_bool(&options, "show_overlay") {
                 data.config.show_overlay = value;
             }
-            config_map(&data.config)
+            let config_data = data.config.clone();
+            let config = config_map(&data.config);
+            (config_data, config)
         };
+        self.persist_config(&config_data)?;
+        Self::config_changed(&emitter, config).await?;
+        Ok(())
+    }
+
+    async fn set_runtime_options(
+        &self,
+        options: VariantMap,
+        #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
+    ) -> zbus::fdo::Result<()> {
+        let (config_data, config) = {
+            let mut data = self.lock_data()?;
+            let mut restart_worker = false;
+            if let Some(value) = get_string(&options, "model_root") {
+                restart_worker |= data.config.model_root != value;
+                data.config.model_root = value;
+            }
+            if let Some(value) = get_string(&options, "worker_path") {
+                restart_worker |= data.config.worker_path != value;
+                data.config.worker_path = value;
+            }
+            if let Some(value) = get_string(&options, "model_installer_path") {
+                data.config.model_installer_path = value;
+            }
+            if let Some(value) = get_u32(&options, "sample_rate") {
+                if value == 0 {
+                    return Err(zbus::fdo::Error::InvalidArgs(
+                        "sample_rate must be positive".to_string(),
+                    ));
+                }
+                restart_worker |= data.config.sample_rate != value;
+                data.config.sample_rate = value;
+            }
+            if let Some(value) = get_u32(&options, "num_threads") {
+                if value == 0 {
+                    return Err(zbus::fdo::Error::InvalidArgs(
+                        "num_threads must be positive".to_string(),
+                    ));
+                }
+                restart_worker |= data.config.num_threads != value;
+                data.config.num_threads = value;
+            }
+            if restart_worker {
+                shutdown_worker(&mut data);
+            }
+            let config_data = data.config.clone();
+            let config = config_map(&data.config);
+            (config_data, config)
+        };
+        self.persist_config(&config_data)?;
         Self::config_changed(&emitter, config).await?;
         Ok(())
     }
@@ -425,6 +542,10 @@ impl WordpipeService {
         self.data
             .lock()
             .map_err(|_| zbus::fdo::Error::Failed("service state lock poisoned".to_string()))
+    }
+
+    fn persist_config(&self, config: &ServiceConfig) -> zbus::fdo::Result<()> {
+        save_service_config(&self.config_path, config).map_err(fdo_failed)
     }
 
     async fn ensure_worker(&self, emitter: SignalEmitter<'static>) -> zbus::fdo::Result<()> {
@@ -713,7 +834,10 @@ async fn run(args: Args) -> Result<()> {
     if args.replace {
         eprintln!("wordpipe-service: --replace requested; D-Bus will replace an existing name if the bus allows it");
     }
-    let service = WordpipeService::default();
+    let config_path = args.config.unwrap_or_else(default_config_path);
+    let config = load_service_config(&config_path)
+        .with_context(|| format!("failed to load service config {}", config_path.display()))?;
+    let service = WordpipeService::new(config_path, config);
     let service_handle = service.clone();
     let _connection = connection::Builder::session()?
         .serve_at(OBJECT_PATH, service)?
@@ -770,6 +894,114 @@ fn config_map(config: &ServiceConfig) -> VariantMap {
     );
     insert_bool(&mut map, "show_overlay", config.show_overlay);
     map
+}
+
+fn default_config_path() -> PathBuf {
+    if let Some(value) = std::env::var_os("XDG_CONFIG_HOME") {
+        PathBuf::from(value).join("wordpipe").join("service.json")
+    } else if let Some(value) = std::env::var_os("HOME") {
+        PathBuf::from(value)
+            .join(".config")
+            .join("wordpipe")
+            .join("service.json")
+    } else {
+        PathBuf::from("wordpipe-service.json")
+    }
+}
+
+fn load_service_config(path: &Path) -> Result<ServiceConfig> {
+    if !path.exists() {
+        return Ok(ServiceConfig::default());
+    }
+    let persisted: PersistedConfig = serde_json::from_slice(
+        &fs::read(path).with_context(|| format!("failed to read {}", path.display()))?,
+    )
+    .with_context(|| format!("failed to parse {}", path.display()))?;
+    apply_persisted_config(ServiceConfig::default(), persisted)
+}
+
+fn apply_persisted_config(
+    mut config: ServiceConfig,
+    persisted: PersistedConfig,
+) -> Result<ServiceConfig> {
+    if let Some(value) = persisted.backend {
+        if !is_backend(&value) {
+            return Err(anyhow!("unknown backend in service config: {value}"));
+        }
+        config.backend = value;
+    }
+    if let Some(value) = persisted.model_profile {
+        if !is_model_profile(&value) {
+            return Err(anyhow!("unknown model profile in service config: {value}"));
+        }
+        config.model_profile = value;
+    }
+    if let Some(value) = persisted.input_device {
+        config.input_device = value;
+    }
+    if let Some(value) = persisted.shortcut {
+        config.shortcut = value;
+    }
+    if let Some(value) = persisted.model_root {
+        config.model_root = value;
+    }
+    if let Some(value) = persisted.worker_path {
+        config.worker_path = value;
+    }
+    if let Some(value) = persisted.model_installer_path {
+        config.model_installer_path = value;
+    }
+    if let Some(value) = persisted.sample_rate {
+        if value == 0 {
+            return Err(anyhow!("sample_rate must be positive"));
+        }
+        config.sample_rate = value;
+    }
+    if let Some(value) = persisted.num_threads {
+        if value == 0 {
+            return Err(anyhow!("num_threads must be positive"));
+        }
+        config.num_threads = value;
+    }
+    if let Some(value) = persisted.spoken_punctuation {
+        config.spoken_punctuation = value;
+    }
+    if let Some(value) = persisted.insert_partials {
+        config.insert_partials = value;
+    }
+    if let Some(value) = persisted.stream_insert_delay_ms {
+        config.stream_insert_delay_ms = value;
+    }
+    if let Some(value) = persisted.show_overlay {
+        config.show_overlay = value;
+    }
+    Ok(config)
+}
+
+fn save_service_config(path: &Path, config: &ServiceConfig) -> Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow!("config path has no parent: {}", path.display()))?;
+    fs::create_dir_all(parent)
+        .with_context(|| format!("failed to create config directory {}", parent.display()))?;
+    let temporary = path.with_file_name(format!(
+        ".{}.tmp-{}",
+        path.file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("service.json"),
+        std::process::id()
+    ));
+    let bytes = serde_json::to_vec_pretty(&PersistedConfig::from(config))?;
+    fs::write(&temporary, bytes)
+        .with_context(|| format!("failed to write {}", temporary.display()))?;
+    fs::rename(&temporary, path).with_context(|| {
+        format!(
+            "failed to replace {} with {}",
+            path.display(),
+            temporary.display()
+        )
+    })?;
+    Ok(())
 }
 
 fn enumerate_input_devices() -> Result<Vec<VariantMap>> {
@@ -878,6 +1110,11 @@ fn get_bool(map: &VariantMap, key: &str) -> Option<bool> {
 fn get_u32(map: &VariantMap, key: &str) -> Option<u32> {
     map.get(key)
         .and_then(|value| u32::try_from(value.clone()).ok())
+}
+
+fn get_string(map: &VariantMap, key: &str) -> Option<String> {
+    map.get(key)
+        .and_then(|value| String::try_from(value.clone()).ok())
 }
 
 fn fdo_failed(err: anyhow::Error) -> zbus::fdo::Error {
@@ -1131,4 +1368,46 @@ fn json_to_variant_map(value: &JsonValue) -> VariantMap {
         }
     }
     map
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persisted_config_overrides_defaults() {
+        let config = apply_persisted_config(
+            ServiceConfig::default(),
+            PersistedConfig {
+                model_profile: Some("compact".to_string()),
+                input_device: Some("pipewire".to_string()),
+                num_threads: Some(4),
+                sample_rate: Some(16_000),
+                show_overlay: Some(false),
+                ..PersistedConfig::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(config.model_profile, "compact");
+        assert_eq!(config.input_device, "pipewire");
+        assert_eq!(config.num_threads, 4);
+        assert_eq!(config.sample_rate, 16_000);
+        assert!(!config.show_overlay);
+        assert_eq!(config.backend, DEFAULT_BACKEND);
+    }
+
+    #[test]
+    fn persisted_config_rejects_invalid_profile() {
+        let err = apply_persisted_config(
+            ServiceConfig::default(),
+            PersistedConfig {
+                model_profile: Some("tiny".to_string()),
+                ..PersistedConfig::default()
+            },
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("unknown model profile"));
+    }
 }
