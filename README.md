@@ -32,8 +32,12 @@ The current implementation provides:
 - `wordpipe voice-keyboard` global-hotkey dictation into the focused text box.
 - `wordpipe app` GTK/libadwaita control window for local app-style use.
 - Optional libadwaita/GTK live transcript overlay.
+- Experimental GNOME Shell extension plus Rust session service on the
+  `experiment/gnome-extension-service` branch.
 
-The GNOME Shell extension and top-bar indicator are not built yet.
+The GNOME extension path installs a top-bar indicator, Shell shortcut,
+preferences UI, D-Bus service client, and Shell-side text insertion adapter.
+See [docs/gnome-extension-service-experiment.md](docs/gnome-extension-service-experiment.md).
 
 ## Local Development
 
@@ -48,6 +52,13 @@ Run tests:
 
 ```sh
 PYTHONPATH=src python3 -m unittest discover -s tests
+```
+
+Check that the GNOME Shell extension and preferences UI still declare the same
+D-Bus methods/signals as the Rust protocol crate:
+
+```sh
+python3 scripts/check_gnome_dbus_xml.py
 ```
 
 Build the Rust Parakeet worker:

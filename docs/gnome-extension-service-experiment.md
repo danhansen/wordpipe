@@ -178,6 +178,13 @@ GTK/libadwaita apps, terminals, and browser text fields.
 
 ## Local Install
 
+Before installing, verify that the GJS clients still match the Rust D-Bus
+protocol declaration:
+
+```bash
+python3 scripts/check_gnome_dbus_xml.py
+```
+
 Install the service and extension for the current user:
 
 ```bash

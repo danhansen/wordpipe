@@ -15,6 +15,7 @@ const SERVICE_XML = `
     <method name="Start"/>
     <method name="Stop"/>
     <method name="Toggle"/>
+    <method name="Shutdown"/>
     <method name="GetState"><arg name="state" type="a{sv}" direction="out"/></method>
     <method name="GetConfig"><arg name="config" type="a{sv}" direction="out"/></method>
     <method name="ListBackends"><arg name="backends" type="aa{sv}" direction="out"/></method>
@@ -29,7 +30,13 @@ const SERVICE_XML = `
     <method name="InstallModel"><arg name="profile" type="s" direction="in"/></method>
     <signal name="StateChanged"><arg name="state" type="a{sv}"/></signal>
     <signal name="ConfigChanged"><arg name="config" type="a{sv}"/></signal>
+    <signal name="SessionStarted"><arg name="session_id" type="t"/></signal>
+    <signal name="TextDelta"><arg name="session_id" type="t"/><arg name="seq" type="t"/><arg name="text" type="s"/></signal>
+    <signal name="Partial"><arg name="session_id" type="t"/><arg name="seq" type="t"/><arg name="full_text" type="s"/></signal>
+    <signal name="Commit"><arg name="session_id" type="t"/><arg name="seq" type="t"/><arg name="text" type="s"/></signal>
+    <signal name="SessionStopped"><arg name="session_id" type="t"/></signal>
     <signal name="InstallProgress"><arg name="profile" type="s"/><arg name="progress" type="a{sv}"/></signal>
+    <signal name="Metrics"><arg name="metrics" type="a{sv}"/></signal>
     <signal name="Error"><arg name="message" type="s"/></signal>
   </interface>
 </node>`;
