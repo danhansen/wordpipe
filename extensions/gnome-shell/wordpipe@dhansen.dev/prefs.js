@@ -2,6 +2,7 @@ import Adw from 'gi://Adw';
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import GObject from 'gi://GObject';
+import Gdk from 'gi://Gdk';
 import Gtk from 'gi://Gtk';
 
 import {ExtensionPreferences, gettext as _} from 'resource:///org/gnome/Shell/Extensions/js/extensions/prefs.js';
@@ -76,12 +77,28 @@ class WordpipePage extends Adw.PreferencesPage {
         this._installButtons = new Map();
         this._installing = false;
         this._installingProfile = '';
-        this._buildModelGroup();
-        this._buildInputGroup();
-        this._buildBehaviorGroup();
-        this._buildAdvancedGroup();
-        this._buildTranscriptGroup();
-        this._buildServiceGroup();
+        this._viewStack = new Adw.ViewStack({
+            hexpand: true,
+            vexpand: true,
+        });
+        this._viewStack.add_titled(
+            this._buildGeneralSection(),
+            'general',
+            _('General'));
+        this._viewStack.add_titled(
+            this._buildAdvancedSection(),
+            'advanced',
+            _('Advanced'));
+
+        const viewGroup = new Adw.PreferencesGroup({
+            title: _('View'),
+        });
+        viewGroup.add(new Adw.ViewSwitcher({
+            stack: this._viewStack,
+            halign: Gtk.Align.CENTER,
+        }));
+        viewGroup.add(this._viewStack);
+        this.add(viewGroup);
         this._connectProxy();
     }
 
@@ -95,11 +112,48 @@ class WordpipePage extends Adw.PreferencesPage {
         super.vfunc_unroot();
     }
 
-    _buildModelGroup() {
+    _buildGeneralSection() {
+        const section = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 12,
+            margin_top: 12,
+            margin_bottom: 12,
+            margin_start: 12,
+            margin_end: 12,
+        });
+        this._buildModelGroup(section);
+        this._buildInputGroup(section);
+        this._buildBehaviorGroup(section);
+        return section;
+    }
+
+    _buildAdvancedSection() {
+        const section = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 12,
+            margin_top: 12,
+            margin_bottom: 12,
+            margin_start: 12,
+            margin_end: 12,
+        });
+        this._buildAdvancedGroup(section);
+        this._buildTranscriptGroup(section);
+        this._buildServiceGroup(section);
+        return section;
+    }
+
+    _appendSection(section, widget) {
+        if (section.append)
+            section.append(widget);
+        else
+            section.add(widget);
+    }
+
+    _buildModelGroup(section) {
         this._modelGroup = new Adw.PreferencesGroup({
             title: _('Model'),
         });
-        this.add(this._modelGroup);
+        this._appendSection(section, this._modelGroup);
 
         this._backendModel = new Gtk.StringList();
         this._backends.forEach(backend => this._backendModel.append(backend.title));
@@ -143,11 +197,11 @@ class WordpipePage extends Adw.PreferencesPage {
         this._rebuildProfileRows();
     }
 
-    _buildInputGroup() {
+    _buildInputGroup(section) {
         const group = new Adw.PreferencesGroup({
             title: _('Input'),
         });
-        this.add(group);
+        this._appendSection(section, group);
 
         this._deviceModel = new Gtk.StringList();
         this._deviceModel.append(_('System Default'));
@@ -178,11 +232,11 @@ class WordpipePage extends Adw.PreferencesPage {
         group.add(refreshRow);
     }
 
-    _buildBehaviorGroup() {
+    _buildBehaviorGroup(section) {
         const group = new Adw.PreferencesGroup({
             title: _('Behavior'),
         });
-        this.add(group);
+        this._appendSection(section, group);
 
         let row = new Adw.SwitchRow({
             title: _('Spoken Punctuation'),
@@ -235,25 +289,31 @@ class WordpipePage extends Adw.PreferencesPage {
         });
         group.add(this._delayRow);
 
-        this._shortcutRow = new Adw.EntryRow({
+        const shortcutRow = new Adw.ActionRow({
             title: _('Shortcut'),
-            text: this._settings.get_strv('toggle-shortcut')[0] ?? '',
+            subtitle: _('Press a key combination to change the global toggle shortcut.'),
         });
-        this._shortcutRow.connect('changed', row => {
-            if (this._syncingSettings)
-                return;
-            const accelerator = row.text.trim();
-            this._settings.set_strv('toggle-shortcut', accelerator ? [accelerator] : []);
-            this._callRemote('SetShortcut', accelerator);
+        this._shortcutValue = new Adw.ShortcutLabel({
+            accelerator: this._settings.get_strv('toggle-shortcut')[0] ?? '',
+            disabled_text: _('Set shortcut'),
         });
-        group.add(this._shortcutRow);
+        this._shortcutButton = new Gtk.Button({
+            child: this._shortcutValue,
+            css_classes: ['flat'],
+        });
+        this._shortcutButton.connect('clicked', () => this._captureShortcut());
+        shortcutRow.add_suffix(this._shortcutButton);
+        shortcutRow.set_activatable_widget(this._shortcutButton);
+        this._shortcutRow = shortcutRow;
+        group.add(shortcutRow);
+        this._syncShortcutValue();
     }
 
-    _buildAdvancedGroup() {
+    _buildAdvancedGroup(section) {
         const group = new Adw.PreferencesGroup({
             title: _('Advanced'),
         });
-        this.add(group);
+        this._appendSection(section, group);
 
         this._modelRootRow = new Adw.EntryRow({
             title: _('Model Directory'),
@@ -314,11 +374,11 @@ class WordpipePage extends Adw.PreferencesPage {
         group.add(this._sampleRateRow);
     }
 
-    _buildTranscriptGroup() {
+    _buildTranscriptGroup(section) {
         const group = new Adw.PreferencesGroup({
             title: _('Transcript'),
         });
-        this.add(group);
+        this._appendSection(section, group);
 
         this._partialRow = new Adw.ActionRow({
             title: _('Live Transcript'),
@@ -333,11 +393,11 @@ class WordpipePage extends Adw.PreferencesPage {
         group.add(this._commitRow);
     }
 
-    _buildServiceGroup() {
+    _buildServiceGroup(section) {
         const group = new Adw.PreferencesGroup({
             title: _('Service'),
         });
-        this.add(group);
+        this._appendSection(section, group);
 
         this._statusRow = new Adw.ActionRow({
             title: _('Status'),
@@ -565,12 +625,12 @@ class WordpipePage extends Adw.PreferencesPage {
         this._insertPartialsRow.active = this._settings.get_boolean('insert-partials');
         this._showOverlayRow.active = this._settings.get_boolean('show-overlay');
         this._delayRow.value = this._settings.get_uint('stream-insert-delay-ms');
-        this._shortcutRow.text = this._settings.get_strv('toggle-shortcut')[0] ?? '';
         this._modelRootRow.text = this._settings.get_string('model-root');
         this._workerPathRow.text = this._settings.get_string('worker-path');
         this._modelInstallerPathRow.text = this._settings.get_string('model-installer-path');
         this._threadsRow.value = this._settings.get_uint('num-threads');
         this._sampleRateRow.value = this._settings.get_uint('sample-rate');
+        this._syncShortcutValue();
     }
 
     _rebuildProfileRows() {
@@ -723,6 +783,79 @@ class WordpipePage extends Adw.PreferencesPage {
         });
     }
 
+    _syncShortcutValue() {
+        const accelerator = this._settings.get_strv('toggle-shortcut')[0] ?? '';
+        this._shortcutValue.accelerator = accelerator;
+    }
+
+    _captureShortcut() {
+        const dialog = new Gtk.Window({
+            title: _('Set Shortcut'),
+            modal: true,
+            default_width: 360,
+            default_height: 160,
+        });
+        dialog.set_hide_on_close(true);
+
+        const box = new Gtk.Box({
+            orientation: Gtk.Orientation.VERTICAL,
+            spacing: 12,
+            margin_top: 24,
+            margin_bottom: 24,
+            margin_start: 24,
+            margin_end: 24,
+        });
+        dialog.set_child(box);
+
+        const title = new Gtk.Label({
+            label: _('Press a key combination'),
+            halign: Gtk.Align.CENTER,
+        });
+        const subtitle = new Gtk.Label({
+            label: _('Esc cancels. Backspace clears the shortcut.'),
+            halign: Gtk.Align.CENTER,
+            wrap: true,
+        });
+        box.append(title);
+        box.append(subtitle);
+
+        const preview = new Gtk.Label({
+            label: _('Waiting for shortcut'),
+            halign: Gtk.Align.CENTER,
+        });
+        box.append(preview);
+
+        const controller = new Gtk.EventControllerKey();
+        controller.connect('key-pressed', (_controller, keyval, _keycode, state) => {
+            if (keyval === Gdk.KEY_Escape) {
+                dialog.close();
+                return true;
+            }
+            if (keyval === Gdk.KEY_BackSpace) {
+                this._setShortcut('');
+                dialog.close();
+                return true;
+            }
+            const accelerator = shortcutFromKey(keyval, state);
+            if (!accelerator)
+                return false;
+            preview.label = accelerator;
+            this._setShortcut(accelerator);
+            dialog.close();
+            return true;
+        });
+        dialog.add_controller(controller);
+        dialog.present();
+    }
+
+    _setShortcut(accelerator) {
+        if (this._syncingSettings)
+            return;
+        this._settings.set_strv('toggle-shortcut', accelerator ? [accelerator] : []);
+        this._callRemote('SetShortcut', accelerator);
+        this._syncShortcutValue();
+    }
+
     _callRemote(method, ...args) {
         const callback = typeof args.at(-1) === 'function' ? args.pop() : null;
         const remote = this._proxy?.[`${method}Remote`];
@@ -820,4 +953,13 @@ function numberValue(value) {
 function formatError(error) {
     const message = error?.message ?? String(error);
     return message.replace(/^GDBus\.Error:[^:]+:\s*/, '');
+}
+
+function shortcutFromKey(keyval, state) {
+    const mods = state & Gtk.accelerator_get_default_mod_mask();
+    if (!mods)
+        return '';
+    if (!Gtk.accelerator_valid(keyval, mods))
+        return '';
+    return Gtk.accelerator_name(keyval, mods);
 }
