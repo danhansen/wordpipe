@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import sys
 import types
+import subprocess
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from wordpipe.audio import (
     cpal_input_device_arg,
+    list_parakeet_input_devices,
     list_input_devices,
     parse_audio_device,
+    render_parakeet_input_devices,
     render_input_devices,
 )
 
@@ -115,6 +119,65 @@ class AudioTests(unittest.TestCase):
             rendered = render_input_devices()
 
         self.assertIn("none found", rendered)
+
+    def test_list_parakeet_input_devices_uses_worker_json_events(self) -> None:
+        output = "\n".join(
+            [
+                '{"event":"input_device","data":{"index":0,"name":"Built-in","is_default":true}}',
+                '{"event":"input_device","data":{"index":1,"name":"USB Mic","is_default":false}}',
+            ]
+        )
+
+        with (
+            mock.patch("wordpipe.daemon._resolve_parakeet_worker", return_value=Path("/tmp/worker")),
+            mock.patch("wordpipe.daemon.parakeet_worker_env", return_value={}),
+            mock.patch(
+                "subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    ["/tmp/worker", "--list-input-devices"],
+                    0,
+                    stdout=output,
+                    stderr="",
+                ),
+            ) as run,
+        ):
+            devices = list_parakeet_input_devices(Path("/tmp/worker"))
+
+        run.assert_called_once()
+        self.assertEqual([device.selector for device in devices], ["cpal:0", "cpal:1"])
+        self.assertEqual([device.name for device in devices], ["Built-in", "USB Mic"])
+        self.assertTrue(devices[0].is_default)
+
+    def test_render_parakeet_input_devices_formats_selectors(self) -> None:
+        with mock.patch(
+            "wordpipe.audio.list_parakeet_input_devices",
+            return_value=[
+                types.SimpleNamespace(selector="cpal:0", name="Built-in", is_default=True),
+                types.SimpleNamespace(selector="cpal:1", name="USB Mic", is_default=False),
+            ],
+        ):
+            rendered = render_parakeet_input_devices()
+
+        self.assertIn("Input devices (Parakeet/CPAL):", rendered)
+        self.assertIn("*   cpal:0 Built-in", rendered)
+        self.assertIn("    cpal:1 USB Mic", rendered)
+
+    def test_list_parakeet_input_devices_reports_worker_failure(self) -> None:
+        with (
+            mock.patch("wordpipe.daemon._resolve_parakeet_worker", return_value=Path("/tmp/worker")),
+            mock.patch("wordpipe.daemon.parakeet_worker_env", return_value={}),
+            mock.patch(
+                "subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    ["/tmp/worker", "--list-input-devices"],
+                    2,
+                    stdout="",
+                    stderr="no audio host",
+                ),
+            ),
+            self.assertRaisesRegex(RuntimeError, "no audio host"),
+        ):
+            list_parakeet_input_devices(Path("/tmp/worker"))
 
 
 if __name__ == "__main__":

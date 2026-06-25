@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from wordpipe.config import load_config, save_model_profile
+from wordpipe.config import load_config, save_input_device, save_model_profile
 from wordpipe.models import DEFAULT_NEMO_SOURCE_REPO, default_model_root
 
 
@@ -217,6 +217,35 @@ class ConfigTests(unittest.TestCase):
         self.assertLess(text.index('model_profile = "compact"'), text.index("[ui]"))
         self.assertEqual(config.model_profile, "compact")
         self.assertEqual(config.num_threads, 4)
+
+    def test_save_input_device_updates_existing_config_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text('input_device = ""\nmodel_profile = "fast"\n', encoding="utf-8")
+
+            save_input_device("cpal:1", path)
+            config = load_config(path)
+
+        self.assertEqual(config.input_device, "cpal:1")
+
+    def test_save_input_device_clears_to_system_default(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+            path.write_text('input_device = "cpal:1"\n', encoding="utf-8")
+
+            save_input_device(None, path)
+            config = load_config(path)
+
+        self.assertIsNone(config.input_device)
+
+    def test_save_input_device_escapes_strings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.toml"
+
+            save_input_device('USB "Mic"', path)
+            config = load_config(path)
+
+        self.assertEqual(config.input_device, 'USB "Mic"')
 
 
 if __name__ == "__main__":

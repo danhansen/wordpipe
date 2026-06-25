@@ -12,6 +12,7 @@ from wordpipe.app import (
     UiEvent,
     UiTranscriptSink,
     WordpipeApp,
+    _selected_microphone_index,
     _summarize_progress,
     profile_status_text,
 )
@@ -110,6 +111,36 @@ class FakeActionRow:
 
     def set_subtitle(self, text: str) -> None:
         self.subtitle = text
+
+
+class FakeStringList:
+    def __init__(self, labels: list[str]) -> None:
+        self.labels = labels
+
+    @classmethod
+    def new(cls, labels: list[str]):  # type: ignore[no-untyped-def]
+        return cls(labels)
+
+
+class FakeGtk:
+    StringList = FakeStringList
+
+
+class FakeMicrophoneDropdown:
+    def __init__(self) -> None:
+        self.model = None
+        self.selected_values: list[int] = []
+        self._selected = 0
+
+    def set_model(self, model) -> None:  # type: ignore[no-untyped-def]
+        self.model = model
+
+    def set_selected(self, selected: int) -> None:
+        self._selected = selected
+        self.selected_values.append(selected)
+
+    def get_selected(self) -> int:
+        return self._selected
 
 
 class FakeBanner:
@@ -254,6 +285,55 @@ class AppControllerStateTests(unittest.TestCase):
         self.assertIn("installed: <Super>d", row.subtitle)
         self.assertEqual(button.sensitive_values, [False, True])
         self.assertEqual(overlay.toasts, ["Keyboard shortcut installed"])
+
+    def test_refresh_microphones_populates_dropdown_and_keeps_selection(self) -> None:
+        app = WordpipeApp(DaemonConfig(model_dir=Path("/models"), input_device="cpal:1"))
+        row = FakeActionRow()
+        dropdown = FakeMicrophoneDropdown()
+        app._gtk = FakeGtk
+        app._microphone_status_label = row
+        app._microphone_dropdown = dropdown
+
+        devices = [
+            mock.Mock(name="Built-in", selector="cpal:0", is_default=True),
+            mock.Mock(name="USB Mic", selector="cpal:1", is_default=False),
+        ]
+        devices[0].name = "Built-in"
+        devices[1].name = "USB Mic"
+        with mock.patch("wordpipe.app.list_parakeet_input_devices", return_value=devices):
+            self.assertFalse(app._refresh_microphones())
+
+        self.assertEqual(dropdown.model.labels, ["System Default", "Default: Built-in", "USB Mic"])
+        self.assertEqual(dropdown.selected_values, [2])
+        self.assertEqual(app._microphone_selectors, [None, "cpal:0", "cpal:1"])
+        self.assertEqual(row.subtitle, "Selected input: cpal:1")
+
+    def test_apply_input_device_persists_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "config.toml"
+            app = WordpipeApp(
+                DaemonConfig(model_dir=root / "model", dry_run_insertion=True),
+                model_setup=AppModelSetup(
+                    model_root=root / "models",
+                    model_profile="fast",
+                    nemo_source="nvidia/example",
+                    config_path=config_path,
+                ),
+            )
+            row = FakeActionRow()
+            app._microphone_status_label = row
+
+            app._apply_input_device("cpal:2")
+            config = load_config(config_path)
+
+        self.assertEqual(config.input_device, "cpal:2")
+        self.assertEqual(app._config.input_device, "cpal:2")
+        self.assertEqual(row.subtitle, "Selected input: cpal:2")
+
+    def test_selected_microphone_index_defaults_when_missing(self) -> None:
+        self.assertEqual(_selected_microphone_index([None, "cpal:0"], "cpal:0"), 1)
+        self.assertEqual(_selected_microphone_index([None, "cpal:0"], "cpal:9"), 0)
 
     def test_open_controller_reenables_dictate_button_after_setup_mode(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

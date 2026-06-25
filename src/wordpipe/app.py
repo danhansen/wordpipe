@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 import sys
 import threading
@@ -10,6 +10,7 @@ from typing import Callable
 from .daemon import DaemonConfig, DictationController
 from .insertion import DryRunKeyboardBackend, PortalKeyboardBackend
 from .models import MODEL_PROFILES, profile_installed, profile_runtime_dir
+from .audio import list_parakeet_input_devices
 from .shortcuts import flatpak_shortcut_spec, install_shortcut, read_shortcut_status
 
 
@@ -98,6 +99,11 @@ class WordpipeApp:
         self._install_button = None
         self._shortcut_status_label = None
         self._shortcut_button = None
+        self._microphone_status_label = None
+        self._microphone_dropdown = None
+        self._microphone_refresh_button = None
+        self._microphone_selectors: list[str | None] = [None]
+        self._updating_microphones = False
         self._install_thread: threading.Thread | None = None
         self._last_install_progress = 0.0
         self._selected_profile = model_setup.model_profile if model_setup else "fast"
@@ -168,6 +174,7 @@ class WordpipeApp:
         window.present()
         assert self._glib is not None
         self._glib.idle_add(self._refresh_shortcut_state)
+        self._glib.idle_add(self._refresh_microphones)
         self._glib.idle_add(self._open_controller)
 
     def _build_content(self, Gtk, Adw=None):  # type: ignore[no-untyped-def]
@@ -217,6 +224,10 @@ class WordpipeApp:
         self._build_profile_row(model, Gtk, Adw)
         root.append(model)
 
+        audio = Adw.PreferencesGroup(title="Audio")
+        self._build_microphone_row(audio, Gtk, Adw)
+        root.append(audio)
+
         transcript = Adw.PreferencesGroup(title="Transcript")
         self._partial_label = Adw.ActionRow(title="Live Transcript", subtitle="No speech yet")
         transcript.add(self._partial_label)
@@ -265,6 +276,7 @@ class WordpipeApp:
         root.append(status_row)
 
         self._build_profile_row(root, Gtk)
+        self._build_microphone_row(root, Gtk)
         self._partial_label = self._section(root, Gtk, "Live transcript", "No speech yet")
         self._commit_label = self._section(root, Gtk, "Last committed", "Nothing committed")
         self._error_label = Gtk.Label(label="")
@@ -308,6 +320,35 @@ class WordpipeApp:
             row.append(self._install_button)
             root.append(row)
         self._refresh_profile_state()
+
+    def _build_microphone_row(self, root, Gtk, Adw=None) -> None:  # type: ignore[no-untyped-def]
+        self._microphone_selectors = [None]
+        self._microphone_dropdown = Gtk.DropDown.new_from_strings(["System Default"])
+        self._microphone_dropdown.connect("notify::selected", self._microphone_changed)
+        self._microphone_refresh_button = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
+        self._microphone_refresh_button.set_tooltip_text("Refresh microphones")
+        self._microphone_refresh_button.connect("clicked", self._refresh_microphones_clicked)
+
+        if Adw is not None:
+            row = Adw.ActionRow(title="Microphone", subtitle=self._microphone_status_text())
+            row.add_prefix(Gtk.Image.new_from_icon_name("audio-input-microphone-symbolic"))
+            row.add_suffix(self._microphone_dropdown)
+            row.add_suffix(self._microphone_refresh_button)
+            self._microphone_status_label = row
+            root.add(row)
+            return
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        row.set_valign(Gtk.Align.CENTER)
+        row.append(Gtk.Image.new_from_icon_name("audio-input-microphone-symbolic"))
+        self._microphone_status_label = Gtk.Label(label=self._microphone_status_text())
+        self._microphone_status_label.set_xalign(0)
+        self._microphone_status_label.set_hexpand(True)
+        self._microphone_status_label.set_wrap(True)
+        row.append(self._microphone_status_label)
+        row.append(self._microphone_dropdown)
+        row.append(self._microphone_refresh_button)
+        root.append(row)
 
     def _build_shortcut_row(self, root, Gtk, Adw=None) -> None:  # type: ignore[no-untyped-def]
         self._shortcut_button = Gtk.Button(label="Install")
@@ -547,6 +588,80 @@ class WordpipeApp:
     def _show_preferences_placeholder(self, _button) -> None:  # type: ignore[no-untyped-def]
         self._show_toast("Preferences are not available yet")
 
+    def _refresh_microphones_clicked(self, _button) -> None:  # type: ignore[no-untyped-def]
+        self._refresh_microphones()
+
+    def _refresh_microphones(self) -> bool:
+        if self._microphone_dropdown is None:
+            return False
+        try:
+            worker = self._config.asr_worker_path if self._config is not None else None
+            devices = list_parakeet_input_devices(worker)
+        except Exception as exc:  # noqa: BLE001 - show device enumeration failures in the UI.
+            self._set_label(self._microphone_status_label, f"Microphones unavailable: {exc}")
+            return False
+
+        labels = ["System Default"]
+        selectors: list[str | None] = [None]
+        for device in devices:
+            labels.append(("Default: " if device.is_default else "") + device.name)
+            selectors.append(device.selector)
+
+        selected = _selected_microphone_index(selectors, self._current_input_selector())
+        self._updating_microphones = True
+        try:
+            assert self._gtk is not None
+            self._microphone_dropdown.set_model(self._gtk.StringList.new(labels))
+            self._microphone_dropdown.set_selected(selected)
+            self._microphone_selectors = selectors
+        finally:
+            self._updating_microphones = False
+        self._set_label(self._microphone_status_label, self._microphone_status_text())
+        return False
+
+    def _microphone_changed(self, dropdown, _param) -> None:  # type: ignore[no-untyped-def]
+        if self._updating_microphones:
+            return
+        selected = int(dropdown.get_selected())
+        if selected >= len(self._microphone_selectors):
+            return
+        self._apply_input_device(self._microphone_selectors[selected])
+
+    def _apply_input_device(self, selector: str | None) -> None:
+        if self._config is not None and self._config.input_device == selector:
+            return
+        if self._config is not None:
+            self._config = replace(self._config, input_device=selector)
+        self._persist_input_device(selector)
+        if self._controller is not None:
+            self._controller.close()
+            self._controller = None
+            self._set_button_state(False)
+            self._set_button_sensitive(False)
+            self._open_controller()
+        self._set_label(self._microphone_status_label, self._microphone_status_text())
+
+    def _persist_input_device(self, selector: str | None) -> None:
+        if self._model_setup is None or self._model_setup.config_path is None:
+            return
+        try:
+            from .config import save_input_device
+
+            save_input_device(selector, self._model_setup.config_path)
+        except Exception as exc:  # noqa: BLE001 - device selection should remain usable.
+            self._post_event(UiEvent("error", f"Could not save microphone: {exc}"))
+
+    def _current_input_selector(self) -> str | None:
+        if self._config is None or self._config.input_device is None:
+            return None
+        return str(self._config.input_device)
+
+    def _microphone_status_text(self) -> str:
+        selector = self._current_input_selector()
+        if selector is None:
+            return "System default input"
+        return f"Selected input: {selector}"
+
     def _refresh_shortcut_state(self) -> bool:
         if self._shortcut_status_label is None:
             return False
@@ -662,3 +777,10 @@ def _split_profile_event(text: str) -> tuple[str | None, str]:
     if separator and profile in MODEL_PROFILES:
         return profile, detail
     return None, text
+
+
+def _selected_microphone_index(selectors: list[str | None], current: str | None) -> int:
+    try:
+        return selectors.index(current)
+    except ValueError:
+        return 0

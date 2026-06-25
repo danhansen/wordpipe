@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 import math
 import os
 from pathlib import Path
@@ -132,14 +133,30 @@ def load_config(path: Path | None = None) -> WordpipeConfig:
 
 def save_model_profile(profile: str, path: Path | None = None) -> Path:
     selected = _model_profile(profile)
+    return _save_root_assignment("model_profile", _quote_toml_string(selected), path)
+
+
+def save_input_device(device: int | str | None, path: Path | None = None) -> Path:
+    if device is None:
+        value = ""
+    elif isinstance(device, bool):
+        raise ValueError("input_device must be an integer index or string name")
+    elif isinstance(device, int | str):
+        value = device
+    else:
+        raise ValueError("input_device must be an integer index or string name")
+    return _save_root_assignment("input_device", _quote_toml_string(str(value)), path)
+
+
+def _save_root_assignment(key: str, encoded_value: str, path: Path | None = None) -> Path:
     config_path = path if path is not None else default_config_path()
     existing = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
-    line = f'model_profile = "{selected}"'
+    line = f"{key} = {encoded_value}"
     lines = existing.splitlines()
     root_end = _first_table_header_index(lines)
     replaced = False
     for index, current in enumerate(lines[:root_end]):
-        if current.lstrip().split("=", 1)[0].strip() == "model_profile":
+        if current.lstrip().split("=", 1)[0].strip() == key:
             lines[index] = line
             replaced = True
             break
@@ -159,6 +176,10 @@ def save_model_profile(profile: str, path: Path | None = None) -> Path:
         temporary = Path(handle.name)
     temporary.replace(config_path)
     return config_path
+
+
+def _quote_toml_string(value: str) -> str:
+    return json.dumps(value)
 
 
 def _first_table_header_index(lines: list[str]) -> int:

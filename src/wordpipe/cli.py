@@ -247,50 +247,17 @@ def _collect_stderr_lines(stream, lines: list[str]) -> None:  # type: ignore[no-
 
 
 def _cmd_audio_devices(args: argparse.Namespace) -> int:
-    from .audio import render_input_devices
+    from .audio import render_input_devices, render_parakeet_input_devices
 
     if args.backend == "parakeet":
-        print(_render_parakeet_input_devices(args.asr_worker_path))
+        print(
+            render_parakeet_input_devices(
+                Path(args.asr_worker_path).expanduser() if args.asr_worker_path else None
+            )
+        )
     else:
         print(render_input_devices())
     return 0
-
-
-def _render_parakeet_input_devices(configured_worker: str | None = None) -> str:
-    from .daemon import _resolve_parakeet_worker, parakeet_worker_env
-
-    worker = _resolve_parakeet_worker(
-        Path(configured_worker).expanduser() if configured_worker else None
-    )
-    command = [str(worker), "--list-input-devices"]
-    process = subprocess.run(
-        command,
-        check=False,
-        capture_output=True,
-        text=True,
-        env=parakeet_worker_env(),
-    )
-    if process.returncode != 0:
-        detail = process.stderr.strip() or process.stdout.strip() or "unknown error"
-        raise RuntimeError(f"Parakeet worker failed to list input devices: {detail}")
-
-    rows: list[dict[str, object]] = []
-    for line in process.stdout.splitlines():
-        if not line.strip():
-            continue
-        item = json.loads(line)
-        if item.get("event") == "input_device" and isinstance(item.get("data"), dict):
-            rows.append(item["data"])  # type: ignore[arg-type]
-
-    lines = ["Input devices (Parakeet/CPAL):"]
-    if not rows:
-        lines.append("  none found")
-        return "\n".join(lines)
-    for row in rows:
-        marker = "*" if row.get("is_default") else " "
-        selector = f"cpal:{row.get('index', '?')}"
-        lines.append(f"{marker} {selector:>8} {row.get('name', '')}")
-    return "\n".join(lines)
 
 
 def _cmd_record_test(args: argparse.Namespace) -> int:
@@ -578,7 +545,11 @@ def _cmd_app(args: argparse.Namespace) -> int:
     def config_for_profile(profile: str) -> DaemonConfig:
         profile_args = copy.copy(args)
         profile_args.model_profile = profile
-        return _daemon_config_from_args(profile_args, file_config, log_metrics_default=True)
+        return _daemon_config_from_args(
+            profile_args,
+            load_config(config_path),
+            log_metrics_default=True,
+        )
 
     try:
         config = _daemon_config_from_args(args, file_config, log_metrics_default=True)

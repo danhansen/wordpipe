@@ -15,7 +15,6 @@ from wordpipe.cli import (
     _cmd_model_install,
     _cmd_stream_file_test,
     _cmd_voice_keyboard_toggle,
-    _render_parakeet_input_devices,
     _start_voice_keyboard_daemon,
     _resolve_model_dir,
     build_parser,
@@ -163,51 +162,6 @@ class CliModelResolutionTests(unittest.TestCase):
         self.assertEqual(install_args.command, "shortcut-install")
         self.assertEqual(install_args.target, "local")
         self.assertEqual(install_args.root, "/repo")
-
-    def test_render_parakeet_input_devices_uses_worker_json_events(self) -> None:
-        output = "\n".join(
-            [
-                '{"event":"input_device","data":{"index":0,"name":"Built-in","is_default":true}}',
-                '{"event":"input_device","data":{"index":1,"name":"USB Mic","is_default":false}}',
-            ]
-        )
-
-        with (
-            mock.patch("wordpipe.daemon._resolve_parakeet_worker", return_value="/tmp/worker"),
-            mock.patch("wordpipe.daemon.parakeet_worker_env", return_value={}),
-            mock.patch(
-                "subprocess.run",
-                return_value=subprocess.CompletedProcess(
-                    ["/tmp/worker", "--list-input-devices"],
-                    0,
-                    stdout=output,
-                    stderr="",
-                ),
-            ) as run,
-        ):
-            rendered = _render_parakeet_input_devices("/tmp/worker")
-
-        run.assert_called_once()
-        self.assertIn("Input devices (Parakeet/CPAL):", rendered)
-        self.assertIn("*   cpal:0 Built-in", rendered)
-        self.assertIn("    cpal:1 USB Mic", rendered)
-
-    def test_render_parakeet_input_devices_reports_worker_failure(self) -> None:
-        with (
-            mock.patch("wordpipe.daemon._resolve_parakeet_worker", return_value="/tmp/worker"),
-            mock.patch("wordpipe.daemon.parakeet_worker_env", return_value={}),
-            mock.patch(
-                "subprocess.run",
-                return_value=subprocess.CompletedProcess(
-                    ["/tmp/worker", "--list-input-devices"],
-                    2,
-                    stdout="",
-                    stderr="no audio host",
-                ),
-            ),
-            self.assertRaisesRegex(RuntimeError, "no audio host"),
-        ):
-            _render_parakeet_input_devices("/tmp/worker")
 
     def test_parser_rejects_non_positive_runtime_values(self) -> None:
         cases = [

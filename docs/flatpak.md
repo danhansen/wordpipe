@@ -152,6 +152,10 @@ flatpak run dev.wordpipe.Wordpipe audio-devices --backend parakeet
 flatpak run dev.wordpipe.Wordpipe voice-keyboard --signal-hotkey --input-device cpal:0
 ```
 
+The GUI exposes the same CPAL list in the Microphone row. Refresh the list,
+choose a device, and Wordpipe writes the selected `cpal:N` selector to
+`config.toml`; the app restarts its dictation controller against that input.
+
 If the shortcut starts the daemon itself, startup logs are written inside the
 Flatpak cache at
 `~/.var/app/dev.wordpipe.Wordpipe/cache/wordpipe/voice-keyboard.log`.

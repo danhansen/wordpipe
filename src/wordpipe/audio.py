@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
+import subprocess
 import wave
 from typing import Any
 
@@ -17,6 +19,17 @@ class InputDeviceInfo:
     max_input_channels: int
     default_samplerate: float
     is_default: bool = False
+
+
+@dataclass(frozen=True)
+class ParakeetInputDeviceInfo:
+    index: int
+    name: str
+    is_default: bool = False
+
+    @property
+    def selector(self) -> str:
+        return f"cpal:{self.index}"
 
 
 def parse_audio_device(value: str | None) -> AudioDevice | None:
@@ -87,6 +100,53 @@ def render_input_devices() -> str:
             f"({device.hostapi}, inputs={device.max_input_channels}, "
             f"default_sr={device.default_samplerate:g})"
         )
+    return "\n".join(lines)
+
+
+def list_parakeet_input_devices(
+    configured_worker: Path | None = None,
+) -> list[ParakeetInputDeviceInfo]:
+    from .daemon import _resolve_parakeet_worker, parakeet_worker_env
+
+    worker = _resolve_parakeet_worker(configured_worker)
+    process = subprocess.run(
+        [str(worker), "--list-input-devices"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=parakeet_worker_env(),
+    )
+    if process.returncode != 0:
+        detail = process.stderr.strip() or process.stdout.strip() or "unknown error"
+        raise RuntimeError(f"Parakeet worker failed to list input devices: {detail}")
+
+    devices: list[ParakeetInputDeviceInfo] = []
+    for line in process.stdout.splitlines():
+        if not line.strip():
+            continue
+        item = json.loads(line)
+        if item.get("event") != "input_device" or not isinstance(item.get("data"), dict):
+            continue
+        data = item["data"]
+        devices.append(
+            ParakeetInputDeviceInfo(
+                index=int(data.get("index", len(devices))),
+                name=str(data.get("name", "")),
+                is_default=bool(data.get("is_default", False)),
+            )
+        )
+    return devices
+
+
+def render_parakeet_input_devices(configured_worker: Path | None = None) -> str:
+    lines = ["Input devices (Parakeet/CPAL):"]
+    devices = list_parakeet_input_devices(configured_worker)
+    if not devices:
+        lines.append("  none found")
+        return "\n".join(lines)
+    for device in devices:
+        marker = "*" if device.is_default else " "
+        lines.append(f"{marker} {device.selector:>8} {device.name}")
     return "\n".join(lines)
 
 
