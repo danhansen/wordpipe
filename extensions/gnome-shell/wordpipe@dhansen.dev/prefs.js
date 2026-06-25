@@ -804,6 +804,7 @@ class WordpipePage extends Adw.PreferencesPage {
             margin_bottom: 24,
             margin_start: 24,
             margin_end: 24,
+            focusable: true,
         });
         dialog.set_child(box);
 
@@ -826,6 +827,7 @@ class WordpipePage extends Adw.PreferencesPage {
         box.append(preview);
 
         const controller = new Gtk.EventControllerKey();
+        controller.set_propagation_phase(Gtk.PropagationPhase.CAPTURE);
         controller.connect('key-pressed', (_controller, keyval, _keycode, state) => {
             if (keyval === Gdk.KEY_Escape) {
                 dialog.close();
@@ -844,8 +846,12 @@ class WordpipePage extends Adw.PreferencesPage {
             dialog.close();
             return true;
         });
-        dialog.add_controller(controller);
+        box.add_controller(controller);
         dialog.present();
+        GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            box.grab_focus();
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     _setShortcut(accelerator) {
