@@ -530,6 +530,8 @@ class WordpipePage extends Adw.PreferencesPage {
             this._statusRow.subtitle = _('Loading model');
         else if (values.listening)
             this._statusRow.subtitle = _('Listening');
+        else if (values.stopping)
+            this._statusRow.subtitle = _('Stopping');
         else if (values.installing)
             this._statusRow.subtitle = _('Installing model');
         else if (values.last_error)

@@ -86,12 +86,15 @@ class Indicator extends PanelMenu.Button {
 
     setState(state, available) {
         const listening = Boolean(state?.listening);
-        this._icon.icon_name = listening
+        const stopping = Boolean(state?.stopping);
+        this._icon.icon_name = listening || stopping
             ? 'media-record-symbolic'
             : 'audio-input-microphone-symbolic';
-        this._toggleItem.label.text = listening ? _('Stop Dictation') : _('Start Dictation');
+        this._toggleItem.label.text = listening || stopping
+            ? _('Stop Dictation')
+            : _('Start Dictation');
         this._statusItem.label.text = available
-            ? listening ? _('Listening') : _('Ready')
+            ? listening ? _('Listening') : stopping ? _('Stopping') : _('Ready')
             : _('Service unavailable');
     }
 });
@@ -434,13 +437,16 @@ export default class WordpipeExtension extends Extension {
     _handleState(state) {
         this._state = state;
         this._indicator?.setState(this._state, true);
-        const visible = Boolean(state.listening || state.loading_model) &&
+        const visible = Boolean(state.listening || state.stopping || state.loading_model) &&
             this._settings.get_boolean('show-overlay');
         this._overlay?.setVisible(visible);
         if (visible) {
-            this._overlay?.setSubtitle(state.loading_model
-                ? _('Loading model')
-                : state.model_profile ?? '');
+            let subtitle = state.model_profile ?? '';
+            if (state.loading_model)
+                subtitle = _('Loading model');
+            else if (state.stopping)
+                subtitle = _('Stopping');
+            this._overlay?.setSubtitle(subtitle);
         }
     }
 

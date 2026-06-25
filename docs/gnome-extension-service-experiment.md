@@ -116,6 +116,8 @@ ambiguous trailing command prefixes such as `new`, `question`, `full`, and
 `exclamation` until they either become a complete command or ordinary text.
 The GNOME client inserts `TextDelta` only when `insert_partials` is enabled and
 inserts `Commit` text when it adds text that has not already been streamed.
+`Stop()` moves state to `stopping=true` while the worker flushes. The service
+emits final `Commit` before `SessionStopped` when the worker produces one.
 
 ## Migration Steps
 

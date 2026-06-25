@@ -106,6 +106,7 @@ impl Default for ServiceConfig {
 struct ServiceData {
     config: ServiceConfig,
     listening: bool,
+    stopping: bool,
     installing: bool,
     loading_model: bool,
     model_loaded: bool,
@@ -121,6 +122,7 @@ impl Default for ServiceData {
         Self {
             config: ServiceConfig::default(),
             listening: false,
+            stopping: false,
             installing: false,
             loading_model: false,
             model_loaded: false,
@@ -169,6 +171,7 @@ impl WordpipeService {
             let mut data = self.lock_data()?;
             if !data.listening {
                 data.listening = true;
+                data.stopping = false;
                 data.session_id = next_session_id(data.session_id);
                 data.seq = 0;
                 data.partial_text.clear();
@@ -190,18 +193,22 @@ impl WordpipeService {
         &self,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        let (state, stopped_session, stdin) = {
+        let (state, stopped_session, stdin, emit_stopped) = {
             let mut data = self.lock_data()?;
             let stopped_session = data.session_id;
             data.listening = false;
+            data.stopping = data.worker.is_some();
             data.seq = data.seq.saturating_add(1);
             let stdin = data.worker.as_ref().map(|worker| Arc::clone(&worker.stdin));
-            (state_map(&data), stopped_session, stdin)
+            let emit_stopped = stdin.is_none();
+            (state_map(&data), stopped_session, stdin, emit_stopped)
         };
         if let Some(stdin) = stdin {
             send_worker_command(&stdin, "stop").map_err(fdo_failed)?;
         }
-        Self::session_stopped(&emitter, stopped_session).await?;
+        if emit_stopped {
+            Self::session_stopped(&emitter, stopped_session).await?;
+        }
         Self::state_changed(&emitter, state).await?;
         Ok(())
     }
@@ -480,6 +487,7 @@ impl WordpipeService {
         let state = {
             let mut data = self.lock_data()?;
             data.listening = false;
+            data.stopping = false;
             shutdown_worker(&mut data);
             state_map(&data)
         };
@@ -619,6 +627,7 @@ impl WordpipeService {
                 Err(_) => return,
             };
             data.listening = false;
+            data.stopping = false;
             data.loading_model = false;
             data.model_loaded = false;
             data.worker = None;
@@ -681,6 +690,7 @@ impl WordpipeService {
                         Err(_) => return,
                     };
                     data.listening = true;
+                    data.stopping = false;
                     state_map(&data)
                 };
                 let _ = zbus::block_on(Self::state_changed(emitter, state));
@@ -701,6 +711,7 @@ impl WordpipeService {
                         Err(_) => return,
                     };
                     data.listening = false;
+                    data.stopping = false;
                     (state_map(&data), data.session_id)
                 };
                 let _ = zbus::block_on(Self::session_stopped(emitter, session_id));
@@ -872,6 +883,7 @@ async fn run(args: Args) -> Result<()> {
 fn state_map(data: &ServiceData) -> VariantMap {
     let mut map = VariantMap::new();
     insert_bool(&mut map, "listening", data.listening);
+    insert_bool(&mut map, "stopping", data.stopping);
     insert_bool(&mut map, "installing", data.installing);
     insert_bool(&mut map, "loading_model", data.loading_model);
     insert_bool(&mut map, "model_loaded", data.model_loaded);
@@ -1299,6 +1311,7 @@ fn shutdown_worker(data: &mut ServiceData) {
         let _ = worker.child.wait();
     }
     data.listening = false;
+    data.stopping = false;
     data.loading_model = false;
     data.model_loaded = false;
     data.partial_text.clear();
