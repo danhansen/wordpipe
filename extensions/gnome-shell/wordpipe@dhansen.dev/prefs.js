@@ -303,6 +303,14 @@ class WordpipePage extends Adw.PreferencesPage {
         });
         this._shortcutButton.connect('clicked', () => this._captureShortcut());
         shortcutRow.add_suffix(this._shortcutButton);
+        this._shortcutsHelpButton = new Gtk.Button({
+            icon_name: 'help-browser-symbolic',
+            valign: Gtk.Align.CENTER,
+            css_classes: ['flat'],
+            tooltip_text: _('Show keyboard shortcuts'),
+        });
+        this._shortcutsHelpButton.connect('clicked', () => this._showShortcutsDialog());
+        shortcutRow.add_suffix(this._shortcutsHelpButton);
         shortcutRow.set_activatable_widget(this._shortcutButton);
         this._shortcutRow = shortcutRow;
         group.add(shortcutRow);
@@ -860,6 +868,21 @@ class WordpipePage extends Adw.PreferencesPage {
         this._settings.set_strv('toggle-shortcut', accelerator ? [accelerator] : []);
         this._callRemote('SetShortcut', accelerator);
         this._syncShortcutValue();
+    }
+
+    _showShortcutsDialog() {
+        const dialog = new Adw.ShortcutsDialog();
+        dialog.title = _('Wordpipe Keyboard Shortcuts');
+
+        const accelerator = this._settings.get_strv('toggle-shortcut')[0] ?? '';
+        if (accelerator) {
+            const section = Adw.ShortcutsSection.new(_('Dictation'));
+            section.add(Adw.ShortcutsItem.new(
+                _('Toggle dictation'),
+                accelerator));
+            dialog.add(section);
+        }
+        dialog.present(this.get_root());
     }
 
     _callRemote(method, ...args) {
