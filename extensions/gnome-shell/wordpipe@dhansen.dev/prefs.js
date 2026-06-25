@@ -508,15 +508,22 @@ class WordpipePage extends Adw.PreferencesPage {
 
         for (const profile of this._profiles) {
             const row = new Adw.ActionRow({
-                title: _(`Install ${profile.title}`),
+                title: profile.installed
+                    ? profile.title
+                    : _(`Install ${profile.title}`),
                 subtitle: this._profileSubtitle(profile),
             });
             const button = new Gtk.Button({
                 icon_name: profile.installed ? 'emblem-ok-symbolic' : 'folder-download-symbolic',
                 valign: Gtk.Align.CENTER,
-                tooltip_text: _(`Download and prepare the ${profile.title} model`),
+                sensitive: !profile.installed,
+                tooltip_text: profile.installed
+                    ? _(`${profile.title} is installed`)
+                    : _(`Download and prepare the ${profile.title} model`),
             });
             button.connect('clicked', () => {
+                if (profile.installed)
+                    return;
                 this._progressRow.subtitle = _(`Starting ${profile.title}`);
                 this._callRemote('InstallModel', profile.id);
             });

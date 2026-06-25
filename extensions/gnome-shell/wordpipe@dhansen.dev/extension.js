@@ -113,21 +113,30 @@ class Indicator extends PanelMenu.Button {
 
         const selected = profiles.find(profile => profile.id === selectedProfile);
         this._profileStatusItem.label.text = selected
-            ? `${_('Model')}: ${selected.title}`
+            ? `${_('Model')}: ${selected.title}${selected.installed ? '' : ` (${_('not installed')})`}`
             : `${_('Model')}: ${selectedProfile || _('Unknown')}`;
 
         for (const profile of profiles) {
             const isSelected = profile.id === selectedProfile;
-            const status = profile.installed ? _('installed') : _('not installed');
-            const selectItem = new PopupMenu.PopupMenuItem(
-                isSelected
-                    ? `${profile.title} ${_('selected')} (${status})`
-                    : `${_('Use')} ${profile.title} (${status})`);
-            selectItem.connect('activate', () => this._extension.selectModelProfile(profile.id));
-            this._profileSection.addMenuItem(selectItem);
-            this._profileItems.push(selectItem);
+            if (profile.installed) {
+                const selectItem = new PopupMenu.PopupMenuItem(
+                    isSelected
+                        ? `${profile.title} ${_('selected')}`
+                        : `${_('Use')} ${profile.title}`,
+                    {reactive: !isSelected});
+                if (!isSelected) {
+                    selectItem.connect('activate',
+                        () => this._extension.selectModelProfile(profile.id));
+                }
+                this._profileSection.addMenuItem(selectItem);
+                this._profileItems.push(selectItem);
+            } else {
+                const missingItem = new PopupMenu.PopupMenuItem(
+                    `${profile.title} ${_('not installed')}`,
+                    {reactive: false});
+                this._profileSection.addMenuItem(missingItem);
+                this._profileItems.push(missingItem);
 
-            if (!profile.installed) {
                 const installItem = new PopupMenu.PopupMenuItem(
                     `${_('Install')} ${profile.title}`);
                 installItem.connect('activate', () => this._extension.installModel(profile.id));
