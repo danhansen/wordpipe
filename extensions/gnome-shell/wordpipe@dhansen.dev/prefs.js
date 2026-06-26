@@ -110,7 +110,7 @@ const ShortcutSettingButton = GObject.registerClass({
         const content = new Adw.StatusPage({
             title: _('Set Dictation Shortcut'),
             icon_name: 'preferences-desktop-keyboard-shortcuts-symbolic',
-            description: _('Press a key combination. System shortcuts already used by GNOME cannot be recorded.'),
+            description: _('Press a key combination. If it does not appear, it may already be used by GNOME.'),
         });
         this._editor = new Adw.Window({
             modal: true,
