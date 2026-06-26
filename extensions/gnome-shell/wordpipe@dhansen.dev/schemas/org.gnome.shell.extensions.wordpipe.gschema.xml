@@ -6,6 +6,11 @@
       <summary>Toggle dictation shortcut</summary>
       <description>Keyboard shortcut handled by GNOME Shell to start or stop Wordpipe dictation.</description>
     </key>
+    <key name="shortcut-capture-active" type="b">
+      <default>false</default>
+      <summary>Shortcut capture active</summary>
+      <description>Internal coordination flag used to release the active shortcut while preferences records a new one.</description>
+    </key>
     <key name="backend" type="s">
       <default>'parakeet'</default>
       <summary>ASR backend</summary>

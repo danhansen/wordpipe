@@ -20,6 +20,7 @@ GNOME_SCHEMA = (
 )
 EXPECTED_SETTINGS_KEYS = {
     "toggle-shortcut": "as",
+    "shortcut-capture-active": "b",
     "backend": "s",
     "model-profile": "s",
     "input-device": "s",

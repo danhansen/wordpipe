@@ -120,6 +120,11 @@ const ShortcutSettingButton = GObject.registerClass({
         });
         this._editor.add_controller(controller);
         controller.connect('key-pressed', this._onKeyPressed.bind(this));
+        this._editor.connect('close-request', () => {
+            this._settings.set_boolean('shortcut-capture-active', false);
+            return false;
+        });
+        this._settings.set_boolean('shortcut-capture-active', true);
         this._editor.present();
     }
 
@@ -161,6 +166,7 @@ const ShortcutSettingButton = GObject.registerClass({
         this.shortcut = accelerator;
         this._label.set_accelerator(this.shortcut);
         this._settings.set_strv(this._settingsKey, [this.shortcut]);
+        this._settings.set_boolean('shortcut-capture-active', false);
         this.emit('changed', this.shortcut);
     }
 

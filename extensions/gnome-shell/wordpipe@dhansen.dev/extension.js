@@ -404,19 +404,21 @@ export default class WordpipeExtension extends Extension {
         this._profiles = [];
         this._signalIds = [];
         this._syncingSettings = false;
+        this._shortcutBound = false;
         this._injector = new TextInjector();
 
         this._indicator = new Indicator(this);
         Main.panel.addToStatusArea(this.uuid, this._indicator);
 
-        this._bindShortcut();
+        this._settings.set_boolean('shortcut-capture-active', false);
+        this._syncShortcutBinding();
         this._connectSettings();
         this._connectProxy();
     }
 
     disable() {
         this._settings?.disconnectObject(this);
-        Main.wm.removeKeybinding('toggle-shortcut');
+        this._unbindShortcut();
 
         if (this._proxy) {
             for (const id of this._signalIds)
@@ -445,16 +447,38 @@ export default class WordpipeExtension extends Extension {
     }
 
     _bindShortcut() {
+        if (this._shortcutBound)
+            return;
         Main.wm.addKeybinding(
             'toggle-shortcut',
             this._settings,
             Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
             Shell.ActionMode.NORMAL | Shell.ActionMode.OVERVIEW,
             () => this.toggleDictation());
+        this._shortcutBound = true;
+    }
+
+    _unbindShortcut() {
+        if (!this._shortcutBound)
+            return;
+        Main.wm.removeKeybinding('toggle-shortcut');
+        this._shortcutBound = false;
+    }
+
+    _syncShortcutBinding() {
+        if (this._settings.get_boolean('shortcut-capture-active'))
+            this._unbindShortcut();
+        else
+            this._bindShortcut();
     }
 
     _connectSettings() {
-        this._settings.connectObject('changed', () => {
+        this._settings.connectObject('changed::shortcut-capture-active', () => {
+            this._syncShortcutBinding();
+        }, this);
+        this._settings.connectObject('changed', (_settings, key) => {
+            if (key === 'shortcut-capture-active')
+                return;
             if (!this._syncingSettings)
                 this._pushSettings();
         }, this);
