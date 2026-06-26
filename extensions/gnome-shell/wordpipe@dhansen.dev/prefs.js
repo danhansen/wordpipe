@@ -110,7 +110,7 @@ const ShortcutSettingButton = GObject.registerClass({
         const content = new Adw.StatusPage({
             title: _('Set Dictation Shortcut'),
             icon_name: 'preferences-desktop-keyboard-shortcuts-symbolic',
-            description: _('Press a key combination. Backspace clears, Escape cancels.'),
+            description: _('Press a key combination. System shortcuts already used by GNOME cannot be recorded.'),
         });
         this._editor = new Adw.Window({
             modal: true,
