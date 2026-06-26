@@ -80,7 +80,7 @@ const ShortcutSettingButton = GObject.registerClass({
         this._recordingShortcut = false;
         this._shortcut = '';
         this._label = new Gtk.ShortcutLabel({
-            disabled_text: _('New accelerator...'),
+            disabled_text: _('Not Set'),
             valign: Gtk.Align.CENTER,
             hexpand: false,
             vexpand: false,
@@ -108,9 +108,9 @@ const ShortcutSettingButton = GObject.registerClass({
     _onActivated(widget) {
         const controller = new Gtk.EventControllerKey();
         const content = new Adw.StatusPage({
-            title: _('New accelerator...'),
+            title: _('Set Dictation Shortcut'),
             icon_name: 'preferences-desktop-keyboard-shortcuts-symbolic',
-            description: _('Use Backspace to clear'),
+            description: _('Press a key combination. Backspace clears, Escape cancels.'),
         });
         this._editor = new Adw.Window({
             modal: true,
@@ -474,7 +474,7 @@ class WordpipePage extends Adw.PreferencesPage {
         shortcutButton.set_valign(Gtk.Align.CENTER);
         const shortcutRow = new Adw.ActionRow({
             title: _('Shortcut'),
-            subtitle: _('Click to record a shortcut. Use Backspace to clear.'),
+            subtitle: _('Click to set the dictation shortcut.'),
         });
         shortcutRow.add_suffix(shortcutButton);
         shortcutRow.set_activatable_widget(shortcutButton);
