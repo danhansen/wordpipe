@@ -56,6 +56,15 @@ rsync -a --delete \
     "$EXTENSION_DIR/"
 glib-compile-schemas "$EXTENSION_DIR/schemas"
 
+echo "Removing legacy GNOME custom shortcuts"
+PYTHON="$ROOT/.venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+  PYTHON="python3"
+fi
+if ! PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON" -m wordpipe shortcut-cleanup; then
+    echo "Warning: could not remove legacy GNOME custom shortcuts"
+fi
+
 echo "Enabling GNOME Shell extension"
 if gnome-extensions info "$UUID" >/dev/null 2>&1; then
     gnome-extensions enable "$UUID"

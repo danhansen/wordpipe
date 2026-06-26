@@ -13,6 +13,7 @@ from wordpipe.shortcuts import (
     install_shortcut,
     local_shortcut_spec,
     read_shortcut_status,
+    remove_shortcut_paths,
 )
 
 
@@ -107,6 +108,60 @@ class ShortcutBackendTests(unittest.TestCase):
             == ["set", "org.gnome.settings-daemon.plugins.media-keys", "custom-keybindings"]
         ]
         self.assertEqual(set_path_commands, [])
+
+    def test_remove_shortcut_paths_removes_only_requested_paths(self) -> None:
+        fake = FakeGSettings()
+        other_path = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/other/"
+        fake.values[
+            ("org.gnome.settings-daemon.plugins.media-keys", "custom-keybindings")
+        ] = f"['{LOCAL_SHORTCUT_PATH}', '{other_path}', '{FLATPAK_SHORTCUT_PATH}']"
+        fake.values[
+            (
+                f"org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"
+                f"{LOCAL_SHORTCUT_PATH}",
+                "binding",
+            )
+        ] = "'<Control><Alt>space'"
+        fake.values[
+            (
+                f"org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"
+                f"{FLATPAK_SHORTCUT_PATH}",
+                "binding",
+            )
+        ] = "'<Control><Alt>g'"
+
+        removed = remove_shortcut_paths(
+            (LOCAL_SHORTCUT_PATH, FLATPAK_SHORTCUT_PATH),
+            runner=fake,
+        )
+
+        self.assertEqual(removed, (LOCAL_SHORTCUT_PATH, FLATPAK_SHORTCUT_PATH))
+        self.assertEqual(
+            fake.values[
+                ("org.gnome.settings-daemon.plugins.media-keys", "custom-keybindings")
+            ],
+            f"['{other_path}']",
+        )
+        self.assertEqual(
+            fake.values[
+                (
+                    f"org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"
+                    f"{LOCAL_SHORTCUT_PATH}",
+                    "binding",
+                )
+            ],
+            "''",
+        )
+        self.assertEqual(
+            fake.values[
+                (
+                    f"org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"
+                    f"{FLATPAK_SHORTCUT_PATH}",
+                    "binding",
+                )
+            ],
+            "''",
+        )
 
     def test_failed_gsettings_command_raises_runtime_error(self) -> None:
         def fail(command: Sequence[str]) -> subprocess.CompletedProcess[str]:

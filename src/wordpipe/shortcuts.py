@@ -123,6 +123,31 @@ def install_shortcut(
     return read_shortcut_status(spec, runner=runner)
 
 
+def remove_shortcut_paths(
+    paths_to_remove: Sequence[str],
+    *,
+    runner: CommandRunner | None = None,
+) -> tuple[str, ...]:
+    paths = list(_read_custom_keybinding_paths(runner=runner))
+    remove_set = set(paths_to_remove)
+    remaining = [path for path in paths if path not in remove_set]
+    removed = tuple(path for path in paths if path in remove_set)
+
+    if remaining != paths:
+        _gsettings_set(
+            MEDIA_KEYS_SCHEMA,
+            CUSTOM_KEYBINDINGS_KEY,
+            _format_gvariant_list(remaining),
+            runner,
+        )
+
+    for path in paths_to_remove:
+        schema = f"{CUSTOM_KEYBINDING_SCHEMA}:{path}"
+        _gsettings_set(schema, "binding", _quote_gvariant_string(""), runner)
+
+    return removed
+
+
 def _read_custom_keybinding_paths(*, runner: CommandRunner | None = None) -> list[str]:
     raw = _gsettings_get(MEDIA_KEYS_SCHEMA, CUSTOM_KEYBINDINGS_KEY, runner=runner)
     return _parse_gvariant_string_list(raw)

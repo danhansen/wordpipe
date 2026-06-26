@@ -465,6 +465,17 @@ def _cmd_shortcut_install(args: argparse.Namespace) -> int:
     return 0 if status.matches else 2
 
 
+def _cmd_shortcut_cleanup(_args: argparse.Namespace) -> int:
+    from .shortcuts import FLATPAK_SHORTCUT_PATH, LOCAL_SHORTCUT_PATH, remove_shortcut_paths
+
+    removed = remove_shortcut_paths((LOCAL_SHORTCUT_PATH, FLATPAK_SHORTCUT_PATH))
+    if removed:
+        print("removed legacy shortcut paths: " + ", ".join(removed))
+    else:
+        print("no legacy shortcut paths found")
+    return 0
+
+
 def _load_cli_config(args: argparse.Namespace) -> WordpipeConfig:
     path = Path(args.config).expanduser() if getattr(args, "config", None) else None
     return load_config(path)
@@ -1182,6 +1193,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_shortcut_args(shortcut_install)
     shortcut_install.set_defaults(func=_cmd_shortcut_install)
+
+    shortcut_cleanup = subparsers.add_parser(
+        "shortcut-cleanup",
+        help="Remove legacy GNOME custom shortcuts now handled by the Shell extension.",
+    )
+    shortcut_cleanup.set_defaults(func=_cmd_shortcut_cleanup)
 
     config_example = subparsers.add_parser(
         "config-example",
