@@ -408,19 +408,8 @@ class WordpipePage extends Adw.PreferencesPage {
             this._settings.set_string('input-device', selector);
             this._callRemote('SetInputDevice', selector);
         });
+        this._deviceRow.connect('activated', () => this._refreshInputDevices());
         group.add(this._deviceRow);
-
-        const refreshRow = new Adw.ActionRow({
-            title: _('Refresh Microphones'),
-        });
-        const button = new Gtk.Button({
-            icon_name: 'view-refresh-symbolic',
-            valign: Gtk.Align.CENTER,
-            tooltip_text: _('Refresh input devices from the Wordpipe service'),
-        });
-        button.connect('clicked', () => this._refreshInputDevices());
-        refreshRow.add_suffix(button);
-        group.add(refreshRow);
     }
 
     _buildBehaviorGroup(section) {
