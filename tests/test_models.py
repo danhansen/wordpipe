@@ -4,8 +4,10 @@ import contextlib
 import io
 import shutil
 import stat
+import sys
 import tempfile
 import tarfile
+import types
 import unittest
 import zipfile
 from unittest import mock
@@ -16,6 +18,7 @@ from wordpipe.models import (
     _progress_reporter,
     build_model_profile,
     build_profile_command,
+    download_prebuilt_profile,
     download_nemo_source,
     install_built_profile,
     make_download_plan,
@@ -86,6 +89,43 @@ class ModelDownloadTests(unittest.TestCase):
             profile_runtime_dir(Path("/models/wordpipe"), "compact"),
             Path("/models/wordpipe/nemotron-wordpipe-compact-fixed-shape-ort-format"),
         )
+
+    def test_download_prebuilt_profile_downloads_raw_hub_files(self) -> None:
+        class EntryNotFoundError(Exception):
+            pass
+
+        downloaded: list[str] = []
+
+        def hf_hub_download(**kwargs):  # type: ignore[no-untyped-def]
+            filename = kwargs["filename"]
+            downloaded.append(filename)
+            if filename.endswith(".data"):
+                raise EntryNotFoundError()
+            destination = Path(kwargs["local_dir"]) / filename
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(filename, encoding="utf-8")
+            return str(destination)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with mock.patch.dict(
+                sys.modules,
+                {
+                    "huggingface_hub": types.SimpleNamespace(hf_hub_download=hf_hub_download),
+                    "huggingface_hub.utils": types.SimpleNamespace(EntryNotFoundError=EntryNotFoundError),
+                },
+            ):
+                source = download_prebuilt_profile(
+                    profile="fast",
+                    model_root=root,
+                    repo_id="danhansen/example-fast",
+                )
+
+            self.assertEqual(source, root / "downloads" / "danhansen--example-fast" / "fast")
+            self.assertEqual((source / "tokenizer.model").read_text(encoding="utf-8"), "tokenizer.model")
+            self.assertEqual((source / "encoder.onnx").read_text(encoding="utf-8"), "encoder.onnx")
+            self.assertEqual((source / "decoder_joint.onnx").read_text(encoding="utf-8"), "decoder_joint.onnx")
+            self.assertIn("encoder.onnx.data", downloaded)
 
     def test_install_built_profile_copies_runtime_dir_to_profile_destination(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

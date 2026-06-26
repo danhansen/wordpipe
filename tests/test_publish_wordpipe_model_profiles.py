@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
-import tarfile
 import tempfile
 import unittest
 
@@ -20,31 +19,30 @@ def _load_script():
 
 
 class PublishWordpipeModelProfilesTests(unittest.TestCase):
-    def test_package_profile_uses_canonical_top_level_directory(self) -> None:
+    def test_copy_profile_files_uses_hub_root_layout(self) -> None:
         module = _load_script()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "local-fast-output"
+            output = root / "release"
             source.mkdir()
             (source / "tokenizer.model").write_text("tokenizer", encoding="utf-8")
             (source / "encoder.onnx").write_text("encoder", encoding="utf-8")
+            (source / "encoder.onnx.data").write_text("encoder-data", encoding="utf-8")
             (source / "decoder_joint.onnx").write_text("decoder", encoding="utf-8")
-            archive = root / "fast.tar.gz"
 
             module.validate_publish_source(source)
-            module.package_profile(
+            copied = module.copy_profile_files(
                 source,
-                archive,
-                spec=module.profile_spec("fast"),
+                output,
                 force=False,
             )
 
-            with tarfile.open(archive, "r:gz") as tar:
-                names = tar.getnames()
-
-            self.assertIn("nemotron-wordpipe-fast-fp32-projected/tokenizer.model", names)
-            self.assertIn("nemotron-wordpipe-fast-fp32-projected/encoder.onnx", names)
-            self.assertIn("nemotron-wordpipe-fast-fp32-projected/decoder_joint.onnx", names)
+            self.assertEqual({path.name for path in copied}, {"tokenizer.model", "encoder.onnx", "encoder.onnx.data", "decoder_joint.onnx"})
+            self.assertEqual((output / "tokenizer.model").read_text(encoding="utf-8"), "tokenizer")
+            self.assertEqual((output / "encoder.onnx").read_text(encoding="utf-8"), "encoder")
+            self.assertEqual((output / "encoder.onnx.data").read_text(encoding="utf-8"), "encoder-data")
+            self.assertEqual((output / "decoder_joint.onnx").read_text(encoding="utf-8"), "decoder")
 
     def test_validate_publish_source_rejects_ort_runtime_cache(self) -> None:
         module = _load_script()
@@ -62,8 +60,8 @@ class PublishWordpipeModelProfilesTests(unittest.TestCase):
         module = _load_script()
 
         card = module.render_model_card(
-            "danhansen/wordpipe-nemotron-3.5-asr-streaming-0.6b",
-            ("fast", "compact"),
+            "danhansen/wordpipe-nemotron-fast-fp32-projected",
+            ("fast",),
         )
 
         self.assertIn("language:\n- multilingual", card)
@@ -72,7 +70,39 @@ class PublishWordpipeModelProfilesTests(unittest.TestCase):
         self.assertIn("pipeline_tag: automatic-speech-recognition", card)
         self.assertIn("base_model: nvidia/nemotron-3.5-asr-streaming-0.6b", card)
         self.assertIn("NVIDIA is the upstream model developer", card)
+        self.assertIn("This repository publishes the `fast` Wordpipe profile", card)
+        self.assertIn("wordpipe model-install --profile fast", card)
         self.assertIn("Do not read the upstream", card)
+        self.assertIn("MODEL_SPEC.md", card)
+        self.assertIn("runtime ABI assumptions", card)
+
+    def test_model_card_rejects_multiple_profiles(self) -> None:
+        module = _load_script()
+
+        with self.assertRaisesRegex(ValueError, "one profile per repo"):
+            module.render_model_card("danhansen/example", ("fast", "compact"))
+
+    def test_model_spec_documents_runtime_constraints(self) -> None:
+        module = _load_script()
+
+        spec = module.render_model_spec(("fast", "compact"))
+
+        self.assertIn("processed_signal=[1, 128, 65]", spec)
+        self.assertIn("cache_len=56", spec)
+        self.assertIn("cache_key_layer_N", spec)
+        self.assertIn("projected_current_key_layer_N", spec)
+        self.assertIn("caller, not the graph, rolls the projected K/V cache", spec)
+        self.assertIn("scripts/build_nemotron_wordpipe_model.py", spec)
+
+    def test_copy_reproducibility_scripts(self) -> None:
+        module = _load_script()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            module.copy_reproducibility_scripts(output_dir, force=False)
+
+            for name in module.REPRODUCIBILITY_SCRIPTS:
+                self.assertTrue((output_dir / "scripts" / name).is_file(), name)
 
 
 if __name__ == "__main__":

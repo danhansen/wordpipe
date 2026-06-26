@@ -1,20 +1,15 @@
 # Publishing Wordpipe Model Profiles
 
-Wordpipe installs app-level model profiles from prebuilt Hugging Face archives by
-default. The installer currently looks in:
+Wordpipe installs app-level model profiles from prebuilt Hugging Face model
+repositories by default. Each profile is published as its own Hub repo with raw
+ONNX files at the repository root:
 
 ```text
-danhansen/wordpipe-nemotron-3.5-asr-streaming-0.6b
+danhansen/wordpipe-nemotron-fast-fp32-projected
+danhansen/wordpipe-nemotron-compact-fixed-shape
 ```
 
-and expects these root-level files:
-
-```text
-wordpipe-nemotron-fast-fp32-projected.tar.gz
-wordpipe-nemotron-compact-fixed-shape.tar.gz
-```
-
-The archives must contain ONNX profile directories with:
+Each repo should contain:
 
 ```text
 tokenizer.model
@@ -28,7 +23,7 @@ includes those sidecars automatically when present and excludes stale duplicate
 export files such as `*.fp32.*`.
 
 Do not publish the local `*-ort-format` runtime cache for `compact`; Wordpipe
-downloads the compact ONNX archive and converts it to ORT format during install.
+downloads the compact ONNX files and converts them to ORT format during install.
 
 ## Hub Conventions
 
@@ -56,14 +51,22 @@ Before uploading, review the generated model card for:
 - Evaluation language that points to Wordpipe release documentation instead of
   copying NVIDIA's upstream benchmark numbers.
 
-## Package Profiles
+## Publish Profiles
 
-From canonical installed profile names under a model root:
+Publish one profile per Hugging Face model repo. From canonical installed
+profile names under a model root:
 
 ```sh
 PYTHONPATH=src python3 scripts/publish_wordpipe_model_profiles.py \
+  --profile fast \
   --model-root ~/.local/share/wordpipe/models \
-  --output-dir build/model-release \
+  --output-dir build/model-release/fast \
+  --force
+
+PYTHONPATH=src python3 scripts/publish_wordpipe_model_profiles.py \
+  --profile compact \
+  --model-root ~/.local/share/wordpipe/models \
+  --output-dir build/model-release/compact \
   --force
 ```
 
@@ -71,14 +74,38 @@ Or from explicit build directories:
 
 ```sh
 PYTHONPATH=src python3 scripts/publish_wordpipe_model_profiles.py \
+  --profile fast \
   --fast-dir build/model-variants/nemotron-fp32-projected \
+  --output-dir build/model-release/fast \
+  --force
+
+PYTHONPATH=src python3 scripts/publish_wordpipe_model_profiles.py \
+  --profile compact \
   --compact-dir build/model-variants/nemotron-c56-fixed-shape \
-  --output-dir build/model-release \
+  --output-dir build/model-release/compact \
   --force
 ```
 
-The script writes the two archives, a generated `README.md`, and
-`wordpipe-model-profiles-manifest.json` with sizes and SHA-256 hashes.
+The script writes the raw runtime files, a generated `README.md`,
+`wordpipe-model-profiles-manifest.json` with sizes and SHA-256 hashes,
+`MODEL_SPEC.md`, and a `scripts/` directory with the export and graph rewrite
+scripts used by the Wordpipe source tree.
+
+`MODEL_SPEC.md` documents the assumptions baked into the published graphs:
+
+- c56 streaming shape: 65 mel input frames, 7 encoder output frames, and 56
+  projected-cache frames.
+- Batch size 1, 24 layers, hidden size 1024, and convolution cache context 8.
+- The projected K/V cache ABI: per-layer `cache_key_layer_N` and
+  `cache_value_layer_N` inputs plus `projected_current_*` outputs.
+- The caller is responsible for rolling projected K/V cache tensors between
+  streaming chunks.
+- `fast` is FP32 projected-cache ONNX; `compact` is dynamic-QUInt8
+  projected-cache ONNX that Wordpipe converts to ORT format locally.
+
+Bundling these scripts in the Hugging Face model repository is intentional:
+they are source/reproducibility artifacts for the published inference files, not
+extra model weights.
 
 ## Upload To Hugging Face
 
@@ -96,9 +123,16 @@ Then upload:
 
 ```sh
 PYTHONPATH=src python3 scripts/publish_wordpipe_model_profiles.py \
+  --profile fast \
   --model-root ~/.local/share/wordpipe/models \
-  --repo-id danhansen/wordpipe-nemotron-3.5-asr-streaming-0.6b \
-  --output-dir build/model-release \
+  --output-dir build/model-release/fast \
+  --force \
+  --upload
+
+PYTHONPATH=src python3 scripts/publish_wordpipe_model_profiles.py \
+  --profile compact \
+  --model-root ~/.local/share/wordpipe/models \
+  --output-dir build/model-release/compact \
   --force \
   --upload
 ```

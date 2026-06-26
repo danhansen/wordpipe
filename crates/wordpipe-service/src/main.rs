@@ -310,7 +310,7 @@ impl WordpipeService {
                 insert_str(&mut item, "description", profile.description);
                 insert_str(&mut item, "build_profile", profile.build_profile);
                 insert_str(&mut item, "output_name", profile.output_name);
-                insert_str(&mut item, "prebuilt_filename", profile.prebuilt_filename);
+                insert_str(&mut item, "prebuilt_repo", profile.prebuilt_repo);
                 insert_bool(&mut item, "ort_format", profile.ort_format);
                 insert_str(&mut item, "runtime_dir", &runtime_dir);
                 insert_bool(&mut item, "installed", profile_installed(&runtime_dir));
@@ -1826,7 +1826,7 @@ mod tests {
                 "installed",
                 "ort_format",
                 "output_name",
-                "prebuilt_filename",
+                "prebuilt_repo",
                 "runtime_dir",
                 "title",
             ]

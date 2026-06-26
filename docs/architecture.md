@@ -166,8 +166,8 @@ Wordpipe keeps two app-level model profiles:
 - `compact`: dynamic-int8 projected-cache export with fixed shapes and
   ORT-format startup, smaller footprint and sub-second load target.
 
-`wordpipe model-install --profile fast|compact` downloads a validated prebuilt
-optimized ONNX profile archive from Hugging Face and installs it under
+`wordpipe model-install --profile fast|compact` downloads validated raw ONNX
+profile files from the profile's Hugging Face model repo and installs them under
 `model_root`. Profiles that use ORT startup, currently `compact`, then convert
 the ONNX profile to a local ORT-format runtime cache. Both profiles can coexist
 under `model_root`; changing `model_profile` or passing
@@ -175,7 +175,7 @@ under `model_root`; changing `model_profile` or passing
 `model_dir` is not explicitly set. The reproducible NeMo export pipeline remains
 available with `model-install --build-from-nemo` for release/developer work.
 See [model-publishing.md](model-publishing.md) for packaging and uploading the
-prebuilt profile archives that `model-install` downloads.
+prebuilt profile repos that `model-install` downloads.
 
 ## Performance
 

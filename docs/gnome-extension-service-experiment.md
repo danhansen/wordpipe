@@ -168,7 +168,7 @@ stale events after toggles, restarts, or extension reloads.
 | `description` | `s` | User-facing profile description. |
 | `build_profile` | `s` | Installer/export recipe name. |
 | `output_name` | `s` | Installed model directory base name. |
-| `prebuilt_filename` | `s` | Expected prebuilt archive name when prebuilt downloads are used. |
+| `prebuilt_repo` | `s` | Default Hugging Face model repo for raw prebuilt profile files. |
 | `ort_format` | `b` | Whether the runtime dir points at ORT-format output. |
 | `runtime_dir` | `s` | Full expected installed runtime directory for this profile. |
 | `installed` | `b` | Whether `runtime_dir` has the expected installed profile marker/files. |

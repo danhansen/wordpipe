@@ -168,8 +168,8 @@ The app also shows shortcut status and can try to repair it, but the host helper
 above is the reliable path if the Flatpak sandbox cannot write GNOME's host
 custom-keybinding settings.
 
-Default profile installation downloads a prebuilt optimized ONNX profile
-archive and installs it under
+Default profile installation downloads prebuilt optimized ONNX profile files and
+installs them under
 `~/.var/app/dev.wordpipe.Wordpipe/data/wordpipe/models/`. Profiles that use ORT
 startup, currently `compact`, convert that ONNX profile into a local ORT-format
 runtime cache after download.

@@ -289,7 +289,7 @@ def _cmd_download_model(args: argparse.Namespace) -> int:
 def _cmd_model_install(args: argparse.Namespace) -> int:
     from .models import (
         build_model_profile,
-        download_prebuilt_profile_archive,
+        download_prebuilt_profile,
         default_nemo_source_path,
         download_nemo_source,
         install_built_profile,
@@ -304,26 +304,35 @@ def _cmd_model_install(args: argparse.Namespace) -> int:
     model_root = Path(args.model_root).expanduser() if args.model_root else file_config.model_root
     if model_root is None:
         raise SystemExit("model_root is required")
-    if not args.build_from_nemo:
+    build_from_nemo = getattr(args, "build_from_nemo", bool(args.source))
+    prebuilt_repo = getattr(args, "prebuilt_repo", None)
+    source_candidate = Path(args.source).expanduser() if args.source else None
+    if source_candidate is not None and source_candidate.exists() and (
+        source_is_built_profile(source_candidate) or source_may_be_built_profile_archive(source_candidate)
+    ):
+        runtime_dir = install_built_profile(
+            source=source_candidate,
+            model_root=model_root,
+            profile=profile,
+            force=args.force,
+        )
+        print(runtime_dir)
+        return 0
+
+    if not build_from_nemo:
         if args.source:
-            source_candidate = Path(args.source).expanduser()
-            if not (
-                source_is_built_profile(source_candidate)
-                or source_may_be_built_profile_archive(source_candidate)
-            ):
-                raise SystemExit(
-                    "--source must be a built Wordpipe profile directory/archive unless "
-                    "--build-from-nemo is used"
-                )
-            source_path = source_candidate
+            raise SystemExit(
+                "--source must be a local built Wordpipe profile directory/archive unless "
+                "--build-from-nemo is used"
+            )
         elif args.dry_run:
-            source_path = model_root / "downloads" / args.prebuilt_repo.replace("/", "--")
-            source_path = source_path / profile_spec(profile).prebuilt_filename
+            selected_repo = prebuilt_repo or profile_spec(profile).prebuilt_repo
+            source_path = model_root / "downloads" / selected_repo.replace("/", "--") / profile
         else:
-            source_path = download_prebuilt_profile_archive(
+            source_path = download_prebuilt_profile(
                 profile=profile,
                 model_root=model_root,
-                repo_id=args.prebuilt_repo,
+                repo_id=prebuilt_repo,
                 force=args.force_source,
             )
         if args.dry_run:
@@ -341,17 +350,6 @@ def _cmd_model_install(args: argparse.Namespace) -> int:
 
     source_value = args.source or file_config.nemo_source
     source_candidate = Path(source_value).expanduser()
-    if source_candidate.exists() and (
-        source_is_built_profile(source_candidate) or source_may_be_built_profile_archive(source_candidate)
-    ):
-        runtime_dir = install_built_profile(
-            source=source_candidate,
-            model_root=model_root,
-            profile=profile,
-            force=args.force,
-        )
-        print(runtime_dir)
-        return 0
     source_output = Path(args.source_output).expanduser() if args.source_output else None
     if args.dry_run:
         source_path = source_candidate if source_candidate.exists() else source_output or default_nemo_source_path(model_root)
@@ -389,6 +387,7 @@ def _cmd_model_profiles(args: argparse.Namespace) -> int:
                 "title": spec.title,
                 "description": spec.description,
                 "build_profile": spec.build_profile,
+                "prebuilt_repo": spec.prebuilt_repo,
                 "runtime_dir": str(runtime_dir) if runtime_dir is not None else None,
                 "installed": installed,
             }
@@ -1111,7 +1110,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     model_install = subparsers.add_parser(
         "model-install",
-        help="Install a selectable Wordpipe profile from a prebuilt profile archive.",
+        help="Install a selectable Wordpipe profile from prebuilt Hugging Face ONNX files.",
     )
     model_install.add_argument("--config", help="Path to config.toml.")
     model_install.add_argument(
@@ -1132,8 +1131,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     model_install.add_argument(
         "--prebuilt-repo",
-        default="danhansen/wordpipe-nemotron-3.5-asr-streaming-0.6b",
-        help="Hugging Face repo containing prebuilt Wordpipe profile archives.",
+        help="Override the Hugging Face repo containing this profile's raw ONNX files.",
     )
     model_install.add_argument(
         "--build-from-nemo",
