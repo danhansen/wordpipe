@@ -240,25 +240,32 @@ def render_model_card(repo_id: str, profiles: Iterable[str]) -> str:
     for profile_name in profiles:
         spec = profile_spec(profile_name)
         profile_lines.append(
-            f"- `{spec.prebuilt_filename}`: {spec.title} profile. {spec.description}"
+            f"- `{spec.prebuilt_filename}` - {spec.title}: {spec.description}"
         )
     joined_profiles = "\n".join(profile_lines)
     return f"""---
 language:
-- en
+- multilingual
+license: openmdw-1.1
+library_name: onnx
+pipeline_tag: automatic-speech-recognition
+base_model: nvidia/nemotron-3.5-asr-streaming-0.6b
 tags:
 - automatic-speech-recognition
 - onnx
 - wordpipe
 - nemotron
-library_name: onnx
-base_model: nvidia/nemotron-3.5-asr-streaming-0.6b
+- streaming-asr
+- desktop-dictation
 ---
 
 # Wordpipe Nemotron 3.5 ASR Streaming Profiles
 
 This repository contains Wordpipe-specialized ONNX profile archives derived from
-`nvidia/nemotron-3.5-asr-streaming-0.6b`.
+[`nvidia/nemotron-3.5-asr-streaming-0.6b`](https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b).
+NVIDIA is the upstream model developer. Wordpipe adds export, graph
+specialization, packaging, and local desktop runtime integration; these archives
+are not separately trained checkpoints.
 
 The archives are consumed by Wordpipe with:
 
@@ -274,11 +281,45 @@ wordpipe model-install --profile compact --prebuilt-repo {repo_id}
 `wordpipe-model-profiles-manifest.json` records archive sizes, SHA-256 hashes,
 source directories used when packaging, and the Wordpipe build profile.
 
-## Notes
+Each archive expands to a Wordpipe ONNX profile directory containing:
 
-These are inference artifacts for local desktop dictation. They are not training
-checkpoints. The `compact` archive intentionally contains the ONNX profile; the
-Wordpipe installer converts it to ORT format locally for startup-time behavior.
+```text
+tokenizer.model
+encoder.onnx
+encoder.onnx.data        # when the encoder uses external ONNX data
+decoder_joint.onnx
+decoder_joint.onnx.data  # when the decoder uses external ONNX data
+```
+
+## Intended Use
+
+These artifacts are intended for local Wordpipe desktop dictation on Linux. They
+are optimized for the Wordpipe Parakeet/Nemotron runtime layout and are not a
+general NeMo checkpoint replacement.
+
+## Evaluation Status
+
+Wordpipe validates candidate profiles with local WER and real-time-factor tests
+before promotion. Current Wordpipe release validation is primarily English
+LibriSpeech-based unless a release explicitly says otherwise. See the Wordpipe
+project documentation and release notes for the exact benchmark set used for a
+given upload. Do not read the upstream NVIDIA FLEURS numbers as measurements of
+these transformed artifacts.
+
+## Limitations
+
+The `compact` archive intentionally contains the ONNX profile; the Wordpipe
+installer converts it to ORT format locally for startup-time behavior. The
+profiles are packaged for CPU-oriented Wordpipe usage and may not match NeMo's
+standard runtime interface.
+
+## License and Attribution
+
+The upstream model card states that use of
+`nvidia/nemotron-3.5-asr-streaming-0.6b` is governed by the OpenMDW 1.1 license.
+Review the upstream NVIDIA model card and OpenMDW terms before redistribution or
+deployment. This repository preserves that attribution and publishes derived
+inference artifacts for Wordpipe.
 """
 
 

@@ -58,6 +58,22 @@ class PublishWordpipeModelProfilesTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "Publish the ONNX profile directory"):
                 module.validate_publish_source(source)
 
+    def test_model_card_includes_hub_metadata_and_attribution(self) -> None:
+        module = _load_script()
+
+        card = module.render_model_card(
+            "danhansen/wordpipe-nemotron-3.5-asr-streaming-0.6b",
+            ("fast", "compact"),
+        )
+
+        self.assertIn("language:\n- multilingual", card)
+        self.assertIn("license: openmdw-1.1", card)
+        self.assertIn("library_name: onnx", card)
+        self.assertIn("pipeline_tag: automatic-speech-recognition", card)
+        self.assertIn("base_model: nvidia/nemotron-3.5-asr-streaming-0.6b", card)
+        self.assertIn("NVIDIA is the upstream model developer", card)
+        self.assertIn("Do not read the upstream", card)
+
 
 if __name__ == "__main__":
     unittest.main()

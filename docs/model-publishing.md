@@ -30,6 +30,32 @@ export files such as `*.fp32.*`.
 Do not publish the local `*-ort-format` runtime cache for `compact`; Wordpipe
 downloads the compact ONNX archive and converts it to ORT format during install.
 
+## Hub Conventions
+
+The generated Hugging Face `README.md` is the model card. It uses YAML metadata
+so the Hub can index the repository correctly:
+
+- `pipeline_tag: automatic-speech-recognition`
+- `library_name: onnx`
+- `base_model: nvidia/nemotron-3.5-asr-streaming-0.6b`
+- `license: openmdw-1.1`
+- `language: multilingual`
+
+The card should make clear that NVIDIA is the upstream model developer and that
+Wordpipe publishes derived inference artifacts: export, graph specialization,
+packaging, and desktop runtime integration. Do not claim new training datasets,
+new upstream FLEURS results, or a separate checkpoint lineage unless those have
+actually been produced and validated.
+
+Before uploading, review the generated model card for:
+
+- Attribution to `nvidia/nemotron-3.5-asr-streaming-0.6b`.
+- OpenMDW 1.1 license metadata and prose link.
+- A clear intended-use section for local Wordpipe dictation.
+- A limitations section explaining that `compact` is converted to ORT locally.
+- Evaluation language that points to Wordpipe release documentation instead of
+  copying NVIDIA's upstream benchmark numbers.
+
 ## Package Profiles
 
 From canonical installed profile names under a model root:
