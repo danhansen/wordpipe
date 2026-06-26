@@ -60,7 +60,7 @@ class PublishWordpipeModelProfilesTests(unittest.TestCase):
         module = _load_script()
 
         card = module.render_model_card(
-            "danhansen/wordpipe-nemotron-fast-fp32-projected",
+            "fractalyzer/wordpipe-nemotron-fast-fp32-projected",
             ("fast",),
         )
 

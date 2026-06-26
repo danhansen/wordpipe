@@ -5,8 +5,8 @@ repositories by default. Each profile is published as its own Hub repo with raw
 ONNX files at the repository root:
 
 ```text
-danhansen/wordpipe-nemotron-fast-fp32-projected
-danhansen/wordpipe-nemotron-compact-fixed-shape
+fractalyzer/wordpipe-nemotron-fast-fp32-projected
+fractalyzer/wordpipe-nemotron-compact-fixed-shape
 ```
 
 Each repo should contain:

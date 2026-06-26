@@ -26,7 +26,7 @@ DEFAULT_MODEL_FILES = (
 )
 DEFAULT_NEMO_SOURCE_REPO = "nvidia/nemotron-3.5-asr-streaming-0.6b"
 DEFAULT_NEMO_SOURCE_FILENAME = "nemotron-3.5-asr-streaming-0.6b.nemo"
-DEFAULT_PREBUILT_PROFILE_REPO = "danhansen/wordpipe-nemotron-fast-fp32-projected"
+DEFAULT_PREBUILT_PROFILE_REPO = "fractalyzer/wordpipe-nemotron-fast-fp32-projected"
 PREBUILT_PROFILE_FILES = (
     "tokenizer.model",
     "encoder.onnx",
@@ -86,7 +86,7 @@ MODEL_PROFILES: dict[ModelProfile, ModelProfileSpec] = {
         description="FP32 projected-cache model; fastest validated profile, largest footprint.",
         build_profile="fp32-projected",
         output_name="nemotron-wordpipe-fast-fp32-projected",
-        prebuilt_repo="danhansen/wordpipe-nemotron-fast-fp32-projected",
+        prebuilt_repo="fractalyzer/wordpipe-nemotron-fast-fp32-projected",
     ),
     "compact": ModelProfileSpec(
         name="compact",
@@ -94,7 +94,7 @@ MODEL_PROFILES: dict[ModelProfile, ModelProfileSpec] = {
         description="Dynamic-int8 projected-cache model with fixed shapes and ORT-format startup.",
         build_profile="compact-fixed-shape",
         output_name="nemotron-wordpipe-compact-fixed-shape",
-        prebuilt_repo="danhansen/wordpipe-nemotron-compact-fixed-shape",
+        prebuilt_repo="fractalyzer/wordpipe-nemotron-compact-fixed-shape",
         emit_ort_format=True,
     ),
 }

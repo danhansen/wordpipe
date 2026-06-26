@@ -21,7 +21,7 @@ pub const MODEL_PROFILES: &[ModelProfileSpec] = &[
         description: "FP32 projected-cache model; fastest validated profile, largest footprint.",
         build_profile: "fp32-projected",
         output_name: "nemotron-wordpipe-fast-fp32-projected",
-        prebuilt_repo: "danhansen/wordpipe-nemotron-fast-fp32-projected",
+        prebuilt_repo: "fractalyzer/wordpipe-nemotron-fast-fp32-projected",
         ort_format: false,
     },
     ModelProfileSpec {
@@ -30,7 +30,7 @@ pub const MODEL_PROFILES: &[ModelProfileSpec] = &[
         description: "Dynamic-int8 projected-cache model with fixed shapes and ORT-format startup.",
         build_profile: "compact-fixed-shape",
         output_name: "nemotron-wordpipe-compact-fixed-shape",
-        prebuilt_repo: "danhansen/wordpipe-nemotron-compact-fixed-shape",
+        prebuilt_repo: "fractalyzer/wordpipe-nemotron-compact-fixed-shape",
         ort_format: true,
     },
 ];
