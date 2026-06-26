@@ -76,6 +76,8 @@ const ShortcutSettingButton = GObject.registerClass({
         this._settingsKey = settingsKey;
         this._settings = settings;
         this._editor = null;
+        this._previousShortcut = '';
+        this._recordingShortcut = false;
         this._shortcut = '';
         this._label = new Gtk.ShortcutLabel({
             disabled_text: _('New accelerator...'),
@@ -121,11 +123,18 @@ const ShortcutSettingButton = GObject.registerClass({
         this._editor.add_controller(controller);
         controller.connect('key-pressed', this._onKeyPressed.bind(this));
         this._editor.connect('close-request', () => {
-            this._settings.set_boolean('shortcut-capture-active', false);
+            this._finishRecording(false);
             return false;
         });
+        this._previousShortcut = this._settings.get_strv(this._settingsKey)[0] ?? '';
+        this._recordingShortcut = true;
         this._settings.set_boolean('shortcut-capture-active', true);
-        this._editor.present();
+        this._settings.set_strv(this._settingsKey, []);
+        this._label.set_accelerator(this._previousShortcut);
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => {
+            this._editor?.present();
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     _onKeyPressed(_controller, keyval, keycode, state) {
@@ -165,9 +174,24 @@ const ShortcutSettingButton = GObject.registerClass({
     _updateShortcut(accelerator) {
         this.shortcut = accelerator;
         this._label.set_accelerator(this.shortcut);
-        this._settings.set_strv(this._settingsKey, [this.shortcut]);
-        this._settings.set_boolean('shortcut-capture-active', false);
+        this._settings.set_strv(this._settingsKey, accelerator ? [accelerator] : []);
+        this._finishRecording(true);
         this.emit('changed', this.shortcut);
+    }
+
+    _finishRecording(accepted) {
+        if (!this._recordingShortcut)
+            return;
+
+        this._recordingShortcut = false;
+        if (!accepted) {
+            this.shortcut = this._previousShortcut;
+            this._label.set_accelerator(this.shortcut);
+            this._settings.set_strv(this._settingsKey,
+                this._previousShortcut ? [this._previousShortcut] : []);
+        }
+        this._previousShortcut = '';
+        this._settings.set_boolean('shortcut-capture-active', false);
     }
 
     _keyvalIsForbidden(keyval) {

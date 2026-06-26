@@ -479,6 +479,8 @@ export default class WordpipeExtension extends Extension {
         this._settings.connectObject('changed', (_settings, key) => {
             if (key === 'shortcut-capture-active')
                 return;
+            if (this._settings.get_boolean('shortcut-capture-active'))
+                return;
             if (!this._syncingSettings)
                 this._pushSettings();
         }, this);
