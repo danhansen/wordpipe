@@ -529,6 +529,8 @@ PYTHONPATH=src python3 -m wordpipe model-install \
 Wordpipe uses `huggingface_hub` and enables `HF_HUB_ENABLE_HF_TRANSFER=1` when
 `hf_transfer` is installed. Run `model-install` again with the other profile
 when you want to try it; both artifacts can coexist under `model_root`.
+See [docs/model-publishing.md](docs/model-publishing.md) for packaging and
+uploading the prebuilt profile archives that this command downloads.
 
 `model-install --source` can also import an already-built Wordpipe profile
 directory or archive. The app Flatpak can run the same install pipeline inside

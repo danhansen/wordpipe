@@ -174,6 +174,8 @@ under `model_root`; changing `model_profile` or passing
 `--model-profile fast|compact` selects which one the app and daemon load when
 `model_dir` is not explicitly set. The reproducible NeMo export pipeline remains
 available with `model-install --build-from-nemo` for release/developer work.
+See [model-publishing.md](model-publishing.md) for packaging and uploading the
+prebuilt profile archives that `model-install` downloads.
 
 ## Performance
 
