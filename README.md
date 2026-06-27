@@ -1,13 +1,14 @@
 # Wordpipe
 
 Wordpipe is a Wayland-only GNOME dictation app built around true streaming
-speech recognition. The ASR runtime is pivoting to a Rust worker based on
-`parakeet-rs`; the earlier sherpa-onnx worker remains available for legacy
-diagnostics.
+speech recognition. The primary implementation is a GNOME Shell frontend backed
+by a Rust D-Bus service and a Rust `parakeet-rs` ASR worker. Earlier GTK,
+Flatpak, portal, and sherpa-onnx app paths are retained as areas for future
+frontend exploration and diagnostics, but they are not the main product path.
 
 ## Direction
 
-- GNOME-first Linux desktop integration.
+- GNOME Shell-first Linux desktop integration.
 - Wayland only; no X11 tooling.
 - Streaming ASR with `parakeet-rs`.
 - Target model family: Parakeet/Nemotron cache-aware streaming ASR.
@@ -23,30 +24,27 @@ See [docs/architecture.md](docs/architecture.md) for the current design plan.
 
 The current implementation provides:
 
-- `wordpipe probe` capability checks for GNOME, portals, and Python modules.
+- GNOME Shell extension with a top-bar indicator, Shell shortcut handling,
+  preferences UI, D-Bus service client, and Shell-side text insertion adapter.
+- Rust `wordpipe-service` D-Bus session service for configuration, profile
+  install, dictation control, and worker lifecycle.
 - `wordpipe-parakeet-worker` Rust newline-JSON streaming worker.
+- `wordpipe model-install` profile install from the published Wordpipe Nemotron
+  `fast` and `compact` Hugging Face model repos.
+- `wordpipe probe` capability checks for GNOME, portals, and Python modules.
 - `wordpipe asr-worker` legacy sherpa-onnx newline-JSON worker.
 - `wordpipe type-text` keyboard insertion through the RemoteDesktop portal.
 - `wordpipe daemon` MVP loop that connects the ASR worker to text insertion.
 - `wordpipe hotkey-daemon` manual or GlobalShortcuts-controlled dictation.
 - `wordpipe voice-keyboard` global-hotkey dictation into the focused text box.
-- `wordpipe app` GTK/libadwaita control window for local app-style use.
-- Optional libadwaita/GTK live transcript overlay.
-- Experimental GNOME Shell extension plus Rust session service on the
-  `experiment/gnome-extension-service` branch.
+- `wordpipe app` GTK/libadwaita control window for local app-style exploration.
 
-The GNOME extension path installs a top-bar indicator, Shell shortcut,
-preferences UI, D-Bus service client, and Shell-side text insertion adapter.
 See [docs/gnome-extension-service-experiment.md](docs/gnome-extension-service-experiment.md).
 
+Other frontends remain possible. The previous app/Flatpak-oriented `main`
+history is preserved on `exploration/app-flatpak-frontend` for future reference.
+
 ## Local Development
-
-This workspace contains a mounted placeholder `.git` directory, so the real Git
-metadata lives in `.wordpipe.git`. Use:
-
-```sh
-git --git-dir=.wordpipe.git --work-tree=. status
-```
 
 Run tests:
 
