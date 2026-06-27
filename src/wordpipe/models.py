@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -39,6 +40,7 @@ PREBUILT_PROFILE_FILES = (
     "tokenizer_config.json",
 )
 REQUIRED_PREBUILT_PROFILE_FILES = ("tokenizer.model", "encoder.onnx", "decoder_joint.onnx")
+PROFILE_COMPLETION_MARKER = ".wordpipe-profile.json"
 ModelProfile = Literal["fast", "compact"]
 ProgressCallback = Callable[[str], None]
 
@@ -190,6 +192,13 @@ def profile_installed(model_root: Path, profile: str) -> bool:
 
 
 def model_runtime_dir_valid(runtime_dir: Path) -> bool:
+    if not _runtime_structure_valid(runtime_dir):
+        return False
+    marker = _profile_completion_marker(runtime_dir)
+    return not marker.exists() or _profile_completion_marker_valid(runtime_dir, verify_hashes=False)
+
+
+def _runtime_structure_valid(runtime_dir: Path) -> bool:
     return (
         (runtime_dir / "tokenizer.model").exists()
         and _graph_file_valid(runtime_dir, "encoder")
@@ -259,6 +268,7 @@ def install_built_profile(
         shutil.rmtree(temporary)
     try:
         shutil.copytree(prepared_source.path, temporary)
+        _write_profile_completion_marker(temporary, profile=profile)
         if destination.exists():
             shutil.rmtree(destination)
         temporary.replace(destination)
@@ -282,8 +292,14 @@ def download_prebuilt_profile(
     output_dir = prebuilt_profile_cache_dir(model_root, selected_repo, profile)
     output_dir.mkdir(parents=True, exist_ok=True)
     if source_is_built_profile(output_dir) and not force:
+        if not _profile_completion_marker(output_dir).exists():
+            _write_profile_completion_marker(output_dir, profile=profile)
         _progress(progress, f"Using cached prebuilt profile: {output_dir}")
         return output_dir
+    if _profile_completion_marker(output_dir).exists() and not _profile_completion_marker_valid(output_dir, verify_hashes=False):
+        _progress(progress, f"Removing invalid cached prebuilt profile: {output_dir}")
+        shutil.rmtree(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         from huggingface_hub import hf_hub_download
@@ -349,6 +365,7 @@ def download_prebuilt_profile(
                     os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
                 else:
                     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = env_value
+        _write_profile_completion_marker(output_dir, profile=profile)
         _progress(progress, f"Prebuilt profile ready: {output_dir}")
         return output_dir
     except ImportError as exc:
@@ -435,7 +452,7 @@ def install_prebuilt_profile(
     prepared_source = _prepare_built_profile_source(source)
     try:
         onnx_dir = spec.output_dir(model_root)
-        _install_prepared_profile(prepared_source.path, onnx_dir, force=force)
+        _install_prepared_profile(prepared_source.path, onnx_dir, profile=profile, force=force)
     finally:
         if prepared_source.cleanup_dir is not None:
             shutil.rmtree(prepared_source.cleanup_dir, ignore_errors=True)
@@ -446,6 +463,8 @@ def install_prebuilt_profile(
 
     runtime_dir = spec.runtime_dir(model_root)
     if runtime_dir.exists() and not force and model_runtime_dir_valid(runtime_dir):
+        if not _profile_completion_marker(runtime_dir).exists():
+            _write_profile_completion_marker(runtime_dir, profile=profile)
         _progress(progress, f"Using cached ORT runtime profile: {runtime_dir}")
         return runtime_dir
 
@@ -458,11 +477,12 @@ def install_prebuilt_profile(
     ]
     _progress(progress, " ".join(command))
     _run_with_progress(command, progress)
+    _write_profile_completion_marker(runtime_dir, profile=profile)
     _progress(progress, f"Model profile ready: {runtime_dir}")
     return runtime_dir
 
 
-def _install_prepared_profile(source: Path, destination: Path, *, force: bool) -> None:
+def _install_prepared_profile(source: Path, destination: Path, *, profile: str, force: bool) -> None:
     if destination.exists():
         if not force:
             raise RuntimeError(
@@ -474,6 +494,7 @@ def _install_prepared_profile(source: Path, destination: Path, *, force: bool) -
         shutil.rmtree(temporary)
     try:
         shutil.copytree(source, temporary)
+        _write_profile_completion_marker(temporary, profile=profile)
         if destination.exists():
             shutil.rmtree(destination)
         temporary.replace(destination)
@@ -681,6 +702,7 @@ def build_model_profile(
     build_dir = profile_build_dir(model_root, profile)
     if not dry_run:
         _run_with_progress(command, progress)
+        _write_profile_completion_marker(profile_runtime_dir(model_root, profile), profile=profile)
         if not keep_build_dir and build_dir.exists():
             _progress(progress, f"Removing build intermediates: {build_dir}")
             shutil.rmtree(build_dir)
@@ -718,3 +740,94 @@ def _progress(progress: ProgressCallback | None, message: str) -> None:
 
 def _progress_event(progress: ProgressCallback | None, **payload: object) -> None:
     _progress(progress, "wordpipe-progress " + json.dumps(payload, sort_keys=True))
+
+
+def _profile_completion_marker(runtime_dir: Path) -> Path:
+    return runtime_dir / PROFILE_COMPLETION_MARKER
+
+
+def _write_profile_completion_marker(runtime_dir: Path, *, profile: str) -> None:
+    if not _runtime_structure_valid(runtime_dir):
+        raise RuntimeError(
+            f"model runtime profile is incomplete at {runtime_dir}; expected tokenizer.model "
+            "plus encoder and decoder_joint ONNX/ORT graphs"
+        )
+    marker = _profile_completion_marker(runtime_dir)
+    files = []
+    for path in _runtime_files(runtime_dir):
+        relative = path.relative_to(runtime_dir).as_posix()
+        files.append(
+            {
+                "path": relative,
+                "size": path.stat().st_size,
+                "sha256": _sha256_file(path),
+            }
+        )
+    payload = {
+        "format": 1,
+        "profile": profile,
+        "created_at_unix": int(time.time()),
+        "files": files,
+    }
+    temporary = marker.with_name(f"{marker.name}.tmp-{os.getpid()}")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    temporary.replace(marker)
+
+
+def _profile_completion_marker_valid(runtime_dir: Path, *, verify_hashes: bool) -> bool:
+    marker = _profile_completion_marker(runtime_dir)
+    try:
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if payload.get("format") != 1:
+        return False
+    files = payload.get("files")
+    if not isinstance(files, list) or not files:
+        return False
+    for item in files:
+        if not isinstance(item, dict):
+            return False
+        relative = item.get("path")
+        expected_size = item.get("size")
+        expected_sha256 = item.get("sha256")
+        if not isinstance(relative, str) or not isinstance(expected_size, int):
+            return False
+        if verify_hashes and not isinstance(expected_sha256, str):
+            return False
+        if not _safe_relative_path(relative):
+            return False
+        path = runtime_dir / relative
+        try:
+            if path.stat().st_size != expected_size:
+                return False
+        except OSError:
+            return False
+        if verify_hashes and _sha256_file(path) != expected_sha256:
+            return False
+    return True
+
+
+def _runtime_files(runtime_dir: Path) -> list[Path]:
+    files: list[Path] = []
+    marker = _profile_completion_marker(runtime_dir)
+    for path in runtime_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        if path == marker or path.name.startswith(f"{PROFILE_COMPLETION_MARKER}.tmp-"):
+            continue
+        files.append(path)
+    return sorted(files, key=lambda path: path.relative_to(runtime_dir).as_posix())
+
+
+def _safe_relative_path(value: str) -> bool:
+    path = Path(value)
+    return bool(value) and not path.is_absolute() and ".." not in path.parts
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()

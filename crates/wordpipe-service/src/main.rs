@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, Write};
+use std::io::{BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -20,6 +20,7 @@ use zbus::zvariant::{OwnedValue, Value};
 use zbus::{connection, interface};
 
 type VariantMap = HashMap<String, OwnedValue>;
+const PROFILE_COMPLETION_MARKER: &str = ".wordpipe-profile.json";
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -1207,18 +1208,152 @@ fn normalize_model_root(value: String) -> String {
 }
 
 fn normalize_worker_path(value: String) -> String {
-    if value.trim().is_empty() {
-        default_worker_path()
-    } else {
-        value
-    }
+    normalize_executable_path(value, default_worker_path)
 }
 
 fn normalize_model_installer_path(value: String) -> String {
-    if value.trim().is_empty() {
-        default_model_installer_path()
+    normalize_executable_path(value, default_model_installer_path)
+}
+
+fn normalize_executable_path(value: String, default_path: impl FnOnce() -> String) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return default_path();
+    }
+    if Path::new(trimmed).exists() {
+        trimmed.to_string()
     } else {
-        value
+        let fallback = default_path();
+        if Path::new(&fallback).exists() {
+            fallback
+        } else {
+            trimmed.to_string()
+        }
+    }
+}
+
+fn graph_file_valid(runtime_dir: &Path, stem: &str) -> bool {
+    if runtime_dir.join(format!("{stem}.ort")).exists() {
+        return true;
+    }
+    let onnx_path = runtime_dir.join(format!("{stem}.onnx"));
+    if !onnx_path.exists() {
+        return false;
+    }
+    let data_path = runtime_dir.join(format!("{stem}.onnx.data"));
+    if data_path.exists() {
+        return true;
+    }
+    match fs::metadata(&onnx_path) {
+        Ok(metadata) if metadata.len() > 128 * 1024 * 1024 => true,
+        Ok(_) => !onnx_references_external_data(&onnx_path, &format!("{stem}.onnx.data")),
+        Err(_) => false,
+    }
+}
+
+fn onnx_references_external_data(onnx_path: &Path, marker: &str) -> bool {
+    let marker = marker.as_bytes();
+    let mut file = match fs::File::open(onnx_path) {
+        Ok(file) => file,
+        Err(_) => return true,
+    };
+    let mut buffer = [0_u8; 1024 * 1024];
+    let mut carry = Vec::<u8>::new();
+    loop {
+        let count = match file.read(&mut buffer) {
+            Ok(0) => return false,
+            Ok(count) => count,
+            Err(_) => return true,
+        };
+        let mut chunk = Vec::with_capacity(carry.len() + count);
+        chunk.extend_from_slice(&carry);
+        chunk.extend_from_slice(&buffer[..count]);
+        if chunk.windows(marker.len()).any(|window| window == marker) {
+            return true;
+        }
+        let carry_len = marker.len().saturating_sub(1).min(chunk.len());
+        carry.clear();
+        carry.extend_from_slice(&chunk[chunk.len() - carry_len..]);
+    }
+}
+
+fn model_runtime_dir_valid(runtime_dir: &Path) -> bool {
+    model_runtime_structure_valid(runtime_dir)
+        && profile_completion_marker_valid_if_present(runtime_dir)
+}
+
+fn model_runtime_structure_valid(runtime_dir: &Path) -> bool {
+    runtime_dir.join("tokenizer.model").exists()
+        && graph_file_valid(runtime_dir, "encoder")
+        && graph_file_valid(runtime_dir, "decoder_joint")
+}
+
+fn profile_completion_marker_valid_if_present(runtime_dir: &Path) -> bool {
+    let marker = runtime_dir.join(PROFILE_COMPLETION_MARKER);
+    if !marker.exists() {
+        return true;
+    }
+    let payload = match fs::read(&marker)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<JsonValue>(&bytes).ok())
+    {
+        Some(payload) => payload,
+        None => return false,
+    };
+    if payload.get("format").and_then(JsonValue::as_u64) != Some(1) {
+        return false;
+    }
+    let Some(files) = payload.get("files").and_then(JsonValue::as_array) else {
+        return false;
+    };
+    if files.is_empty() {
+        return false;
+    }
+    files
+        .iter()
+        .all(|item| marker_file_valid(runtime_dir, item))
+}
+
+fn marker_file_valid(runtime_dir: &Path, item: &JsonValue) -> bool {
+    let Some(relative) = item.get("path").and_then(JsonValue::as_str) else {
+        return false;
+    };
+    let Some(expected_size) = item.get("size").and_then(JsonValue::as_u64) else {
+        return false;
+    };
+    if !safe_relative_path(relative) {
+        return false;
+    }
+    let path = runtime_dir.join(relative);
+    fs::metadata(path)
+        .map(|metadata| metadata.len() == expected_size)
+        .unwrap_or(false)
+}
+
+fn safe_relative_path(value: &str) -> bool {
+    let path = Path::new(value);
+    !value.is_empty()
+        && !path.is_absolute()
+        && !path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
+}
+
+fn legacy_encoder_graph_exists(runtime_dir: &Path) -> bool {
+    runtime_dir.join("encoder.encoder.onnx").exists()
+        || runtime_dir.join("encoder.encoder.ort").exists()
+}
+
+fn legacy_model_runtime_dir_valid(runtime_dir: &Path) -> bool {
+    runtime_dir.join("tokenizer.model").exists() && legacy_encoder_graph_exists(runtime_dir)
+}
+
+fn profile_installed(runtime_dir: &str) -> bool {
+    let path = Path::new(runtime_dir);
+    if model_runtime_dir_valid(path) {
+        true
+    } else {
+        legacy_model_runtime_dir_valid(path)
     }
 }
 
@@ -1238,14 +1373,6 @@ fn selected_runtime_dir(config: &ServiceConfig) -> String {
         return config.model_root.clone();
     };
     profile_runtime_dir(&config.model_root, profile.output_name, profile.ort_format)
-}
-
-fn profile_installed(runtime_dir: &str) -> bool {
-    let path = std::path::Path::new(runtime_dir);
-    path.join("encoder.onnx").exists()
-        || path.join("encoder.ort").exists()
-        || path.join("encoder.encoder.onnx").exists()
-        || path.join("encoder.encoder.ort").exists()
 }
 
 fn select_installed_model_profile(config: &mut ServiceConfig) {
@@ -1897,6 +2024,93 @@ mod tests {
     }
 
     #[test]
+    fn missing_runtime_path_uses_existing_default_path() {
+        let root = unique_temp_dir("runtime-path-default");
+        fs::create_dir_all(&root).unwrap();
+        let fallback = root.join("wordpipe-parakeet-worker");
+        fs::write(&fallback, b"worker").unwrap();
+
+        let normalized =
+            normalize_executable_path("/tmp/wordpipe-stale-missing-worker".to_string(), || {
+                fallback.to_string_lossy().to_string()
+            });
+
+        assert_eq!(normalized, fallback.to_string_lossy());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn missing_external_onnx_data_is_not_installed() {
+        let root = unique_temp_dir("missing-external-data");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("tokenizer.model"), b"tokenizer").unwrap();
+        fs::write(root.join("encoder.onnx"), b"external encoder.onnx.data").unwrap();
+        fs::write(root.join("decoder_joint.onnx"), b"decoder").unwrap();
+
+        assert!(!profile_installed(root.to_string_lossy().as_ref()));
+
+        fs::write(root.join("encoder.onnx.data"), b"weights").unwrap();
+        assert!(profile_installed(root.to_string_lossy().as_ref()));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn profile_marker_must_match_present_file_sizes() {
+        let root = unique_temp_dir("profile-marker-size");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("tokenizer.model"), b"tokenizer").unwrap();
+        fs::write(root.join("encoder.ort"), b"encoder").unwrap();
+        fs::write(root.join("decoder_joint.ort"), b"decoder").unwrap();
+        fs::write(
+            root.join(PROFILE_COMPLETION_MARKER),
+            json!({
+                "format": 1,
+                "profile": "compact",
+                "files": [
+                    {"path": "tokenizer.model", "size": 9, "sha256": "unused"},
+                    {"path": "encoder.ort", "size": 7, "sha256": "unused"},
+                    {"path": "decoder_joint.ort", "size": 7, "sha256": "unused"}
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        assert!(profile_installed(root.to_string_lossy().as_ref()));
+
+        fs::write(root.join("decoder_joint.ort"), b"changed!").unwrap();
+        assert!(!profile_installed(root.to_string_lossy().as_ref()));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn profile_marker_rejects_unsafe_paths() {
+        let root = unique_temp_dir("profile-marker-unsafe");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("tokenizer.model"), b"tokenizer").unwrap();
+        fs::write(root.join("encoder.ort"), b"encoder").unwrap();
+        fs::write(root.join("decoder_joint.ort"), b"decoder").unwrap();
+        fs::write(
+            root.join(PROFILE_COMPLETION_MARKER),
+            json!({
+                "format": 1,
+                "profile": "compact",
+                "files": [
+                    {"path": "../tokenizer.model", "size": 9, "sha256": "unused"}
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        assert!(!profile_installed(root.to_string_lossy().as_ref()));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn persisted_config_rejects_invalid_profile() {
         let err = apply_persisted_config(
             ServiceConfig::default(),
@@ -1914,8 +2128,7 @@ mod tests {
     fn selects_installed_profile_when_default_is_missing() {
         let root = unique_temp_dir("installed-profile");
         let compact_runtime = root.join("nemotron-wordpipe-compact-fixed-shape-ort-format");
-        fs::create_dir_all(&compact_runtime).unwrap();
-        fs::write(compact_runtime.join("encoder.ort"), b"test").unwrap();
+        write_test_runtime_profile(&compact_runtime);
         let mut config = ServiceConfig {
             model_root: root.to_string_lossy().to_string(),
             model_profile: "fast".to_string(),
@@ -1933,10 +2146,8 @@ mod tests {
         let root = unique_temp_dir("selected-profile");
         let fast_runtime = root.join("nemotron-wordpipe-fast-fp32-projected");
         let compact_runtime = root.join("nemotron-wordpipe-compact-fixed-shape-ort-format");
-        fs::create_dir_all(&fast_runtime).unwrap();
-        fs::create_dir_all(&compact_runtime).unwrap();
-        fs::write(fast_runtime.join("encoder.onnx"), b"test").unwrap();
-        fs::write(compact_runtime.join("encoder.ort"), b"test").unwrap();
+        write_test_runtime_profile(&fast_runtime);
+        write_test_runtime_profile(&compact_runtime);
         let mut config = ServiceConfig {
             model_root: root.to_string_lossy().to_string(),
             model_profile: "fast".to_string(),
@@ -1953,8 +2164,7 @@ mod tests {
     fn state_includes_selected_model_install_status() {
         let root = unique_temp_dir("state-model-installed");
         let compact_runtime = root.join("nemotron-wordpipe-compact-fixed-shape-ort-format");
-        fs::create_dir_all(&compact_runtime).unwrap();
-        fs::write(compact_runtime.join("encoder.ort"), b"test").unwrap();
+        write_test_runtime_profile(&compact_runtime);
         let data = ServiceData {
             config: ServiceConfig {
                 model_root: root.to_string_lossy().to_string(),
@@ -2183,5 +2393,12 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(&dir);
         dir
+    }
+
+    fn write_test_runtime_profile(path: &Path) {
+        fs::create_dir_all(path).unwrap();
+        fs::write(path.join("tokenizer.model"), b"tokenizer").unwrap();
+        fs::write(path.join("encoder.ort"), b"encoder").unwrap();
+        fs::write(path.join("decoder_joint.ort"), b"decoder").unwrap();
     }
 }

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from wordpipe.models import (
     DEFAULT_MODEL_REPO,
+    PROFILE_COMPLETION_MARKER,
     _progress_reporter,
     build_model_profile,
     build_profile_command,
@@ -24,6 +25,7 @@ from wordpipe.models import (
     install_built_profile,
     make_download_plan,
     model_file_url,
+    model_runtime_dir_valid,
     profile_build_dir,
     profile_runtime_dir,
     source_may_be_built_profile_archive,
@@ -127,6 +129,7 @@ class ModelDownloadTests(unittest.TestCase):
             self.assertEqual((source / "tokenizer.model").read_text(encoding="utf-8"), "tokenizer.model")
             self.assertEqual((source / "encoder.onnx").read_text(encoding="utf-8"), "encoder.onnx")
             self.assertEqual((source / "decoder_joint.onnx").read_text(encoding="utf-8"), "decoder_joint.onnx")
+            self.assertTrue((source / PROFILE_COMPLETION_MARKER).exists())
             self.assertIn("encoder.onnx.data", downloaded)
 
     def test_download_prebuilt_profile_reports_structured_file_progress(self) -> None:
@@ -214,14 +217,33 @@ class ModelDownloadTests(unittest.TestCase):
 
             self.assertTrue(source_is_built_profile(source))
 
+    def test_completion_marker_must_match_file_sizes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp)
+            _write_test_runtime_profile(source)
+            marker = source / PROFILE_COMPLETION_MARKER
+            marker.write_text(
+                json.dumps(
+                    {
+                        "format": 1,
+                        "profile": "compact",
+                        "files": [
+                            {"path": "tokenizer.model", "size": 9, "sha256": "unused"},
+                            {"path": "encoder.ort", "size": 7, "sha256": "unused"},
+                            {"path": "decoder_joint.ort", "size": 999, "sha256": "unused"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            self.assertFalse(model_runtime_dir_valid(source))
+
     def test_install_built_profile_copies_runtime_dir_to_profile_destination(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "source"
-            source.mkdir()
-            (source / "tokenizer.model").write_text("tokenizer", encoding="utf-8")
-            (source / "encoder.ort").write_text("encoder", encoding="utf-8")
-            (source / "decoder_joint.ort").write_text("decoder", encoding="utf-8")
+            _write_test_runtime_profile(source)
             (source / "config.json").write_text("{}", encoding="utf-8")
 
             runtime_dir = install_built_profile(
@@ -234,6 +256,10 @@ class ModelDownloadTests(unittest.TestCase):
             self.assertEqual((runtime_dir / "tokenizer.model").read_text(encoding="utf-8"), "tokenizer")
             self.assertTrue((runtime_dir / "encoder.ort").exists())
             self.assertTrue((runtime_dir / "decoder_joint.ort").exists())
+            marker = json.loads((runtime_dir / PROFILE_COMPLETION_MARKER).read_text(encoding="utf-8"))
+            self.assertEqual(marker["format"], 1)
+            self.assertEqual(marker["profile"], "compact")
+            self.assertTrue(all("sha256" in item for item in marker["files"]))
 
     def test_install_built_profile_preserves_existing_profile_when_force_copy_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -438,7 +464,10 @@ class ModelDownloadTests(unittest.TestCase):
             build_dir.mkdir(parents=True)
             (build_dir / "intermediate.onnx").write_text("temporary", encoding="utf-8")
 
-            with mock.patch("subprocess.run") as run:
+            def run_build(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+                _write_test_runtime_profile(profile_runtime_dir(root, "compact"))
+
+            with mock.patch("subprocess.run", side_effect=run_build) as run:
                 runtime_dir = build_model_profile(
                     source=root / "source.nemo",
                     model_root=root,
@@ -456,7 +485,10 @@ class ModelDownloadTests(unittest.TestCase):
             build_dir = profile_build_dir(root, "compact")
             build_dir.mkdir(parents=True)
 
-            with mock.patch("subprocess.run"):
+            def run_build(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+                _write_test_runtime_profile(profile_runtime_dir(root, "compact"))
+
+            with mock.patch("subprocess.run", side_effect=run_build):
                 build_model_profile(
                     source=root / "source.nemo",
                     model_root=root,
@@ -483,7 +515,10 @@ class ModelDownloadTests(unittest.TestCase):
             root = Path(tmp)
             events: list[str] = []
 
-            with mock.patch("wordpipe.models._run_with_progress") as run:
+            def run_build(_command, _progress):  # type: ignore[no-untyped-def]
+                _write_test_runtime_profile(profile_runtime_dir(root, "compact"))
+
+            with mock.patch("wordpipe.models._run_with_progress", side_effect=run_build) as run:
                 runtime_dir = build_model_profile(
                     source=root / "source.nemo",
                     model_root=root,
@@ -504,6 +539,13 @@ def _add_tar_text(archive: tarfile.TarFile, name: str, text: str) -> None:
     info = tarfile.TarInfo(name)
     info.size = len(data)
     archive.addfile(info, io.BytesIO(data))
+
+
+def _write_test_runtime_profile(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "tokenizer.model").write_text("tokenizer", encoding="utf-8")
+    (path / "encoder.ort").write_text("encoder", encoding="utf-8")
+    (path / "decoder_joint.ort").write_text("decoder", encoding="utf-8")
 
 
 if __name__ == "__main__":
