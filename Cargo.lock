@@ -1386,6 +1386,7 @@ checksum = "d7b497d21a8b6fbb4b5a544f8fadb77e801a09ae0add9e411d31c6f89e3c1e90"
 [[package]]
 name = "parakeet-rs"
 version = "0.3.6"
+source = "git+https://github.com/danhansen/parakeet-rs?rev=8519e2754733affff76e749b5a78d0e642248241#8519e2754733affff76e749b5a78d0e642248241"
 dependencies = [
  "eyre",
  "hound",
