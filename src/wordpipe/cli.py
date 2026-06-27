@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import copy
 import json
 import math
 import os
@@ -11,7 +10,7 @@ import threading
 import time
 from pathlib import Path
 
-from .config import DEFAULT_CONFIG, WordpipeConfig, default_config_path, load_config
+from .config import DEFAULT_CONFIG, WordpipeConfig, load_config
 from .probe import ProbeResult, run_probe
 from .audio import parse_audio_device
 
@@ -420,12 +419,10 @@ def _cmd_type_text(args: argparse.Namespace) -> int:
 
 
 def _shortcut_spec_from_args(args: argparse.Namespace):
-    from .shortcuts import flatpak_shortcut_spec, local_shortcut_spec
+    from .shortcuts import local_shortcut_spec
 
-    if args.target == "local":
-        root = Path(args.root).expanduser() if args.root else Path(__file__).resolve().parents[2]
-        return local_shortcut_spec(root, binding=args.binding)
-    return flatpak_shortcut_spec(app_id=args.app_id, binding=args.binding)
+    root = Path(args.root).expanduser() if args.root else Path(__file__).resolve().parents[2]
+    return local_shortcut_spec(root, binding=args.binding)
 
 
 def _cmd_shortcut_status(args: argparse.Namespace) -> int:
@@ -465,9 +462,9 @@ def _cmd_shortcut_install(args: argparse.Namespace) -> int:
 
 
 def _cmd_shortcut_cleanup(_args: argparse.Namespace) -> int:
-    from .shortcuts import FLATPAK_SHORTCUT_PATH, LOCAL_SHORTCUT_PATH, remove_shortcut_paths
+    from .shortcuts import LOCAL_SHORTCUT_PATH, remove_shortcut_paths
 
-    removed = remove_shortcut_paths((LOCAL_SHORTCUT_PATH, FLATPAK_SHORTCUT_PATH))
+    removed = remove_shortcut_paths((LOCAL_SHORTCUT_PATH,))
     if removed:
         print("removed legacy shortcut paths: " + ", ".join(removed))
     else:
@@ -563,50 +560,6 @@ def _daemon_config_from_args(
         stream_insert_delay_seconds=args.stream_insert_delay_seconds
         if getattr(args, "stream_insert_delay_seconds", None) is not None
         else file_config.stream_insert_delay_seconds,
-    )
-
-
-def _cmd_app(args: argparse.Namespace) -> int:
-    from .app import AppModelSetup, run_app
-
-    file_config = _load_cli_config(args)
-    selected_profile = args.model_profile or file_config.model_profile
-    config_path = Path(args.config).expanduser() if getattr(args, "config", None) else default_config_path()
-    raw_model_root = getattr(args, "model_root", None)
-    model_root = Path(raw_model_root).expanduser() if raw_model_root else file_config.model_root
-    model_setup = (
-        AppModelSetup(
-            model_root=model_root,
-            model_profile=selected_profile,
-            nemo_source=file_config.nemo_source,
-            config_path=config_path,
-        )
-        if model_root is not None
-        else None
-    )
-
-    def config_for_profile(profile: str) -> DaemonConfig:
-        profile_args = copy.copy(args)
-        profile_args.model_profile = profile
-        return _daemon_config_from_args(
-            profile_args,
-            load_config(config_path),
-            log_metrics_default=True,
-        )
-
-    try:
-        config = _daemon_config_from_args(args, file_config, log_metrics_default=True)
-    except SystemExit as exc:
-        return run_app(
-            None,
-            setup_error=str(exc),
-            model_setup=model_setup,
-            controller_config_factory=config_for_profile,
-        )
-    return run_app(
-        config,
-        model_setup=model_setup,
-        controller_config_factory=config_for_profile,
     )
 
 
@@ -886,27 +839,16 @@ def _add_insertion_mode_args(parser: argparse.ArgumentParser, *, partials_defaul
 
 
 def _add_shortcut_args(parser: argparse.ArgumentParser) -> None:
-    from .shortcuts import DEFAULT_FLATPAK_APP_ID, DEFAULT_SHORTCUT_BINDING
+    from .shortcuts import DEFAULT_SHORTCUT_BINDING
 
-    parser.add_argument(
-        "--target",
-        choices=("flatpak", "local"),
-        default="flatpak",
-        help="Use the Flatpak shortcut or the local development shortcut.",
-    )
     parser.add_argument(
         "--binding",
         default=DEFAULT_SHORTCUT_BINDING,
         help="GNOME accelerator string to bind.",
     )
     parser.add_argument(
-        "--app-id",
-        default=os.environ.get("WORDPIPE_FLATPAK_APP_ID", DEFAULT_FLATPAK_APP_ID),
-        help="Flatpak app id used when --target=flatpak.",
-    )
-    parser.add_argument(
         "--root",
-        help="Project root used when --target=local. Defaults to this source checkout.",
+        help="Project root used for the local development shortcut. Defaults to this source checkout.",
     )
 
 
@@ -1203,41 +1145,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print an example XDG config.toml.",
     )
     config_example.set_defaults(func=_cmd_config_example)
-
-    app = subparsers.add_parser(
-        "app",
-        help="Run the Wordpipe GNOME control window.",
-    )
-    app.add_argument(
-        "--model-dir",
-        help="Path to Parakeet/Nemotron model directory, or legacy sherpa model when --asr-runtime sherpa.",
-    )
-    _add_model_selection_args(app)
-    app.add_argument("--config", help="Path to config.toml.")
-    app.add_argument(
-        "--dry-run-insertion",
-        action="store_true",
-        help="Print keyboard events instead of opening a portal keyboard session.",
-    )
-    app.add_argument("--provider", help="ONNX Runtime provider.")
-    _add_runtime_args(app, default=None)
-    app.add_argument("--num-threads", type=_positive_int_arg)
-    app.add_argument("--sample-rate", type=_positive_int_arg)
-    app.add_argument("--input-device", help="Input device selector; Parakeet also accepts cpal:N.")
-    _add_asr_tuning_args(app, worker_defaults=False)
-    app.add_argument(
-        "--no-spoken-punctuation",
-        action="store_true",
-        help="Insert raw ASR text instead of converting spoken punctuation commands.",
-    )
-    _add_insertion_mode_args(app, partials_default=False)
-    app.add_argument(
-        "--endpoint",
-        action="store_true",
-        help="Enable endpoint detection/reset. Disabled by default for raw ASR streaming.",
-    )
-    app.add_argument("--log-metrics", action="store_true", help="Show ASR timing metrics.")
-    app.set_defaults(func=_cmd_app)
 
     voice_keyboard = subparsers.add_parser(
         "voice-keyboard",

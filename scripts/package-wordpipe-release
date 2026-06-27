@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/package-wordpipe-release [--version VERSION] [--output-dir DIR] [--skip-build]
+
+Build the composed Wordpipe GitHub release archive and the source-only GNOME
+Shell extension zip suitable for extensions.gnome.org review.
+EOF
+}
+
+VERSION=""
+OUTPUT_DIR=""
+SKIP_BUILD=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --version)
+      VERSION="${2:?missing --version value}"
+      shift 2
+      ;;
+    --output-dir)
+      OUTPUT_DIR="${2:?missing --output-dir value}"
+      shift 2
+      ;;
+    --skip-build)
+      SKIP_BUILD=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+UUID="wordpipe@dhansen.dev"
+ARCH="$(uname -m)"
+
+if [[ -z "$VERSION" ]]; then
+  if git -C "$ROOT" describe --tags --always --dirty >/dev/null 2>&1; then
+    VERSION="$(git -C "$ROOT" describe --tags --always --dirty)"
+  else
+    VERSION="dev"
+  fi
+fi
+
+if [[ -z "$OUTPUT_DIR" ]]; then
+  OUTPUT_DIR="$ROOT/build/release"
+fi
+mkdir -p "$OUTPUT_DIR"
+OUTPUT_DIR="$(cd "$OUTPUT_DIR" && pwd)"
+
+WORK_DIR="$ROOT/build/release-work"
+STAGE_ROOT="$WORK_DIR/wordpipe-${VERSION}-linux-${ARCH}"
+EXTENSION_WORK="$WORK_DIR/${UUID}"
+COMPOSED_ARCHIVE="$OUTPUT_DIR/wordpipe-linux-${ARCH}.tar.gz"
+VERSIONED_ARCHIVE="$OUTPUT_DIR/wordpipe-${VERSION}-linux-${ARCH}.tar.gz"
+EXTENSION_ZIP="$OUTPUT_DIR/${UUID}.shell-extension.zip"
+
+require_tool() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "missing required tool: $1" >&2
+    exit 1
+  fi
+}
+
+copy_extension() {
+  local destination="$1"
+  rm -rf "$destination"
+  mkdir -p "$(dirname "$destination")"
+  cp -a "$ROOT/extensions/gnome-shell/$UUID" "$destination"
+  rm -f "$destination/schemas/gschemas.compiled"
+}
+
+require_tool cargo
+require_tool glib-compile-schemas
+require_tool tar
+require_tool zip
+
+if [[ "$SKIP_BUILD" -eq 0 ]]; then
+  cargo build --release \
+    --manifest-path "$ROOT/Cargo.toml" \
+    -p wordpipe-service \
+    -p wordpipe-parakeet-worker
+fi
+
+rm -rf "$WORK_DIR"
+mkdir -p \
+  "$STAGE_ROOT/bin" \
+  "$STAGE_ROOT/lib/python" \
+  "$STAGE_ROOT/share/wordpipe/scripts" \
+  "$STAGE_ROOT/share/wordpipe" \
+  "$STAGE_ROOT/share/dbus-1/services" \
+  "$STAGE_ROOT/share/systemd/user" \
+  "$STAGE_ROOT/share/gnome-shell/extensions"
+
+install -m 0755 "$ROOT/target/release/wordpipe-service" "$STAGE_ROOT/bin/wordpipe-service"
+install -m 0755 "$ROOT/target/release/wordpipe-parakeet-worker" "$STAGE_ROOT/bin/wordpipe-parakeet-worker"
+install -m 0644 "$ROOT/packaging/requirements-release-model-install.txt" \
+  "$STAGE_ROOT/share/wordpipe/requirements-model-install.txt"
+
+cp -a "$ROOT/src/wordpipe" "$STAGE_ROOT/lib/python/wordpipe"
+find "$STAGE_ROOT/lib/python/wordpipe" -type d -name __pycache__ -prune -exec rm -rf {} +
+find "$STAGE_ROOT/lib/python/wordpipe" -type f -name '*.pyc' -delete
+install -m 0755 "$ROOT/scripts/convert_nemotron_to_ort_format.py" \
+  "$STAGE_ROOT/share/wordpipe/scripts/convert_nemotron_to_ort_format.py"
+install -m 0755 "$ROOT/scripts/build_nemotron_wordpipe_model.py" \
+  "$STAGE_ROOT/share/wordpipe/scripts/build_nemotron_wordpipe_model.py"
+
+cat > "$STAGE_ROOT/bin/wordpipe-model-install" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PREFIX=$(CDPATH= cd -- "$SELF_DIR/.." && pwd)
+PYTHON="$PREFIX/python-venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+  PYTHON="${WORDPIPE_PYTHON:-python3}"
+fi
+export PYTHONPATH="$PREFIX/lib/python${PYTHONPATH:+:$PYTHONPATH}"
+export WORDPIPE_SCRIPTS_DIR="$PREFIX/share/wordpipe/scripts"
+exec "$PYTHON" -m wordpipe model-install "$@"
+EOF
+chmod 0755 "$STAGE_ROOT/bin/wordpipe-model-install"
+
+cat > "$STAGE_ROOT/share/dbus-1/services/dev.wordpipe.Service.service" <<'EOF'
+[D-BUS Service]
+Name=dev.wordpipe.Service
+Exec=@WORDPIPE_LIBEXEC@/bin/wordpipe-service
+EOF
+
+cat > "$STAGE_ROOT/share/systemd/user/wordpipe-service.service" <<'EOF'
+[Unit]
+Description=Wordpipe Rust dictation service
+Documentation=https://github.com/danhansen/wordpipe
+
+[Service]
+Type=simple
+ExecStart=@WORDPIPE_LIBEXEC@/bin/wordpipe-service
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+EOF
+
+copy_extension "$STAGE_ROOT/share/gnome-shell/extensions/$UUID"
+glib-compile-schemas "$STAGE_ROOT/share/gnome-shell/extensions/$UUID/schemas"
+
+cat > "$STAGE_ROOT/README.release" <<EOF
+Wordpipe ${VERSION}
+
+Run ./install.sh from this extracted directory to install the GNOME Shell
+extension, Rust D-Bus service, ASR worker, and model-install helper into your
+user account.
+EOF
+
+cat > "$STAGE_ROOT/install.sh" <<'EOF'
+#!/usr/bin/env sh
+set -eu
+SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$SELF_DIR/share/wordpipe/install-wordpipe-release" --from-extracted "$SELF_DIR" "$@"
+EOF
+chmod 0755 "$STAGE_ROOT/install.sh"
+
+install -m 0755 "$ROOT/scripts/install-wordpipe-release" \
+  "$STAGE_ROOT/share/wordpipe/install-wordpipe-release"
+
+copy_extension "$EXTENSION_WORK"
+glib-compile-schemas "$EXTENSION_WORK/schemas"
+rm -f "$EXTENSION_ZIP"
+(cd "$EXTENSION_WORK" && zip -qr "$EXTENSION_ZIP" .)
+
+rm -f "$COMPOSED_ARCHIVE" "$VERSIONED_ARCHIVE"
+(cd "$WORK_DIR" && tar -czf "$COMPOSED_ARCHIVE" "wordpipe-${VERSION}-linux-${ARCH}")
+cp "$COMPOSED_ARCHIVE" "$VERSIONED_ARCHIVE"
+
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "$OUTPUT_DIR" && sha256sum "$(basename "$COMPOSED_ARCHIVE")" > "$(basename "$COMPOSED_ARCHIVE").sha256")
+  (cd "$OUTPUT_DIR" && sha256sum "$(basename "$VERSIONED_ARCHIVE")" > "$(basename "$VERSIONED_ARCHIVE").sha256")
+  (cd "$OUTPUT_DIR" && sha256sum "$(basename "$EXTENSION_ZIP")" > "$(basename "$EXTENSION_ZIP").sha256")
+fi
+
+echo "wrote $COMPOSED_ARCHIVE"
+echo "wrote $VERSIONED_ARCHIVE"
+echo "wrote $EXTENSION_ZIP"

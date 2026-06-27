@@ -161,9 +161,8 @@ class GlobalShortcutsPortalLoop:
             self._variant_args(args),
             app_id_error=(
                 "GNOME GlobalShortcuts requires Wordpipe to be launched as a desktop "
-                "application. Install the desktop entry with "
-                "`scripts/install-wordpipe-desktop` and start it with "
-                "`gtk-launch dev.wordpipe.Wordpipe`."
+                "application. Use the GNOME Shell extension frontend for normal "
+                "global shortcut handling."
             ),
         )
 

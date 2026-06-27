@@ -8,9 +8,8 @@ from scripts.smoke_stream_file import build_command, summarize_events
 
 
 class SmokeStreamFileTests(unittest.TestCase):
-    def test_flatpak_command_exports_wav_directory(self) -> None:
+    def test_local_command_runs_stream_file_test(self) -> None:
         args = argparse.Namespace(
-            flatpak=True,
             command="scripts/wordpipe-dev",
             num_threads=2,
             flush_chunks=3,
@@ -18,17 +17,11 @@ class SmokeStreamFileTests(unittest.TestCase):
 
         command = build_command(
             args,
-            Path("/home/user/.var/app/dev.wordpipe.Wordpipe/data/wordpipe/models/model"),
+            Path("/home/user/.local/share/wordpipe/models/model"),
             Path("/tmp/smoke/input.wav"),
         )
 
-        self.assertEqual(command[:2], ["flatpak", "run"])
-        self.assertIn("--filesystem=/tmp/smoke:ro", command)
-        self.assertIn(
-            "--filesystem=/home/user/.var/app/dev.wordpipe.Wordpipe/data/wordpipe/models/model:ro",
-            command,
-        )
-        self.assertIn("dev.wordpipe.Wordpipe", command)
+        self.assertEqual(command[0], "scripts/wordpipe-dev")
         self.assertIn("stream-file-test", command)
 
     def test_summarize_events_reports_final_commit_and_metrics(self) -> None:

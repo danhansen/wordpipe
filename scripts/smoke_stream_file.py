@@ -18,7 +18,6 @@ if str(SRC) not in sys.path:
 from wordpipe.models import default_model_root, profile_runtime_dir  # noqa: E402
 
 
-FLATPAK_APP_ID = "dev.wordpipe.Wordpipe"
 DEFAULT_SMOKE_WAVS = (
     REPO_ROOT / "build/librispeech-backend-eval-smoke/wavs/1089-134686-0019.wav",
     REPO_ROOT / "models/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11/test_wavs/en.wav",
@@ -55,7 +54,6 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Smoke-test a Wordpipe Parakeet/Nemotron model with stream-file-test."
     )
-    parser.add_argument("--flatpak", action="store_true", help="Run the installed Flatpak app.")
     parser.add_argument("--model-dir", type=Path, help="Runtime model directory to test.")
     parser.add_argument(
         "--model-profile",
@@ -66,7 +64,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--model-root",
         type=Path,
-        help="Directory containing model profiles. Defaults to local or Flatpak app data.",
+        help="Directory containing model profiles. Defaults to the local Wordpipe model root.",
     )
     parser.add_argument("--wav", type=Path, help="16 kHz mono WAV to feed through ASR.")
     parser.add_argument("--num-threads", type=int, default=2)
@@ -74,7 +72,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--command",
         default=str(REPO_ROOT / "scripts/wordpipe-dev"),
-        help="Local wordpipe command to run when --flatpak is not set.",
+        help="Local wordpipe command to run.",
     )
     parser.add_argument(
         "--print-command",
@@ -96,37 +94,12 @@ def resolve_wav(wav: Path | None) -> Path:
 def resolve_model_dir(args: argparse.Namespace) -> Path:
     if args.model_dir is not None:
         return args.model_dir.expanduser().resolve()
-    model_root = args.model_root.expanduser() if args.model_root else default_root(args.flatpak)
+    model_root = args.model_root.expanduser() if args.model_root else default_model_root()
     return profile_runtime_dir(model_root, args.model_profile).resolve()
 
 
-def default_root(flatpak: bool) -> Path:
-    if not flatpak:
-        return default_model_root()
-    return (
-        Path.home()
-        / ".var/app"
-        / FLATPAK_APP_ID
-        / "data/wordpipe/models"
-    )
-
-
 def build_command(args: argparse.Namespace, model_dir: Path, wav: Path) -> list[str]:
-    command: list[str]
-    if args.flatpak:
-        command = [
-            "flatpak",
-            "run",
-            f"--filesystem={wav.parent}:ro",
-            FLATPAK_APP_ID,
-        ]
-        app_data = Path.home() / ".var/app" / FLATPAK_APP_ID
-        try:
-            model_dir.relative_to(app_data)
-        except ValueError:
-            command.insert(2, f"--filesystem={model_dir}:ro")
-    else:
-        command = [args.command]
+    command = [args.command]
 
     command.extend(
         [

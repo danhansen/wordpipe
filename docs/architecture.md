@@ -47,12 +47,6 @@ wordpipe-voice-keyboard
   - uses the GTK overlay for visible partial/status text
   - commits recognized text into the focused text field on stop
 
-wordpipe-app
-  - GTK/libadwaita control surface
-  - shows ASR load/listening/error state
-  - shows live partial text, last commit, and RTF metrics
-  - reuses wordpipe-daemon's controller and insertion backend
-
 wordpipe-parakeet-worker
   - loads Parakeet/Nemotron model through parakeet-rs
   - captures microphone audio while active
@@ -121,11 +115,10 @@ choose one default and keep the state machine compatible with both.
 
 Recommended initial UI:
 
-- global-hotkey voice-keyboard launcher for actual focused-app text input
-- GTK/libadwaita app window for profile/status/control
+- GNOME Shell shortcut for focused-app text input
 - top-bar status indicator for idle/listening/permission/error states
-- small live transcript overlay for partial text
-- committed text feedback after dictation stops
+- preferences UI for profile/status/control
+- optional live transcript surface for diagnostics
 
 The default `voice-keyboard` path types appended partial text into the target
 app in real time. If a partial hypothesis rewrites already-inserted text,
@@ -235,20 +228,17 @@ installed on `PATH`; they are not a complete distro package.
      live-validated
 
 5. GNOME hotkey and status
-   - GNOME custom shortcut plus signal-triggered daemon, GlobalShortcuts portal,
-     or shell extension trigger
+   - GNOME Shell extension trigger
    - daemon session state
    - visible listening/error state
-   - status: signal-hotkey daemon and GlobalShortcuts daemon paths implemented;
-     GTK/libadwaita app window provides visual status; top-bar indicator not
-     implemented
+   - status: Shell extension top-bar indicator and service bridge implemented
 
 6. First integrated dictation
    - hotkey controls dictation
-   - overlay shows partials
-   - stop commits non-empty partial
-   - status: CLI daemon, hotkey daemon, app control window, and optional
-     Adwaita/GTK overlay implemented; top-bar indicator not implemented
+   - top-bar indicator shows active state
+   - streaming deltas are inserted as they are produced
+   - status: CLI diagnostics, Rust service, worker, and GNOME Shell extension
+     implemented
 
 ## Validation Matrix
 
@@ -256,20 +246,16 @@ installed on `PATH`; they are not a complete distro package.
 - Terminal
 - Firefox text fields
 - LibreOffice Writer
-- Flatpak app text field
 - password field behavior, which should not receive dictated text unless the
   user explicitly accepts that risk later
 
 ## Open Questions
 
 - Default hotkey mode: hold-to-dictate, toggle-to-dictate, or both.
-- Whether the first GNOME integration should use portals only or include a Shell
-  extension immediately.
-- Model installation: managed `model-install` and the GTK/libadwaita app both
-  build source NeMo into the selected `fast` or `compact` profile under the
-  canonical model root.
-- App ergonomics: the control window can test dictation directly, but the
-  focus-preserving voice-keyboard path is still the resident
+- Model installation: managed `model-install` downloads the selected `fast` or
+  `compact` prebuilt profile under the canonical model root.
+- App ergonomics: extension preferences should cover the setup and status tasks
+  that previously lived in experimental control surfaces.
   `voice-keyboard --signal-hotkey` daemon plus a GNOME shortcut.
 - Whether spoken punctuation should remain always-on by default after live
   testing.

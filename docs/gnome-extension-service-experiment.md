@@ -1,11 +1,8 @@
 # GNOME Extension Service Experiment
 
-This branch explores replacing the current Python/libadwaita Flatpak-centered
-runtime with a GNOME Shell extension backed by a long-lived Rust service.
-
-The existing Flatpak app remains the reference/fallback path on `main`. This
-experiment should keep the ASR/model work reusable for KDE and other Wayland
-desktops by putting the dictation engine behind a session D-Bus API.
+This branch is the primary Wordpipe runtime: a GNOME Shell extension backed by
+a long-lived Rust service. The ASR/model work stays reusable for KDE and other
+Wayland desktops by putting the dictation engine behind a session D-Bus API.
 
 ## Target Shape
 
@@ -279,7 +276,7 @@ The `TextInjector` in `extension.js` is intentionally isolated. The first
 GNOME Shell 50 implementation commits append-only text deltas through
 `Clutter.get_default_backend().get_input_method().commit(text)`. This is an
 internal Shell/input-method path, so it needs live GNOME testing across focused
-GTK/libadwaita apps, terminals, and browser text fields.
+GTK apps, terminals, and browser text fields.
 
 ## Local Install
 

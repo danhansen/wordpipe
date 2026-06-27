@@ -12,10 +12,6 @@ CUSTOM_KEYBINDING_SCHEMA = "org.gnome.settings-daemon.plugins.media-keys.custom-
 CUSTOM_KEYBINDINGS_KEY = "custom-keybindings"
 DEFAULT_SHORTCUT_NAME = "Wordpipe Dictation"
 DEFAULT_SHORTCUT_BINDING = "<Control><Alt>space"
-DEFAULT_FLATPAK_APP_ID = "dev.wordpipe.Wordpipe"
-FLATPAK_SHORTCUT_PATH = (
-    "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/wordpipe-flatpak/"
-)
 LOCAL_SHORTCUT_PATH = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/wordpipe/"
 
 
@@ -62,19 +58,6 @@ class ShortcutStatus:
                 f"{self.binding or '<unset>'} -> {self.command or '<unset>'}"
             )
         return "not installed"
-
-
-def flatpak_shortcut_spec(
-    *,
-    app_id: str = DEFAULT_FLATPAK_APP_ID,
-    binding: str = DEFAULT_SHORTCUT_BINDING,
-) -> ShortcutSpec:
-    return ShortcutSpec(
-        path=FLATPAK_SHORTCUT_PATH,
-        name=DEFAULT_SHORTCUT_NAME,
-        command=f"flatpak run {app_id} voice-keyboard-toggle --start-if-needed",
-        binding=binding,
-    )
 
 
 def local_shortcut_spec(

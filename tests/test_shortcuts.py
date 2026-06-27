@@ -7,9 +7,7 @@ from typing import Sequence
 
 from wordpipe.shortcuts import (
     DEFAULT_SHORTCUT_BINDING,
-    FLATPAK_SHORTCUT_PATH,
     LOCAL_SHORTCUT_PATH,
-    flatpak_shortcut_spec,
     install_shortcut,
     local_shortcut_spec,
     read_shortcut_status,
@@ -42,16 +40,6 @@ class FakeGSettings:
 
 
 class ShortcutBackendTests(unittest.TestCase):
-    def test_flatpak_spec_uses_toggle_command(self) -> None:
-        spec = flatpak_shortcut_spec(app_id="dev.example.App")
-
-        self.assertEqual(spec.path, FLATPAK_SHORTCUT_PATH)
-        self.assertEqual(
-            spec.command,
-            "flatpak run dev.example.App voice-keyboard-toggle --start-if-needed",
-        )
-        self.assertEqual(spec.binding, DEFAULT_SHORTCUT_BINDING)
-
     def test_local_spec_uses_wordpipe_dev_helper(self) -> None:
         spec = local_shortcut_spec(Path("/repo"))
 
@@ -63,7 +51,7 @@ class ShortcutBackendTests(unittest.TestCase):
 
     def test_status_reports_missing_shortcut(self) -> None:
         fake = FakeGSettings()
-        spec = flatpak_shortcut_spec()
+        spec = local_shortcut_spec(Path("/repo"))
 
         status = read_shortcut_status(spec, runner=fake)
 
@@ -73,7 +61,7 @@ class ShortcutBackendTests(unittest.TestCase):
 
     def test_install_adds_path_and_sets_shortcut_fields(self) -> None:
         fake = FakeGSettings()
-        spec = flatpak_shortcut_spec(binding="<Super>d")
+        spec = local_shortcut_spec(Path("/repo"), binding="<Super>d")
 
         status = install_shortcut(spec, runner=fake)
 
@@ -83,14 +71,14 @@ class ShortcutBackendTests(unittest.TestCase):
         paths = fake.values[
             ("org.gnome.settings-daemon.plugins.media-keys", "custom-keybindings")
         ]
-        self.assertEqual(paths, f"['{FLATPAK_SHORTCUT_PATH}']")
+        self.assertEqual(paths, f"['{LOCAL_SHORTCUT_PATH}']")
 
     def test_install_repairs_existing_shortcut_without_duplicating_path(self) -> None:
         fake = FakeGSettings()
-        spec = flatpak_shortcut_spec(binding="<Super>d")
+        spec = local_shortcut_spec(Path("/repo"), binding="<Super>d")
         fake.values[
             ("org.gnome.settings-daemon.plugins.media-keys", "custom-keybindings")
-        ] = f"['{FLATPAK_SHORTCUT_PATH}']"
+        ] = f"['{LOCAL_SHORTCUT_PATH}']"
         fake.values[(spec.schema_with_path, "name")] = "'Old'"
         fake.values[(spec.schema_with_path, "command")] = "'old-command'"
         fake.values[(spec.schema_with_path, "binding")] = "'<Super>o'"
@@ -114,7 +102,7 @@ class ShortcutBackendTests(unittest.TestCase):
         other_path = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/other/"
         fake.values[
             ("org.gnome.settings-daemon.plugins.media-keys", "custom-keybindings")
-        ] = f"['{LOCAL_SHORTCUT_PATH}', '{other_path}', '{FLATPAK_SHORTCUT_PATH}']"
+        ] = f"['{LOCAL_SHORTCUT_PATH}', '{other_path}']"
         fake.values[
             (
                 f"org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"
@@ -122,20 +110,12 @@ class ShortcutBackendTests(unittest.TestCase):
                 "binding",
             )
         ] = "'<Control><Alt>space'"
-        fake.values[
-            (
-                f"org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"
-                f"{FLATPAK_SHORTCUT_PATH}",
-                "binding",
-            )
-        ] = "'<Control><Alt>g'"
-
         removed = remove_shortcut_paths(
-            (LOCAL_SHORTCUT_PATH, FLATPAK_SHORTCUT_PATH),
+            (LOCAL_SHORTCUT_PATH,),
             runner=fake,
         )
 
-        self.assertEqual(removed, (LOCAL_SHORTCUT_PATH, FLATPAK_SHORTCUT_PATH))
+        self.assertEqual(removed, (LOCAL_SHORTCUT_PATH,))
         self.assertEqual(
             fake.values[
                 ("org.gnome.settings-daemon.plugins.media-keys", "custom-keybindings")
@@ -152,23 +132,12 @@ class ShortcutBackendTests(unittest.TestCase):
             ],
             "''",
         )
-        self.assertEqual(
-            fake.values[
-                (
-                    f"org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"
-                    f"{FLATPAK_SHORTCUT_PATH}",
-                    "binding",
-                )
-            ],
-            "''",
-        )
-
     def test_failed_gsettings_command_raises_runtime_error(self) -> None:
         def fail(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
             return subprocess.CompletedProcess(list(command), 1, "", "no dconf")
 
         with self.assertRaisesRegex(RuntimeError, "no dconf"):
-            read_shortcut_status(flatpak_shortcut_spec(), runner=fail)
+            read_shortcut_status(local_shortcut_spec(Path("/repo")), runner=fail)
 
 
 if __name__ == "__main__":

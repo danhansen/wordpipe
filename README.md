@@ -2,9 +2,7 @@
 
 Wordpipe is a Wayland-only GNOME dictation app built around true streaming
 speech recognition. The primary implementation is a GNOME Shell frontend backed
-by a Rust D-Bus service and a Rust `parakeet-rs` ASR worker. Earlier GTK,
-Flatpak, portal, and sherpa-onnx app paths are retained as areas for future
-frontend exploration and diagnostics, but they are not the main product path.
+by a Rust D-Bus service and a Rust `parakeet-rs` ASR worker.
 
 ## Direction
 
@@ -37,12 +35,46 @@ The current implementation provides:
 - `wordpipe daemon` MVP loop that connects the ASR worker to text insertion.
 - `wordpipe hotkey-daemon` manual or GlobalShortcuts-controlled dictation.
 - `wordpipe voice-keyboard` global-hotkey dictation into the focused text box.
-- `wordpipe app` GTK/libadwaita control window for local app-style exploration.
 
 See [docs/gnome-extension-service-experiment.md](docs/gnome-extension-service-experiment.md).
 
-Other frontends remain possible. The previous app/Flatpak-oriented `main`
-history is preserved on `exploration/app-flatpak-frontend` for future reference.
+Other frontends remain possible, but the main branch is focused on the GNOME
+Shell frontend and Rust service.
+
+## Install
+
+The GitHub release archive contains the GNOME Shell extension, Rust D-Bus
+service, ASR worker, user D-Bus activation file, systemd user unit, and the
+Python model-install helper.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/danhansen/wordpipe/main/scripts/install-wordpipe-release | sh
+```
+
+Manual equivalent:
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/danhansen/wordpipe/main/scripts/install-wordpipe-release
+less install-wordpipe-release
+sh install-wordpipe-release
+```
+
+After install, open settings with:
+
+```sh
+gnome-extensions prefs wordpipe@dhansen.dev
+```
+
+Install the compact model profile:
+
+```sh
+~/.local/libexec/wordpipe/bin/wordpipe-model-install --profile compact
+```
+
+Release builds also publish `wordpipe@dhansen.dev.shell-extension.zip`, which
+is the source-only GNOME extension archive for review or manual extension
+installation. The Shell extension still requires the separately installed Rust
+service from the composed release archive.
 
 ## Local Development
 
@@ -226,31 +258,6 @@ produced:
 .venv/bin/python scripts/smoke_stream_file.py --model-profile compact
 ```
 
-If the profile was built by the Flatpak but you want to run the local dev
-command against it, pass the Flatpak app-data model root:
-
-```sh
-.venv/bin/python scripts/smoke_stream_file.py \
-  --model-profile compact \
-  --model-root ~/.var/app/dev.wordpipe.Wordpipe/data/wordpipe/models
-```
-
-To smoke-test the installed Flatpak against the same profile and a host WAV:
-
-```sh
-.venv/bin/python scripts/smoke_stream_file.py --flatpak --model-profile compact
-```
-
-After one full Flatpak install, use the source-mounted Flatpak dev runner for
-normal Python/UI iteration without rebuilding the heavy Rust/model-tools
-modules:
-
-```sh
-scripts/wordpipe-flatpak-dev app
-scripts/wordpipe-flatpak-dev model-profiles
-scripts/wordpipe-flatpak-dev voice-keyboard --model-profile compact
-```
-
 Dry-run text insertion:
 
 ```sh
@@ -281,13 +288,12 @@ config values, including `--model-profile fast|compact` and `--model-root`.
 
 Packaging templates live under `packaging/`:
 
-- `packaging/applications/dev.wordpipe.Wordpipe.desktop`
 - `packaging/systemd/wordpipe.service`
-- `packaging/flatpak/dev.wordpipe.Wordpipe.yml`
+- `packaging/systemd/wordpipe-service.service`
+- `packaging/dbus/dev.wordpipe.Service.service`
 
 They assume `wordpipe` is installed on `PATH` and configuration exists at
 `~/.config/wordpipe/config.toml`.
-See [docs/flatpak.md](docs/flatpak.md) for the Flatpak packaging path.
 
 Run the hotkey-controlled daemon:
 
@@ -310,24 +316,11 @@ PYTHONPATH=src python3 -m wordpipe hotkey-daemon \
 
 Manual commands are `down`, `up`, `toggle`, and `quit`.
 
-Run Wordpipe as a voice keyboard:
-
-```sh
-scripts/install-wordpipe-gnome-shortcut
-```
-
-Then focus any text field, press `Ctrl+Alt+Space`, speak, and press
-`Ctrl+Alt+Space` again. In the default toggle mode, Wordpipe inserts appended
-partial text as ASR produces it; the second press stops dictation and inserts
-no additional final text. The final ASR commit is still logged, but realtime
-typing comes from append-only partials.
-
-The current development path uses a GNOME custom shortcut that runs
-`wordpipe voice-keyboard-toggle --start-if-needed`. The first shortcut press
-starts a resident `voice-keyboard --signal-hotkey` daemon if needed, waits for
-it to become ready, and then toggles dictation. This avoids the GlobalShortcuts
-portal's stricter app-id requirements while the app is still running from a
-source checkout.
+The GNOME Shell extension is the normal voice-keyboard frontend. Configure the
+shortcut in the extension preferences, focus any text field, trigger dictation,
+speak, and trigger it again to stop. In the default mode, Wordpipe inserts
+append-only text deltas as ASR produces them; stopping dictation does not
+reinsert the final transcript.
 
 For visible logs while debugging, start the resident daemon manually instead:
 
@@ -360,12 +353,6 @@ shortcut, daemon stdout/stderr is written to
 `~/.cache/wordpipe/voice-keyboard.log` when `XDG_CACHE_HOME` is unset. Pass
 `--daemon-log-file` to `voice-keyboard-toggle` to override it.
 
-For the Flatpak build, install the equivalent host shortcut with:
-
-```sh
-scripts/install-wordpipe-flatpak-gnome-shortcut
-```
-
 To restore the older behavior where nothing is typed until dictation stops:
 
 ```sh
@@ -376,15 +363,6 @@ PYTHONPATH=src python3 -m wordpipe voice-keyboard \
   --final-commit-only
 ```
 
-There is also an experimental desktop launcher:
-
-```sh
-scripts/install-wordpipe-desktop
-gtk-launch dev.wordpipe.Wordpipe
-```
-
-Desktop-launch logs are written to `~/.cache/wordpipe/wordpipe.log`.
-
 The lower-level GlobalShortcuts portal path is still available for diagnostics:
 
 ```sh
@@ -394,8 +372,8 @@ PYTHONPATH=src python3 -m wordpipe voice-keyboard \
   --overlay stderr
 ```
 
-If GNOME rejects that with `An app id is required`, use the desktop/custom
-shortcut path above.
+If GNOME rejects that with `An app id is required`, use the Shell extension
+frontend.
 
 Use hold mode if you prefer press-and-hold dictation:
 
@@ -414,33 +392,6 @@ PYTHONPATH=src python3 -m wordpipe voice-keyboard \
   --manual-hotkey \
   --dry-run-insertion
 ```
-
-Run the app control window:
-
-```sh
-PYTHONPATH=src python3 -m wordpipe app
-```
-
-The control window is useful for local status testing, but it is not the main
-voice-keyboard path because clicking the window moves focus away from the target
-text field.
-
-To try the other built profile without editing config:
-
-```sh
-PYTHONPATH=src python3 -m wordpipe app --model-profile compact
-```
-
-The app uses the same config and portal insertion path as `daemon` and
-`hotkey-daemon`. Endpoint detection remains disabled unless `--endpoint` or
-`enable_endpoint_detection = true` is set.
-
-If the selected `fast` or `compact` model profile is missing, the app opens in
-setup mode. Choose the profile in the dropdown and press `Install` to download
-the source NeMo checkpoint and build the selected runtime profile under the
-canonical `model_root`. Changing the dropdown also saves `model_profile` to the
-normal Wordpipe config file, so later commands such as `voice-keyboard
---signal-hotkey` use the same profile unless explicitly overridden.
 
 ## Runtime Dependencies
 
@@ -531,10 +482,8 @@ See [docs/model-publishing.md](docs/model-publishing.md) for packaging and
 uploading the prebuilt profile archives that this command downloads.
 
 `model-install --source` can also import an already-built Wordpipe profile
-directory or archive. The app Flatpak can run the same install pipeline inside
-its canonical app-data model directory, so normal Flatpak runtime commands do
-not need model directory flags after `model-install` completes.
-Imported profile sources must contain `tokenizer.model`, `encoder.onnx` or
+directory or archive. Imported profile sources must contain `tokenizer.model`,
+`encoder.onnx` or
 `encoder.ort`, and `decoder_joint.onnx` or `decoder_joint.ort`.
 
 For release/developer work, keep the reproducible NeMo export pipeline explicit:

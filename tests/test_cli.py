@@ -10,7 +10,6 @@ from pathlib import Path
 from unittest import mock
 
 from wordpipe.cli import (
-    _cmd_app,
     _cmd_listen_test,
     _cmd_model_install,
     _cmd_stream_file_test,
@@ -148,19 +147,18 @@ class CliModelResolutionTests(unittest.TestCase):
         self.assertEqual(args.backend, "parakeet")
         self.assertEqual(args.asr_worker_path, "/tmp/worker")
 
-    def test_shortcut_parsers_accept_binding_target_and_json(self) -> None:
+    def test_shortcut_parsers_accept_binding_root_and_json(self) -> None:
         status_args = build_parser().parse_args(
             ["shortcut-status", "--binding", "<Super>d", "--json"]
         )
         install_args = build_parser().parse_args(
-            ["shortcut-install", "--target", "local", "--root", "/repo"]
+            ["shortcut-install", "--root", "/repo"]
         )
 
         self.assertEqual(status_args.command, "shortcut-status")
         self.assertEqual(status_args.binding, "<Super>d")
         self.assertTrue(status_args.json)
         self.assertEqual(install_args.command, "shortcut-install")
-        self.assertEqual(install_args.target, "local")
         self.assertEqual(install_args.root, "/repo")
 
     def test_parser_rejects_non_positive_runtime_values(self) -> None:
@@ -460,48 +458,6 @@ class CliModelResolutionTests(unittest.TestCase):
                 self.assertEqual(_cmd_listen_test(args), 0)
 
         self.assertEqual(run.call_args.args[0].model_dir, expected)
-
-    def test_app_opens_setup_ui_when_selected_profile_is_missing(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            args = argparse.Namespace(
-                config=str(Path(tmp) / "config.toml"),
-                model_dir=None,
-                model_profile="compact",
-                model_root=tmp,
-                asr_runtime=None,
-                asr_worker_path=None,
-                dry_run_insertion=False,
-                provider=None,
-                num_threads=None,
-                sample_rate=None,
-                input_device=None,
-                partial_interval_seconds=None,
-                audio_chunk_seconds=None,
-                queue_seconds=None,
-                stats_interval_seconds=None,
-                endpoint=False,
-                endpoint_rule1_min_trailing_silence=None,
-                endpoint_rule2_min_trailing_silence=None,
-                endpoint_rule3_min_utterance_length=None,
-                no_spoken_punctuation=False,
-                log_metrics=False,
-                insert_partials=False,
-                final_commit_only=False,
-            )
-
-            with mock.patch("wordpipe.app.run_app", return_value=0) as run_app:
-                self.assertEqual(_cmd_app(args), 0)
-
-        config, setup_error = run_app.call_args.args[0], run_app.call_args.kwargs["setup_error"]
-        self.assertIsNone(config)
-        self.assertIn("wordpipe model-install --profile compact", setup_error)
-        self.assertEqual(run_app.call_args.kwargs["model_setup"].model_profile, "compact")
-        self.assertEqual(run_app.call_args.kwargs["model_setup"].model_root, Path(tmp))
-        self.assertEqual(
-            run_app.call_args.kwargs["model_setup"].config_path,
-            Path(tmp) / "config.toml",
-        )
-        self.assertIsNotNone(run_app.call_args.kwargs["controller_config_factory"])
 
     def test_model_install_download_cache_follows_model_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
