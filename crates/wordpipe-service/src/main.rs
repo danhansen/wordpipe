@@ -1668,11 +1668,7 @@ fn stream_progress_lines<R>(
         if line.trim().is_empty() {
             continue;
         }
-        let mut progress = VariantMap::new();
-        insert_str(&mut progress, "profile", profile);
-        insert_str(&mut progress, "phase", "running");
-        insert_str(&mut progress, "message", line.trim());
-        insert_f64(&mut progress, "fraction", 0.0);
+        let progress = progress_from_line(profile, line.trim());
         if let Ok(mut data) = data.lock() {
             data.last_install_progress = progress.clone();
         }
@@ -1680,6 +1676,26 @@ fn stream_progress_lines<R>(
             emitter, profile, progress,
         ));
     }
+}
+
+fn progress_from_line(profile: &str, line: &str) -> VariantMap {
+    const PREFIX: &str = "wordpipe-progress ";
+    if let Some(payload) = line.strip_prefix(PREFIX) {
+        if let Ok(value) = serde_json::from_str::<JsonValue>(payload) {
+            let mut progress = json_to_variant_map(&value);
+            if !progress.contains_key("profile") {
+                insert_str(&mut progress, "profile", profile);
+            }
+            return progress;
+        }
+    }
+
+    let mut progress = VariantMap::new();
+    insert_str(&mut progress, "profile", profile);
+    insert_str(&mut progress, "phase", "running");
+    insert_str(&mut progress, "message", line);
+    insert_f64(&mut progress, "fraction", 0.0);
+    progress
 }
 
 fn json_to_variant_map(value: &JsonValue) -> VariantMap {

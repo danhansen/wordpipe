@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import os
 from pathlib import Path
 import shutil
@@ -77,6 +78,13 @@ class ModelProfileSpec:
 class _PreparedProfileSource:
     path: Path
     cleanup_dir: Path | None = None
+
+
+@dataclass(frozen=True)
+class _PrebuiltFile:
+    filename: str
+    required: bool
+    size: int | None = None
 
 
 MODEL_PROFILES: dict[ModelProfile, ModelProfileSpec] = {
@@ -182,9 +190,40 @@ def profile_installed(model_root: Path, profile: str) -> bool:
 
 
 def model_runtime_dir_valid(runtime_dir: Path) -> bool:
-    return (runtime_dir / "tokenizer.model").exists() and (
-        (runtime_dir / "encoder.ort").exists() or (runtime_dir / "encoder.onnx").exists()
-    ) and ((runtime_dir / "decoder_joint.ort").exists() or (runtime_dir / "decoder_joint.onnx").exists())
+    return (
+        (runtime_dir / "tokenizer.model").exists()
+        and _graph_file_valid(runtime_dir, "encoder")
+        and _graph_file_valid(runtime_dir, "decoder_joint")
+    )
+
+
+def _graph_file_valid(runtime_dir: Path, stem: str) -> bool:
+    if (runtime_dir / f"{stem}.ort").exists():
+        return True
+    onnx_path = runtime_dir / f"{stem}.onnx"
+    if not onnx_path.exists():
+        return False
+    data_path = runtime_dir / f"{stem}.onnx.data"
+    if data_path.exists():
+        return True
+    try:
+        if onnx_path.stat().st_size > 128 * 1024 * 1024:
+            return True
+    except OSError:
+        return False
+    return not _onnx_references_external_data(onnx_path, data_path.name)
+
+
+def _onnx_references_external_data(onnx_path: Path, marker: str) -> bool:
+    marker_bytes = marker.encode("utf-8")
+    try:
+        with onnx_path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                if marker_bytes in chunk:
+                    return True
+    except OSError:
+        return True
+    return False
 
 
 def source_is_built_profile(source: Path) -> bool:
@@ -251,6 +290,9 @@ def download_prebuilt_profile(
         from huggingface_hub.utils import EntryNotFoundError
 
         _progress(progress, f"Downloading {spec.title} profile from {selected_repo}")
+        files = _prebuilt_download_plan(selected_repo)
+        total_size = sum(item.size or 0 for item in files)
+        completed_size = 0
         env_value = os.environ.get("HF_HUB_ENABLE_HF_TRANSFER")
         try:
             import hf_transfer  # noqa: F401
@@ -260,19 +302,47 @@ def download_prebuilt_profile(
             enable_hf_transfer = True
             os.environ.setdefault("HF_HUB_ENABLE_HF_TRANSFER", "1")
         try:
-            for filename in PREBUILT_PROFILE_FILES:
-                required = filename in REQUIRED_PREBUILT_PROFILE_FILES
+            for index, item in enumerate(files):
+                _progress_event(
+                    progress,
+                    profile=spec.name,
+                    phase="downloading",
+                    message=_download_message(item, index, len(files)),
+                    filename=item.filename,
+                    file_index=index + 1,
+                    file_count=len(files),
+                    file_size=item.size or 0,
+                    completed_bytes=completed_size,
+                    total_bytes=total_size,
+                    fraction=_download_fraction(completed_size, total_size, index, len(files)),
+                )
                 try:
-                    hf_hub_download(
+                    path = hf_hub_download(
                         repo_id=selected_repo,
-                        filename=filename,
+                        filename=item.filename,
                         local_dir=output_dir,
                         local_dir_use_symlinks=False,
                         force_download=force,
                     )
                 except EntryNotFoundError:
-                    if required:
+                    if item.required:
                         raise
+                    continue
+                actual_size = _downloaded_size(Path(path), output_dir / item.filename)
+                completed_size += item.size or actual_size
+                _progress_event(
+                    progress,
+                    profile=spec.name,
+                    phase="downloaded",
+                    message=f"Downloaded {item.filename}",
+                    filename=item.filename,
+                    file_index=index + 1,
+                    file_count=len(files),
+                    file_size=item.size or actual_size,
+                    completed_bytes=completed_size,
+                    total_bytes=total_size,
+                    fraction=_download_fraction(completed_size, total_size, index + 1, len(files)),
+                )
         finally:
             if enable_hf_transfer:
                 if env_value is None:
@@ -286,6 +356,70 @@ def download_prebuilt_profile(
             "huggingface_hub is required to download prebuilt Wordpipe model profiles. "
             "Install it with hf_transfer support, or pass --source with a local profile directory/archive."
         ) from exc
+
+
+def _prebuilt_download_plan(repo_id: str) -> list[_PrebuiltFile]:
+    try:
+        from huggingface_hub import get_hf_file_metadata, hf_hub_url
+        from huggingface_hub.utils import EntryNotFoundError, HfHubHTTPError
+    except ImportError:
+        return [
+            _PrebuiltFile(filename, filename in REQUIRED_PREBUILT_PROFILE_FILES)
+            for filename in PREBUILT_PROFILE_FILES
+        ]
+
+    files: list[_PrebuiltFile] = []
+    for filename in PREBUILT_PROFILE_FILES:
+        required = filename in REQUIRED_PREBUILT_PROFILE_FILES
+        try:
+            metadata = get_hf_file_metadata(hf_hub_url(repo_id, filename))
+        except EntryNotFoundError:
+            if required:
+                raise
+            continue
+        except HfHubHTTPError as exc:
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            if status_code == 404 and not required:
+                continue
+            files.append(_PrebuiltFile(filename, required))
+        else:
+            files.append(_PrebuiltFile(filename, required, getattr(metadata, "size", None)))
+    return files
+
+
+def _download_message(item: _PrebuiltFile, index: int, total_files: int) -> str:
+    file_number = f"file {index + 1}/{total_files}"
+    if item.size:
+        return f"Downloading {item.filename} ({_format_bytes(item.size)}, {file_number})"
+    return f"Downloading {item.filename} ({file_number})"
+
+
+def _download_fraction(completed_size: int, total_size: int, index: int, total_files: int) -> float:
+    if total_size > 0:
+        return max(0.0, min(1.0, completed_size / total_size))
+    if total_files > 0:
+        return max(0.0, min(1.0, index / total_files))
+    return 0.0
+
+
+def _downloaded_size(primary: Path, fallback: Path) -> int:
+    for path in (primary, fallback):
+        try:
+            return path.stat().st_size
+        except OSError:
+            continue
+    return 0
+
+
+def _format_bytes(value: int) -> str:
+    units = ("B", "KiB", "MiB", "GiB")
+    amount = float(value)
+    for unit in units:
+        if amount < 1024.0 or unit == units[-1]:
+            if unit == "B":
+                return f"{value} B"
+            return f"{amount:.1f} {unit}"
+        amount /= 1024.0
 
 
 def install_prebuilt_profile(
@@ -580,3 +714,7 @@ def _run_with_progress(command: list[str], progress: ProgressCallback | None) ->
 def _progress(progress: ProgressCallback | None, message: str) -> None:
     if progress is not None:
         progress(message)
+
+
+def _progress_event(progress: ProgressCallback | None, **payload: object) -> None:
+    _progress(progress, "wordpipe-progress " + json.dumps(payload, sort_keys=True))

@@ -490,6 +490,7 @@ class CliModelResolutionTests(unittest.TestCase):
             "nvidia/example",
             expected_source,
             force=False,
+            progress=mock.ANY,
         )
 
     def test_model_install_dry_run_does_not_download_source(self) -> None:

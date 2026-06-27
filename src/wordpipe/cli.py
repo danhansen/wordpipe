@@ -303,6 +303,10 @@ def _cmd_model_install(args: argparse.Namespace) -> int:
     model_root = Path(args.model_root).expanduser() if args.model_root else file_config.model_root
     if model_root is None:
         raise SystemExit("model_root is required")
+
+    def report(message: str) -> None:
+        print(message, file=sys.stderr, flush=True)
+
     build_from_nemo = getattr(args, "build_from_nemo", bool(args.source))
     prebuilt_repo = getattr(args, "prebuilt_repo", None)
     source_candidate = Path(args.source).expanduser() if args.source else None
@@ -333,6 +337,7 @@ def _cmd_model_install(args: argparse.Namespace) -> int:
                 model_root=model_root,
                 repo_id=prebuilt_repo,
                 force=args.force_source,
+                progress=report,
             )
         if args.dry_run:
             print(source_path)
@@ -343,6 +348,7 @@ def _cmd_model_install(args: argparse.Namespace) -> int:
             profile=profile,
             python=Path(args.python).expanduser(),
             force=args.force,
+            progress=report,
         )
         print(runtime_dir)
         return 0
@@ -357,6 +363,7 @@ def _cmd_model_install(args: argparse.Namespace) -> int:
             source_value,
             source_output or default_nemo_source_path(model_root),
             force=args.force_source,
+            progress=report,
         )
     runtime_dir = build_model_profile(
         source=source_path,
@@ -366,6 +373,7 @@ def _cmd_model_install(args: argparse.Namespace) -> int:
         force=args.force,
         dry_run=args.dry_run,
         keep_build_dir=args.keep_build_dir,
+        progress=report,
     )
     print(runtime_dir)
     return 0

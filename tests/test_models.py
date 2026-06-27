@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import shutil
 import stat
 import sys
@@ -26,6 +27,7 @@ from wordpipe.models import (
     profile_build_dir,
     profile_runtime_dir,
     source_may_be_built_profile_archive,
+    source_is_built_profile,
 )
 
 
@@ -126,6 +128,91 @@ class ModelDownloadTests(unittest.TestCase):
             self.assertEqual((source / "encoder.onnx").read_text(encoding="utf-8"), "encoder.onnx")
             self.assertEqual((source / "decoder_joint.onnx").read_text(encoding="utf-8"), "decoder_joint.onnx")
             self.assertIn("encoder.onnx.data", downloaded)
+
+    def test_download_prebuilt_profile_reports_structured_file_progress(self) -> None:
+        class EntryNotFoundError(Exception):
+            pass
+
+        class HfHubHTTPError(Exception):
+            pass
+
+        sizes = {
+            "tokenizer.model": 100,
+            "encoder.onnx": 200,
+            "encoder.onnx.data": 1000,
+            "decoder_joint.onnx": 300,
+            "config.json": 50,
+            "preprocessor_config.json": 60,
+            "tokenizer_config.json": 70,
+        }
+        progress: list[str] = []
+
+        def hf_hub_url(_repo_id: str, filename: str) -> str:
+            return filename
+
+        def get_hf_file_metadata(url: str) -> types.SimpleNamespace:
+            if url not in sizes:
+                raise EntryNotFoundError()
+            return types.SimpleNamespace(size=sizes[url])
+
+        def hf_hub_download(**kwargs):  # type: ignore[no-untyped-def]
+            filename = kwargs["filename"]
+            destination = Path(kwargs["local_dir"]) / filename
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(b"x" * sizes[filename])
+            return str(destination)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with mock.patch.dict(
+                sys.modules,
+                {
+                    "huggingface_hub": types.SimpleNamespace(
+                        get_hf_file_metadata=get_hf_file_metadata,
+                        hf_hub_download=hf_hub_download,
+                        hf_hub_url=hf_hub_url,
+                    ),
+                    "huggingface_hub.utils": types.SimpleNamespace(
+                        EntryNotFoundError=EntryNotFoundError,
+                        HfHubHTTPError=HfHubHTTPError,
+                    ),
+                },
+            ):
+                download_prebuilt_profile(
+                    profile="fast",
+                    model_root=root,
+                    repo_id="danhansen/example-fast",
+                    progress=progress.append,
+                )
+
+        events = [
+            json.loads(line.removeprefix("wordpipe-progress "))
+            for line in progress
+            if line.startswith("wordpipe-progress ")
+        ]
+        encoder_data = [
+            event
+            for event in events
+            if event.get("phase") == "downloading"
+            and event.get("filename") == "encoder.onnx.data"
+        ]
+        self.assertEqual(len(encoder_data), 1)
+        self.assertEqual(encoder_data[0]["file_size"], 1000)
+        self.assertEqual(encoder_data[0]["total_bytes"], sum(sizes.values()))
+        self.assertIn("encoder.onnx.data", encoder_data[0]["message"])
+
+    def test_external_onnx_data_must_exist_for_profile_to_be_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp)
+            (source / "tokenizer.model").write_text("tokenizer", encoding="utf-8")
+            (source / "encoder.onnx").write_bytes(b"external encoder.onnx.data")
+            (source / "decoder_joint.onnx").write_bytes(b"decoder")
+
+            self.assertFalse(source_is_built_profile(source))
+
+            (source / "encoder.onnx.data").write_bytes(b"weights")
+
+            self.assertTrue(source_is_built_profile(source))
 
     def test_install_built_profile_copies_runtime_dir_to_profile_destination(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

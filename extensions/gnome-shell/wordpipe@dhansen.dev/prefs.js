@@ -572,6 +572,12 @@ class WordpipePage extends Adw.PreferencesPage {
             title: _('Model Setup'),
             subtitle: _('Idle'),
         });
+        this._progressBar = new Gtk.ProgressBar({
+            valign: Gtk.Align.CENTER,
+            width_request: 140,
+            visible: false,
+        });
+        this._progressRow.add_suffix(this._progressBar);
         group.add(this._progressRow);
 
         this._metricsRow = new Adw.ActionRow({
@@ -871,7 +877,7 @@ class WordpipePage extends Adw.PreferencesPage {
             this._metricsRow.subtitle = metricsSummary;
         const installSummary = formatInstallProgress(values.last_install_progress ?? {});
         if (installSummary)
-            this._progressRow.subtitle = installSummary;
+            this._setInstallProgress(values.last_install_progress ?? {});
         if (typeof values.partial_text === 'string')
             this._partialRow.subtitle = values.partial_text || _('No speech yet');
         if (typeof values.last_commit_text === 'string')
@@ -894,10 +900,28 @@ class WordpipePage extends Adw.PreferencesPage {
     }
 
     _handleInstallProgress(profile, progress) {
-        const message = progress.message ?? progress.phase ?? '';
-        this._progressRow.subtitle = message ? `${profile}: ${message}` : profile;
+        if (typeof progress.profile !== 'string')
+            progress.profile = profile;
+        this._setInstallProgress(progress);
         if (progress.phase === 'complete' || progress.phase === 'error')
             this._refreshModelProfiles();
+    }
+
+    _setInstallProgress(progress) {
+        const summary = formatInstallProgress(progress);
+        if (summary)
+            this._progressRow.subtitle = summary;
+        const fraction = numberValue(progress.fraction);
+        const active = progress.phase !== 'complete' && progress.phase !== 'error';
+        if (fraction !== null && active) {
+            this._progressBar.visible = true;
+            this._progressBar.fraction = Math.max(0.0, Math.min(1.0, fraction));
+        } else if (progress.phase === 'complete') {
+            this._progressBar.fraction = 1.0;
+            this._progressBar.visible = false;
+        } else if (progress.phase === 'error') {
+            this._progressBar.visible = false;
+        }
     }
 
     _syncInstallButtons() {
