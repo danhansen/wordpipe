@@ -41,6 +41,7 @@ PREBUILT_PROFILE_FILES = (
 )
 REQUIRED_PREBUILT_PROFILE_FILES = ("tokenizer.model", "encoder.onnx", "decoder_joint.onnx")
 PROFILE_COMPLETION_MARKER = ".wordpipe-profile.json"
+RANGED_DOWNLOAD_MIN_SIZE = 64 * 1024 * 1024
 ModelProfile = Literal["fast", "compact"]
 ProgressCallback = Callable[[str], None]
 
@@ -191,6 +192,15 @@ def profile_installed(model_root: Path, profile: str) -> bool:
     return model_runtime_dir_valid(runtime_dir)
 
 
+def ensure_profile_completion_marker(model_root: Path, profile: str) -> Path:
+    runtime_dir = profile_runtime_dir(model_root, profile)
+    if not model_runtime_dir_valid(runtime_dir):
+        raise RuntimeError(f"model profile {profile!r} is not installed at {runtime_dir}")
+    if not _profile_completion_marker(runtime_dir).exists():
+        _write_profile_completion_marker(runtime_dir, profile=profile)
+    return runtime_dir
+
+
 def model_runtime_dir_valid(runtime_dir: Path) -> bool:
     if not _runtime_structure_valid(runtime_dir):
         return False
@@ -301,8 +311,10 @@ def download_prebuilt_profile(
         shutil.rmtree(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
+    xet_env_value = os.environ.get("HF_HUB_DISABLE_XET")
+    os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
     try:
-        from huggingface_hub import hf_hub_download
+        from huggingface_hub import hf_hub_download, hf_hub_url
         from huggingface_hub.utils import EntryNotFoundError
 
         _progress(progress, f"Downloading {spec.title} profile from {selected_repo}")
@@ -333,12 +345,19 @@ def download_prebuilt_profile(
                     fraction=_download_fraction(completed_size, total_size, index, len(files)),
                 )
                 try:
-                    path = hf_hub_download(
+                    path = _download_prebuilt_file(
                         repo_id=selected_repo,
-                        filename=item.filename,
-                        local_dir=output_dir,
-                        local_dir_use_symlinks=False,
-                        force_download=force,
+                        item=item,
+                        output_dir=output_dir,
+                        force=force,
+                        hf_hub_download=hf_hub_download,
+                        url=hf_hub_url(selected_repo, item.filename),
+                        progress=progress,
+                        profile=spec.name,
+                        file_index=index + 1,
+                        file_count=len(files),
+                        completed_base=completed_size,
+                        total_bytes=total_size,
                     )
                 except EntryNotFoundError:
                     if item.required:
@@ -373,6 +392,72 @@ def download_prebuilt_profile(
             "huggingface_hub is required to download prebuilt Wordpipe model profiles. "
             "Install it with hf_transfer support, or pass --source with a local profile directory/archive."
         ) from exc
+    finally:
+        if xet_env_value is None:
+            os.environ.pop("HF_HUB_DISABLE_XET", None)
+        else:
+            os.environ["HF_HUB_DISABLE_XET"] = xet_env_value
+
+
+def _download_prebuilt_file(
+    *,
+    repo_id: str,
+    item: _PrebuiltFile,
+    output_dir: Path,
+    force: bool,
+    hf_hub_download: object,
+    url: str,
+    progress: ProgressCallback | None,
+    profile: str,
+    file_index: int,
+    file_count: int,
+    completed_base: int,
+    total_bytes: int,
+) -> Path:
+    destination = output_dir / item.filename
+    if (
+        item.size is not None
+        and item.size >= RANGED_DOWNLOAD_MIN_SIZE
+        and _download_hf_ranged_script().exists()
+    ):
+        if destination.exists() and not force and destination.stat().st_size == item.size:
+            return destination
+        command = [
+            str(Path(sys.executable).expanduser()),
+            str(_download_hf_ranged_script()),
+            url,
+            str(destination),
+            "--size",
+            str(item.size),
+            "--workers",
+            "8",
+        ]
+        env = os.environ.copy()
+        env.update(
+            {
+                "WORDPIPE_PROGRESS_PROFILE": profile,
+                "WORDPIPE_PROGRESS_FILENAME": item.filename,
+                "WORDPIPE_PROGRESS_FILE_INDEX": str(file_index),
+                "WORDPIPE_PROGRESS_FILE_COUNT": str(file_count),
+                "WORDPIPE_PROGRESS_COMPLETED_BASE": str(completed_base),
+                "WORDPIPE_PROGRESS_TOTAL_BYTES": str(total_bytes),
+            }
+        )
+        _run_with_progress(command, progress, env=env)
+        return destination
+
+    path = hf_hub_download(
+        repo_id=repo_id,
+        filename=item.filename,
+        local_dir=output_dir,
+        local_dir_use_symlinks=False,
+        force_download=force,
+    )
+    return Path(path)
+
+
+def _download_hf_ranged_script() -> Path:
+    return wordpipe_scripts_dir() / "download_hf_ranged.py"
 
 
 def _prebuilt_download_plan(repo_id: str) -> list[_PrebuiltFile]:
@@ -449,6 +534,13 @@ def install_prebuilt_profile(
     progress: ProgressCallback | None = None,
 ) -> Path:
     spec = profile_spec(profile)
+    runtime_dir = spec.runtime_dir(model_root)
+    if runtime_dir.exists() and not force and model_runtime_dir_valid(runtime_dir):
+        if not _profile_completion_marker(runtime_dir).exists():
+            _write_profile_completion_marker(runtime_dir, profile=profile)
+        _progress(progress, f"Using installed model profile: {runtime_dir}")
+        return runtime_dir
+
     prepared_source = _prepare_built_profile_source(source)
     try:
         onnx_dir = spec.output_dir(model_root)
@@ -461,7 +553,6 @@ def install_prebuilt_profile(
         _progress(progress, f"Model profile ready: {onnx_dir}")
         return onnx_dir
 
-    runtime_dir = spec.runtime_dir(model_root)
     if runtime_dir.exists() and not force and model_runtime_dir_valid(runtime_dir):
         if not _profile_completion_marker(runtime_dir).exists():
             _write_profile_completion_marker(runtime_dir, profile=profile)
@@ -711,9 +802,14 @@ def build_model_profile(
     return runtime_dir
 
 
-def _run_with_progress(command: list[str], progress: ProgressCallback | None) -> None:
+def _run_with_progress(
+    command: list[str],
+    progress: ProgressCallback | None,
+    *,
+    env: dict[str, str] | None = None,
+) -> None:
     if progress is None:
-        subprocess.run(command, check=True)
+        subprocess.run(command, check=True, env=env)
         return
 
     process = subprocess.Popen(
@@ -722,6 +818,7 @@ def _run_with_progress(command: list[str], progress: ProgressCallback | None) ->
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        env=env,
     )
     assert process.stdout is not None
     for line in process.stdout:

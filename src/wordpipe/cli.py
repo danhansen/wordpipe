@@ -291,8 +291,11 @@ def _cmd_model_install(args: argparse.Namespace) -> int:
         download_prebuilt_profile,
         default_nemo_source_path,
         download_nemo_source,
+        ensure_profile_completion_marker,
         install_built_profile,
         install_prebuilt_profile,
+        model_runtime_dir_valid,
+        profile_runtime_dir,
         profile_spec,
         source_may_be_built_profile_archive,
         source_is_built_profile,
@@ -310,6 +313,18 @@ def _cmd_model_install(args: argparse.Namespace) -> int:
     build_from_nemo = getattr(args, "build_from_nemo", bool(args.source))
     prebuilt_repo = getattr(args, "prebuilt_repo", None)
     source_candidate = Path(args.source).expanduser() if args.source else None
+    runtime_dir = profile_runtime_dir(model_root, profile)
+    if (
+        not args.force
+        and not args.force_source
+        and not args.dry_run
+        and source_candidate is None
+        and model_runtime_dir_valid(runtime_dir)
+    ):
+        runtime_dir = ensure_profile_completion_marker(model_root, profile)
+        report(f"Using installed model profile: {runtime_dir}")
+        print(runtime_dir)
+        return 0
     if source_candidate is not None and source_candidate.exists() and (
         source_is_built_profile(source_candidate) or source_may_be_built_profile_archive(source_candidate)
     ):

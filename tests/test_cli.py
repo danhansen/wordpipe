@@ -20,7 +20,7 @@ from wordpipe.cli import (
     main,
 )
 from wordpipe.config import WordpipeConfig
-from wordpipe.models import DEFAULT_NEMO_SOURCE_FILENAME, profile_runtime_dir
+from wordpipe.models import DEFAULT_NEMO_SOURCE_FILENAME, PROFILE_COMPLETION_MARKER, profile_runtime_dir
 
 
 def _args(
@@ -492,6 +492,36 @@ class CliModelResolutionTests(unittest.TestCase):
             force=False,
             progress=mock.ANY,
         )
+
+    def test_model_install_uses_existing_runtime_without_download(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_dir = _install_marker(root, "compact")
+            args = argparse.Namespace(
+                config=None,
+                profile="compact",
+                model_root=str(root),
+                source=None,
+                source_output=None,
+                python="/venv/bin/python",
+                force=False,
+                force_source=False,
+                dry_run=False,
+                keep_build_dir=False,
+            )
+
+            with (
+                mock.patch("wordpipe.models.download_prebuilt_profile") as download,
+                mock.patch("wordpipe.models.install_prebuilt_profile") as install,
+                contextlib.redirect_stdout(io.StringIO()) as stdout,
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                self.assertEqual(_cmd_model_install(args), 0)
+            self.assertTrue((runtime_dir / PROFILE_COMPLETION_MARKER).exists())
+
+        download.assert_not_called()
+        install.assert_not_called()
+        self.assertEqual(stdout.getvalue().strip(), str(runtime_dir))
 
     def test_model_install_dry_run_does_not_download_source(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

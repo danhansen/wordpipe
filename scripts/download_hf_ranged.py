@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import json
 import os
 import pathlib
 import sys
@@ -96,9 +97,48 @@ def progress_reporter(total: int, progress: list[int], lock: threading.Lock, sto
         now = time.monotonic()
         rate = (done - last_done) / max(now - last_time, 0.001)
         pct = done / total * 100.0
-        print(f"{done / 1024 / 1024:.1f} MiB / {total / 1024 / 1024:.1f} MiB ({pct:.1f}%), {rate / 1024:.1f} KiB/s", flush=True)
+        progress_json = progress_payload(done, total, rate)
+        if progress_json:
+            print("wordpipe-progress " + json.dumps(progress_json, sort_keys=True), flush=True)
+        else:
+            print(
+                f"{done / 1024 / 1024:.1f} MiB / {total / 1024 / 1024:.1f} MiB ({pct:.1f}%), "
+                f"{rate / 1024:.1f} KiB/s",
+                flush=True,
+            )
         last_done = done
         last_time = now
+
+
+def progress_payload(done: int, total: int, rate: float) -> dict[str, object] | None:
+    profile = os.environ.get("WORDPIPE_PROGRESS_PROFILE")
+    filename = os.environ.get("WORDPIPE_PROGRESS_FILENAME")
+    if not profile or not filename:
+        return None
+    completed_base = int(os.environ.get("WORDPIPE_PROGRESS_COMPLETED_BASE", "0"))
+    total_bytes = int(os.environ.get("WORDPIPE_PROGRESS_TOTAL_BYTES", str(total)))
+    file_index = int(os.environ.get("WORDPIPE_PROGRESS_FILE_INDEX", "1"))
+    file_count = int(os.environ.get("WORDPIPE_PROGRESS_FILE_COUNT", "1"))
+    completed_bytes = completed_base + done
+    fraction = completed_bytes / total_bytes if total_bytes > 0 else 0.0
+    return {
+        "profile": profile,
+        "phase": "downloading",
+        "message": (
+            f"Downloading {filename} "
+            f"({done / 1024 / 1024:.1f} MiB / {total / 1024 / 1024:.1f} MiB, "
+            f"{rate / 1024:.1f} KiB/s)"
+        ),
+        "filename": filename,
+        "file_index": file_index,
+        "file_count": file_count,
+        "file_size": total,
+        "file_completed_bytes": done,
+        "completed_bytes": completed_bytes,
+        "total_bytes": total_bytes,
+        "bytes_per_second": rate,
+        "fraction": max(0.0, min(1.0, fraction)),
+    }
 
 
 def assemble(output: pathlib.Path, part_paths: list[pathlib.Path], expected_size: int) -> None:

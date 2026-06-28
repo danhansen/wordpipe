@@ -23,6 +23,7 @@ from wordpipe.models import (
     download_prebuilt_profile,
     download_nemo_source,
     install_built_profile,
+    install_prebuilt_profile,
     make_download_plan,
     model_file_url,
     model_runtime_dir_valid,
@@ -100,6 +101,9 @@ class ModelDownloadTests(unittest.TestCase):
 
         downloaded: list[str] = []
 
+        def hf_hub_url(_repo_id: str, filename: str) -> str:
+            return f"https://huggingface.co/example/resolve/main/{filename}"
+
         def hf_hub_download(**kwargs):  # type: ignore[no-untyped-def]
             filename = kwargs["filename"]
             downloaded.append(filename)
@@ -115,7 +119,10 @@ class ModelDownloadTests(unittest.TestCase):
             with mock.patch.dict(
                 sys.modules,
                 {
-                    "huggingface_hub": types.SimpleNamespace(hf_hub_download=hf_hub_download),
+                    "huggingface_hub": types.SimpleNamespace(
+                        hf_hub_download=hf_hub_download,
+                        hf_hub_url=hf_hub_url,
+                    ),
                     "huggingface_hub.utils": types.SimpleNamespace(EntryNotFoundError=EntryNotFoundError),
                 },
             ):
@@ -149,6 +156,7 @@ class ModelDownloadTests(unittest.TestCase):
             "tokenizer_config.json": 70,
         }
         progress: list[str] = []
+        xet_values: list[str | None] = []
 
         def hf_hub_url(_repo_id: str, filename: str) -> str:
             return filename
@@ -159,6 +167,9 @@ class ModelDownloadTests(unittest.TestCase):
             return types.SimpleNamespace(size=sizes[url])
 
         def hf_hub_download(**kwargs):  # type: ignore[no-untyped-def]
+            import os
+
+            xet_values.append(os.environ.get("HF_HUB_DISABLE_XET"))
             filename = kwargs["filename"]
             destination = Path(kwargs["local_dir"]) / filename
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -181,12 +192,13 @@ class ModelDownloadTests(unittest.TestCase):
                     ),
                 },
             ):
-                download_prebuilt_profile(
-                    profile="fast",
-                    model_root=root,
-                    repo_id="danhansen/example-fast",
-                    progress=progress.append,
-                )
+                with mock.patch.dict("os.environ", {}, clear=True):
+                    download_prebuilt_profile(
+                        profile="fast",
+                        model_root=root,
+                        repo_id="danhansen/example-fast",
+                        progress=progress.append,
+                    )
 
         events = [
             json.loads(line.removeprefix("wordpipe-progress "))
@@ -203,6 +215,73 @@ class ModelDownloadTests(unittest.TestCase):
         self.assertEqual(encoder_data[0]["file_size"], 1000)
         self.assertEqual(encoder_data[0]["total_bytes"], sum(sizes.values()))
         self.assertIn("encoder.onnx.data", encoder_data[0]["message"])
+        self.assertTrue(xet_values)
+        self.assertTrue(all(value == "1" for value in xet_values))
+
+    def test_download_prebuilt_profile_uses_ranged_downloader_for_large_files(self) -> None:
+        class EntryNotFoundError(Exception):
+            pass
+
+        class HfHubHTTPError(Exception):
+            pass
+
+        sizes = {
+            "tokenizer.model": 100,
+            "encoder.onnx": 70 * 1024 * 1024,
+            "decoder_joint.onnx": 300,
+        }
+        hub_downloaded: list[str] = []
+
+        def hf_hub_url(_repo_id: str, filename: str) -> str:
+            return f"https://huggingface.co/example/resolve/main/{filename}"
+
+        def get_hf_file_metadata(url: str) -> types.SimpleNamespace:
+            filename = url.rsplit("/", 1)[-1]
+            if filename not in sizes:
+                raise EntryNotFoundError()
+            return types.SimpleNamespace(size=sizes[filename])
+
+        def hf_hub_download(**kwargs):  # type: ignore[no-untyped-def]
+            filename = kwargs["filename"]
+            hub_downloaded.append(filename)
+            destination = Path(kwargs["local_dir"]) / filename
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(b"x" * sizes[filename])
+            return str(destination)
+
+        def run_ranged(command, _progress, *, env=None):  # type: ignore[no-untyped-def]
+            destination = Path(command[3])
+            destination.write_bytes(b"encoder")
+            self.assertEqual(env["WORDPIPE_PROGRESS_FILENAME"], "encoder.onnx")
+            self.assertEqual(env["WORDPIPE_PROGRESS_FILE_INDEX"], "2")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with (
+                mock.patch.dict(
+                    sys.modules,
+                    {
+                        "huggingface_hub": types.SimpleNamespace(
+                            get_hf_file_metadata=get_hf_file_metadata,
+                            hf_hub_download=hf_hub_download,
+                            hf_hub_url=hf_hub_url,
+                        ),
+                        "huggingface_hub.utils": types.SimpleNamespace(
+                            EntryNotFoundError=EntryNotFoundError,
+                            HfHubHTTPError=HfHubHTTPError,
+                        ),
+                    },
+                ),
+                mock.patch("wordpipe.models._run_with_progress", side_effect=run_ranged) as run,
+            ):
+                download_prebuilt_profile(
+                    profile="compact",
+                    model_root=root,
+                    repo_id="danhansen/example-compact",
+                )
+
+        self.assertEqual(hub_downloaded, ["tokenizer.model", "decoder_joint.onnx"])
+        run.assert_called_once()
 
     def test_external_onnx_data_must_exist_for_profile_to_be_valid(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -260,6 +339,22 @@ class ModelDownloadTests(unittest.TestCase):
             self.assertEqual(marker["format"], 1)
             self.assertEqual(marker["profile"], "compact")
             self.assertTrue(all("sha256" in item for item in marker["files"]))
+
+    def test_install_prebuilt_profile_uses_existing_runtime_before_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_dir = profile_runtime_dir(root, "compact")
+            _write_test_runtime_profile(runtime_dir)
+            missing_source = root / "missing-source"
+
+            result = install_prebuilt_profile(
+                source=missing_source,
+                model_root=root,
+                profile="compact",
+            )
+
+            self.assertEqual(result, runtime_dir)
+            self.assertTrue((runtime_dir / PROFILE_COMPLETION_MARKER).exists())
 
     def test_install_built_profile_preserves_existing_profile_when_force_copy_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
