@@ -138,9 +138,9 @@ class Indicator extends PanelMenu.Button {
         this._toggleItem.label.text = listening || stopping
             ? _('Stop Dictation')
             : _('Start Dictation');
-        this._toggleItem.setSensitive(
-            available && !installing && !loading &&
-            (listening || stopping || selectedModelInstalled));
+        const canToggleDictation = listening || stopping ||
+            (!loading && selectedModelInstalled);
+        this._toggleItem.setSensitive(available && canToggleDictation);
         this._statusItem.label.text = available
             ? statusText(state, selectedModelInstalled)
             : _('Service unavailable');
