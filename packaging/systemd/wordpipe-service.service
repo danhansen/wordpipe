@@ -4,7 +4,7 @@ Documentation=https://github.com/danhansen/wordpipe
 
 [Service]
 Type=simple
-ExecStart=%h/.local/libexec/wordpipe/wordpipe-service
+ExecStart=@WORDPIPE_LIBEXEC@/bin/wordpipe-service
 Restart=on-failure
 RestartSec=2
 

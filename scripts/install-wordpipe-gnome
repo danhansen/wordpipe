@@ -7,7 +7,8 @@ SERVICE_NAME="dev.wordpipe.Service"
 
 PREFIX="${XDG_DATA_HOME:-$HOME/.local/share}"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-BIN_DIR="$HOME/.local/libexec/wordpipe"
+LIBEXEC_DIR="$HOME/.local/libexec/wordpipe"
+BIN_DIR="$LIBEXEC_DIR/bin"
 EXTENSION_DIR="$PREFIX/gnome-shell/extensions/$UUID"
 DBUS_SERVICE_DIR="$PREFIX/dbus-1/services"
 SYSTEMD_USER_DIR="$CONFIG_HOME/systemd/user"
@@ -44,8 +45,9 @@ EOF
 
 echo "Installing systemd user unit"
 install -d "$SYSTEMD_USER_DIR"
-install -m 0644 "$ROOT/packaging/systemd/wordpipe-service.service" \
-    "$SYSTEMD_USER_DIR/wordpipe-service.service"
+sed "s|@WORDPIPE_LIBEXEC@|$LIBEXEC_DIR|g" \
+    "$ROOT/packaging/systemd/wordpipe-service.service" \
+    > "$SYSTEMD_USER_DIR/wordpipe-service.service"
 systemctl --user daemon-reload
 
 echo "Installing GNOME Shell extension"
