@@ -136,6 +136,7 @@ cat > "$STAGE_ROOT/share/dbus-1/services/dev.wordpipe.Service.service" <<'EOF'
 [D-BUS Service]
 Name=dev.wordpipe.Service
 Exec=@WORDPIPE_LIBEXEC@/bin/wordpipe-service
+SystemdService=wordpipe-service.service
 EOF
 
 cat > "$STAGE_ROOT/share/systemd/user/wordpipe-service.service" <<'EOF'
@@ -144,7 +145,8 @@ Description=Wordpipe Rust dictation service
 Documentation=https://github.com/danhansen/wordpipe
 
 [Service]
-Type=simple
+Type=dbus
+BusName=dev.wordpipe.Service
 ExecStart=@WORDPIPE_LIBEXEC@/bin/wordpipe-service
 Restart=on-failure
 RestartSec=2

@@ -425,6 +425,7 @@ export default class WordpipeExtension extends Extension {
         this._settings = this.getSettings();
         this._state = {};
         this._profiles = [];
+        this._selectedProfile = '';
         this._signalIds = [];
         this._syncingSettings = false;
         this._shortcutBound = false;
@@ -465,8 +466,15 @@ export default class WordpipeExtension extends Extension {
     }
 
     selectModelProfile(profile) {
-        this._settings.set_string('model-profile', profile);
-        this._callRemote('SetModelProfile', profile);
+        this._selectedProfile = profile;
+        this._syncProfileMenu();
+        this._syncingSettings = true;
+        try {
+            this._settings.set_string('model-profile', profile);
+        } finally {
+            this._syncingSettings = false;
+        }
+        this._callRemote('SetModelProfile', profile, () => this._refreshConfigFromService());
     }
 
     _bindShortcut() {
@@ -616,6 +624,8 @@ export default class WordpipeExtension extends Extension {
     }
 
     _syncSettingsFromConfig(config) {
+        if (typeof config.model_profile === 'string')
+            this._selectedProfile = config.model_profile;
         this._syncingSettings = true;
         try {
             if (typeof config.backend === 'string')
@@ -722,7 +732,7 @@ export default class WordpipeExtension extends Extension {
     _syncProfileMenu() {
         this._indicator?.setProfiles(
             this._profiles,
-            this._settings.get_string('model-profile'));
+            this._selectedProfile || this._settings.get_string('model-profile'));
     }
 
     _callRemote(method, ...args) {
@@ -738,6 +748,8 @@ export default class WordpipeExtension extends Extension {
                 const message = formatError(error);
                 this._indicator?.setStatusMessage(message);
                 logError(error, `Wordpipe ${method} failed`);
+                if (method === 'SetModelProfile')
+                    this._refreshConfigFromService();
                 return;
             }
             this._setAvailable(true);
@@ -748,6 +760,10 @@ export default class WordpipeExtension extends Extension {
 
     _handleState(state) {
         this._state = state;
+        if (typeof state.model_profile === 'string') {
+            this._selectedProfile = state.model_profile;
+            this._syncProfileMenu();
+        }
         this._indicator?.setState(this._state, true);
         const installSummary = formatInstallProgress(state.last_install_progress ?? {});
         const metricsSummary = formatMetrics(state.last_metrics ?? {});

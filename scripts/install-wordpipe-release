@@ -130,7 +130,12 @@ sed "s|@WORDPIPE_LIBEXEC@|$LIBEXEC_DIR|g" \
   > "$SYSTEMD_USER_DIR/wordpipe-service.service"
 if command -v systemctl >/dev/null 2>&1; then
   systemctl --user daemon-reload || true
-  systemctl --user try-restart wordpipe-service.service || true
+  systemctl --user list-units --all --plain --no-legend 'dbus-*dev.wordpipe.Service*.service' 2>/dev/null |
+    while read -r unit rest; do
+      [ -n "$unit" ] || continue
+      systemctl --user stop "$unit" || true
+    done
+  systemctl --user restart wordpipe-service.service || true
 fi
 
 echo "Installing GNOME Shell extension"

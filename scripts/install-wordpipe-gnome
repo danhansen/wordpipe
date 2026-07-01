@@ -41,6 +41,7 @@ cat > "$DBUS_SERVICE_DIR/$SERVICE_NAME.service" <<EOF
 [D-BUS Service]
 Name=$SERVICE_NAME
 Exec=$BIN_DIR/wordpipe-service
+SystemdService=wordpipe-service.service
 EOF
 
 echo "Installing systemd user unit"
@@ -49,6 +50,15 @@ sed "s|@WORDPIPE_LIBEXEC@|$LIBEXEC_DIR|g" \
     "$ROOT/packaging/systemd/wordpipe-service.service" \
     > "$SYSTEMD_USER_DIR/wordpipe-service.service"
 systemctl --user daemon-reload
+
+echo "Stopping stale D-Bus-activated service copies"
+while read -r unit _; do
+    [ -n "$unit" ] || continue
+    systemctl --user stop "$unit" || true
+done < <(systemctl --user list-units --all --plain --no-legend 'dbus-*dev.wordpipe.Service*.service' || true)
+
+echo "Restarting Wordpipe service"
+systemctl --user restart wordpipe-service.service
 
 echo "Installing GNOME Shell extension"
 install -d "$EXTENSION_DIR"
