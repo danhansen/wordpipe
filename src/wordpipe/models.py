@@ -541,13 +541,18 @@ def install_prebuilt_profile(
         _progress(progress, f"Using installed model profile: {runtime_dir}")
         return runtime_dir
 
-    prepared_source = _prepare_built_profile_source(source)
-    try:
-        onnx_dir = spec.output_dir(model_root)
-        _install_prepared_profile(prepared_source.path, onnx_dir, profile=profile, force=force)
-    finally:
-        if prepared_source.cleanup_dir is not None:
-            shutil.rmtree(prepared_source.cleanup_dir, ignore_errors=True)
+    onnx_dir = spec.output_dir(model_root)
+    if onnx_dir.exists() and not force and model_runtime_dir_valid(onnx_dir):
+        if not _profile_completion_marker(onnx_dir).exists():
+            _write_profile_completion_marker(onnx_dir, profile=profile)
+        _progress(progress, f"Using cached ONNX profile: {onnx_dir}")
+    else:
+        prepared_source = _prepare_built_profile_source(source)
+        try:
+            _install_prepared_profile(prepared_source.path, onnx_dir, profile=profile, force=force)
+        finally:
+            if prepared_source.cleanup_dir is not None:
+                shutil.rmtree(prepared_source.cleanup_dir, ignore_errors=True)
 
     if not spec.emit_ort_format:
         _progress(progress, f"Model profile ready: {onnx_dir}")

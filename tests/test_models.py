@@ -356,6 +356,34 @@ class ModelDownloadTests(unittest.TestCase):
             self.assertEqual(result, runtime_dir)
             self.assertTrue((runtime_dir / PROFILE_COMPLETION_MARKER).exists())
 
+    def test_install_prebuilt_profile_reuses_cached_onnx_profile_for_ort_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            onnx_dir = root / "nemotron-wordpipe-compact-fixed-shape"
+            onnx_dir.mkdir()
+            (onnx_dir / "tokenizer.model").write_text("tokenizer", encoding="utf-8")
+            (onnx_dir / "encoder.onnx").write_text("encoder", encoding="utf-8")
+            (onnx_dir / "decoder_joint.onnx").write_text("decoder", encoding="utf-8")
+            source = root / "missing-source"
+            runtime_dir = profile_runtime_dir(root, "compact")
+
+            def convert(command, _progress):  # type: ignore[no-untyped-def]
+                self.assertEqual(Path(command[2]), onnx_dir)
+                self.assertEqual(Path(command[3]), runtime_dir)
+                _write_test_runtime_profile(runtime_dir)
+
+            with mock.patch("wordpipe.models._run_with_progress", side_effect=convert) as run:
+                result = install_prebuilt_profile(
+                    source=source,
+                    model_root=root,
+                    profile="compact",
+                    progress=lambda _message: None,
+                )
+
+            self.assertEqual(result, runtime_dir)
+            self.assertEqual(run.call_count, 1)
+            self.assertTrue((runtime_dir / PROFILE_COMPLETION_MARKER).exists())
+
     def test_install_built_profile_preserves_existing_profile_when_force_copy_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

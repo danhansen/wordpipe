@@ -1057,10 +1057,10 @@ function formatInstallProgress(progress) {
     if (!profile && !message)
         return '';
     if (!profile)
-        return message;
+        return markupSafe(message);
     if (!message)
-        return profile;
-    return `${profile}: ${message}`;
+        return markupSafe(profile);
+    return markupSafe(`${profile}: ${message}`);
 }
 
 function numberValue(value) {
@@ -1071,5 +1071,9 @@ function numberValue(value) {
 
 function formatError(error) {
     const message = error?.message ?? String(error);
-    return message.replace(/^GDBus\.Error:[^:]+:\s*/, '');
+    return markupSafe(message.replace(/^GDBus\.Error:[^:]+:\s*/, ''));
+}
+
+function markupSafe(value) {
+    return GLib.markup_escape_text(String(value), -1);
 }
