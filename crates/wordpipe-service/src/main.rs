@@ -1625,6 +1625,7 @@ fn spawn_worker(
             command.env("ORT_DYLIB_PATH", path);
         }
     }
+    apply_worker_thread_env(&mut command, config.num_threads);
     let mut child = command.spawn().with_context(|| {
         format!(
             "failed to start ASR worker '{}'; build/install wordpipe-parakeet-worker or set WORDPIPE_WORKER",
@@ -1646,6 +1647,15 @@ fn spawn_worker(
         },
         stdout,
     ))
+}
+
+fn apply_worker_thread_env(command: &mut Command, num_threads: u32) {
+    let value = num_threads.to_string();
+    for name in ["OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"] {
+        if std::env::var_os(name).is_none() {
+            command.env(name, &value);
+        }
+    }
 }
 
 fn send_worker_command(stdin: &Arc<Mutex<ChildStdin>>, command: &str) -> Result<()> {
@@ -2064,6 +2074,20 @@ mod tests {
 
         assert_eq!(normalized, fallback.to_string_lossy());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn worker_thread_env_matches_num_threads() {
+        let mut command = Command::new("wordpipe-parakeet-worker");
+        apply_worker_thread_env(&mut command, 2);
+        let envs: HashMap<_, _> = command
+            .get_envs()
+            .filter_map(|(name, value)| Some((name.to_str()?, value?.to_str()?)))
+            .collect();
+
+        assert_eq!(envs.get("OMP_NUM_THREADS"), Some(&"2"));
+        assert_eq!(envs.get("MKL_NUM_THREADS"), Some(&"2"));
+        assert_eq!(envs.get("OPENBLAS_NUM_THREADS"), Some(&"2"));
     }
 
     #[test]
