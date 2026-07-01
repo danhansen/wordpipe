@@ -1525,6 +1525,12 @@ fn default_ort_dylib_path() -> Option<PathBuf> {
         }
     }
 
+    for venv in candidate_release_venvs() {
+        if let Some(path) = find_ort_in_venv(&venv) {
+            return Some(path);
+        }
+    }
+
     for root in candidate_repo_roots() {
         for venv in [".venv", ".venv-nemo-export"] {
             if let Some(path) = find_ort_in_venv(&root.join(venv)) {
@@ -1533,6 +1539,16 @@ fn default_ort_dylib_path() -> Option<PathBuf> {
         }
     }
     None
+}
+
+fn candidate_release_venvs() -> Vec<PathBuf> {
+    let mut venvs = Vec::new();
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(prefix) = current_exe.parent().and_then(Path::parent) {
+            venvs.push(prefix.join("python-venv"));
+        }
+    }
+    venvs
 }
 
 fn candidate_repo_roots() -> Vec<PathBuf> {
@@ -1561,21 +1577,25 @@ fn candidate_repo_roots() -> Vec<PathBuf> {
 }
 
 fn find_ort_in_venv(venv: &Path) -> Option<PathBuf> {
-    let python_dirs = std::fs::read_dir(venv.join("lib")).ok()?;
-    for python_dir in python_dirs.flatten() {
-        let capi_dir = python_dir
-            .path()
-            .join("site-packages")
-            .join("onnxruntime")
-            .join("capi");
-        let files = std::fs::read_dir(capi_dir).ok()?;
-        for file in files.flatten() {
-            let path = file.path();
-            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-                continue;
-            };
-            if name.starts_with("libonnxruntime.so") {
-                return Some(path);
+    for lib_dir in ["lib", "lib64"] {
+        let Ok(python_dirs) = std::fs::read_dir(venv.join(lib_dir)) else {
+            continue;
+        };
+        for python_dir in python_dirs.flatten() {
+            let capi_dir = python_dir
+                .path()
+                .join("site-packages")
+                .join("onnxruntime")
+                .join("capi");
+            let files = std::fs::read_dir(capi_dir).ok()?;
+            for file in files.flatten() {
+                let path = file.path();
+                let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+                    continue;
+                };
+                if name.starts_with("libonnxruntime.so") {
+                    return Some(path);
+                }
             }
         }
     }
@@ -2043,6 +2063,23 @@ mod tests {
             });
 
         assert_eq!(normalized, fallback.to_string_lossy());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn find_ort_in_venv_supports_release_lib64_layout() {
+        let root = unique_temp_dir("ort-venv-lib64");
+        let capi = root
+            .join("lib64")
+            .join("python3.14")
+            .join("site-packages")
+            .join("onnxruntime")
+            .join("capi");
+        fs::create_dir_all(&capi).unwrap();
+        let expected = capi.join("libonnxruntime.so.1.27.0");
+        fs::write(&expected, b"ort").unwrap();
+
+        assert_eq!(find_ort_in_venv(&root), Some(expected));
         fs::remove_dir_all(root).unwrap();
     }
 
