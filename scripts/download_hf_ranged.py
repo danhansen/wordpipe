@@ -64,7 +64,10 @@ def download_range(
         if existing == expected:
             return
         if existing > expected:
-            raise RuntimeError(f"{part_path} is larger than its assigned range")
+            part_path.unlink(missing_ok=True)
+            with lock:
+                progress[index] = 0
+            existing = 0
 
         resume_start = start + existing
         req = urllib.request.Request(url, headers=request_headers(resume_start, end))
@@ -81,6 +84,9 @@ def download_range(
                     f.write(block)
                     with lock:
                         progress[index] += len(block)
+        actual = part_path.stat().st_size if part_path.exists() else 0
+        if actual == expected:
+            return
         if attempt < max_retries:
             time.sleep(min(2.0, 0.05 * (attempt + 1)))
 
