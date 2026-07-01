@@ -482,7 +482,7 @@ export default class WordpipeExtension extends Extension {
             if (this._settings.get_boolean('shortcut-capture-active'))
                 return;
             if (!this._syncingSettings)
-                this._pushSettings();
+                this._pushSetting(key);
         }, this);
     }
 
@@ -501,7 +501,7 @@ export default class WordpipeExtension extends Extension {
                 this._subscribeSignals();
                 this._refreshState();
                 this._refreshProfiles();
-                this._refreshConfigFromService(() => this._pushSettings());
+                this._refreshConfigFromService();
             });
     }
 
@@ -626,20 +626,46 @@ export default class WordpipeExtension extends Extension {
         }
     }
 
-    _pushSettings() {
+    _pushSetting(key) {
         if (!this._proxy)
             return;
 
-        const backend = this._settings.get_string('backend');
-        const profile = this._settings.get_string('model-profile');
-        const inputDevice = this._settings.get_string('input-device');
-        const language = this._settings.get_string('language');
-        const modelRoot = this._settings.get_string('model-root');
-        const workerPath = this._settings.get_string('worker-path');
-        const modelInstallerPath = this._settings.get_string('model-installer-path');
-        const shortcuts = this._settings.get_strv('toggle-shortcut');
-        const shortcut = shortcuts.length > 0 ? shortcuts[0] : '';
-        const options = {
+        switch (key) {
+        case 'backend':
+            this._callRemote('SetBackend', this._settings.get_string('backend'));
+            break;
+        case 'model-profile':
+            this._callRemote('SetModelProfile', this._settings.get_string('model-profile'));
+            break;
+        case 'input-device':
+            this._callRemote('SetInputDevice', this._settings.get_string('input-device'));
+            break;
+        case 'toggle-shortcut': {
+            const shortcuts = this._settings.get_strv('toggle-shortcut');
+            this._callRemote('SetShortcut', shortcuts.length > 0 ? shortcuts[0] : '');
+            break;
+        }
+        case 'spoken-punctuation':
+        case 'insert-partials':
+        case 'stream-insert-delay-ms':
+        case 'show-overlay':
+            this._pushInsertionOptions();
+            break;
+        case 'model-root':
+        case 'language':
+        case 'worker-path':
+        case 'model-installer-path':
+        case 'num-threads':
+        case 'sample-rate':
+            this._pushRuntimeOptions();
+            break;
+        default:
+            break;
+        }
+    }
+
+    _pushInsertionOptions() {
+        this._callRemote('SetInsertionOptions', {
             spoken_punctuation: new GLib.Variant('b',
                 this._settings.get_boolean('spoken-punctuation')),
             insert_partials: new GLib.Variant('b',
@@ -647,13 +673,15 @@ export default class WordpipeExtension extends Extension {
             stream_insert_delay_ms: new GLib.Variant('u',
                 this._settings.get_uint('stream-insert-delay-ms')),
             show_overlay: new GLib.Variant('b', false),
-        };
+        });
+    }
 
-        this._callRemote('SetBackend', backend);
-        this._callRemote('SetModelProfile', profile);
-        this._callRemote('SetInputDevice', inputDevice);
-        this._callRemote('SetShortcut', shortcut);
-        this._callRemote('SetInsertionOptions', options);
+    _pushRuntimeOptions() {
+        const language = this._settings.get_string('language');
+        const modelRoot = this._settings.get_string('model-root');
+        const workerPath = this._settings.get_string('worker-path');
+        const modelInstallerPath = this._settings.get_string('model-installer-path');
+
         this._callRemote('SetRuntimeOptions', {
             model_root: new GLib.Variant('s', modelRoot),
             language: new GLib.Variant('s', language),

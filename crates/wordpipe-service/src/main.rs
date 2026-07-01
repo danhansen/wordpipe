@@ -467,9 +467,11 @@ impl WordpipeService {
             let mut data = self.lock_data()?;
             let mut restart_worker = false;
             let mut language_update = None;
+            let mut model_root_changed = false;
             if let Some(value) = get_string(&options, "model_root") {
                 let value = normalize_model_root(value);
-                restart_worker |= data.config.model_root != value;
+                model_root_changed = data.config.model_root != value;
+                restart_worker |= model_root_changed;
                 data.config.model_root = value;
             }
             if let Some(value) = get_string(&options, "language") {
@@ -515,6 +517,11 @@ impl WordpipeService {
                 }
                 restart_worker |= data.config.num_threads != value;
                 data.config.num_threads = value;
+            }
+            if model_root_changed {
+                let previous_profile = data.config.model_profile.clone();
+                select_installed_model_profile(&mut data.config);
+                restart_worker |= data.config.model_profile != previous_profile;
             }
             if restart_worker {
                 shutdown_worker(&mut data);
@@ -1100,11 +1107,8 @@ fn load_service_config(path: &Path) -> Result<ServiceConfig> {
         &fs::read(path).with_context(|| format!("failed to read {}", path.display()))?,
     )
     .with_context(|| format!("failed to parse {}", path.display()))?;
-    let has_model_profile = persisted.model_profile.is_some();
     let mut config = apply_persisted_config(ServiceConfig::default(), persisted)?;
-    if !has_model_profile {
-        select_installed_model_profile(&mut config);
-    }
+    select_installed_model_profile(&mut config);
     Ok(config)
 }
 
@@ -2269,6 +2273,29 @@ mod tests {
         };
 
         select_installed_model_profile(&mut config);
+
+        assert_eq!(config.model_profile, "compact");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn persisted_uninstalled_profile_falls_back_to_installed_profile() {
+        let root = unique_temp_dir("persisted-installed-profile");
+        let config_path = root.join("service.json");
+        let model_root = root.join("models");
+        let compact_runtime = model_root.join("nemotron-wordpipe-compact-fixed-shape-ort-format");
+        write_test_runtime_profile(&compact_runtime);
+        save_service_config(
+            &config_path,
+            &ServiceConfig {
+                model_root: model_root.to_string_lossy().to_string(),
+                model_profile: "fast".to_string(),
+                ..ServiceConfig::default()
+            },
+        )
+        .unwrap();
+
+        let config = load_service_config(&config_path).unwrap();
 
         assert_eq!(config.model_profile, "compact");
         fs::remove_dir_all(root).unwrap();
