@@ -108,8 +108,12 @@ class Indicator extends PanelMenu.Button {
 
         this._profileItems = [];
         this._installProfileItems = new Map();
+        this._installActionLabels = new Map();
+        this._installProgressByProfile = new Map();
         this._installing = false;
         this._installingProfile = '';
+        this._profiles = [];
+        this._selectedProfile = '';
         this._profileSection = new PopupMenu.PopupMenuSection();
         this.menu.addMenuItem(this._profileSection);
 
@@ -143,10 +147,13 @@ class Indicator extends PanelMenu.Button {
     }
 
     setProfiles(profiles, selectedProfile) {
+        this._profiles = profiles;
+        this._selectedProfile = selectedProfile;
         for (const item of this._profileItems)
             item.destroy();
         this._profileItems = [];
         this._installProfileItems.clear();
+        this._installActionLabels.clear();
 
         if (!profiles.length) {
             this._profileStatusItem.label.text = _('No model profiles');
@@ -160,36 +167,42 @@ class Indicator extends PanelMenu.Button {
 
         for (const profile of profiles) {
             const isSelected = profile.id === selectedProfile;
-            if (profile.installed) {
-                const selectItem = new PopupMenu.PopupMenuItem(
-                    isSelected
-                        ? `${profile.title} ${_('selected')}`
-                        : `${_('Use')} ${profile.title}`,
-                    {reactive: !isSelected});
-                if (!isSelected) {
-                    selectItem.connect('activate',
-                        () => this._extension.selectModelProfile(profile.id));
-                }
-                this._profileSection.addMenuItem(selectItem);
-                this._profileItems.push(selectItem);
-            } else {
-                const installing = this._installingProfile === profile.id;
-                const missingItem = new PopupMenu.PopupMenuItem(
-                    installing
-                        ? `${profile.title} ${_('installing')}`
-                        : `${profile.title} ${_('not installed')}`,
-                    {reactive: false});
-                this._profileSection.addMenuItem(missingItem);
-                this._profileItems.push(missingItem);
-
-                const installItem = new PopupMenu.PopupMenuItem(
-                    `${_('Install')} ${profile.title}`);
-                installItem.setSensitive(!this._installing);
-                installItem.connect('activate', () => this._extension.installModel(profile.id));
-                this._profileSection.addMenuItem(installItem);
-                this._profileItems.push(installItem);
-                this._installProfileItems.set(profile.id, installItem);
+            const installing = this._installingProfile === profile.id;
+            const rowReactive = profile.installed ? !isSelected : !this._installing;
+            const selectItem = new PopupMenu.PopupBaseMenuItem({
+                reactive: rowReactive,
+                can_focus: rowReactive,
+            });
+            selectItem.add_child(new St.Label({
+                text: profile.title,
+                x_expand: true,
+                y_align: Clutter.ActorAlign.CENTER,
+            }));
+            if (!profile.installed) {
+                const progress = this._installProgressByProfile.get(profile.id) ?? {};
+                const fraction = numberValue(progress.fraction);
+                const actionLabel = new St.Label({
+                    text: installing
+                        ? installProgressLabel(fraction)
+                        : _('Install'),
+                    style_class: 'wordpipe-menu-action-label',
+                    y_align: Clutter.ActorAlign.CENTER,
+                });
+                selectItem.add_child(actionLabel);
+                this._installActionLabels.set(profile.id, actionLabel);
             }
+            selectItem.setOrnament(isSelected
+                ? PopupMenu.Ornament.CHECK
+                : PopupMenu.Ornament.NONE);
+            if (profile.installed && !isSelected) {
+                selectItem.connect('activate',
+                    () => this._extension.selectModelProfile(profile.id));
+            } else if (!profile.installed) {
+                selectItem.connect('activate', () => this._extension.installModel(profile.id));
+                this._installProfileItems.set(profile.id, selectItem);
+            }
+            this._profileSection.addMenuItem(selectItem);
+            this._profileItems.push(selectItem);
         }
     }
 
@@ -201,6 +214,18 @@ class Indicator extends PanelMenu.Button {
     setStatusMessage(message) {
         if (message)
             this._statusItem.label.text = message;
+    }
+
+    setInstallProgress(profile, progress) {
+        const active = progress.phase !== 'complete' && progress.phase !== 'error';
+        if (active)
+            this._installProgressByProfile.set(profile, progress);
+        else
+            this._installProgressByProfile.delete(profile);
+
+        this._installing = active;
+        this._installingProfile = active ? profile : '';
+        this.setProfiles(this._profiles, this._selectedProfile);
     }
 
     setVoiceLevel(rms) {
@@ -545,6 +570,8 @@ export default class WordpipeExtension extends Extension {
                 const summary = formatInstallProgress(values);
                 if (summary)
                     this._indicator?.setStatusMessage(summary);
+                if (typeof values.profile === 'string')
+                    this._indicator?.setInstallProgress(values.profile, values);
                 if (values.phase === 'complete' || values.phase === 'error')
                     this._refreshProfiles();
             }));
@@ -802,6 +829,12 @@ function formatInstallProgress(progress) {
     if (!message)
         return markupSafe(profile);
     return markupSafe(`${profile}: ${message}`);
+}
+
+function installProgressLabel(fraction) {
+    if (fraction === null)
+        return _('Installing');
+    return `${Math.round(Math.max(0.0, Math.min(1.0, fraction)) * 100)}%`;
 }
 
 function numberValue(value) {
