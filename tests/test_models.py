@@ -28,6 +28,7 @@ from wordpipe.models import (
     model_file_url,
     model_runtime_dir_valid,
     profile_build_dir,
+    profile_runtime_dir_valid,
     profile_runtime_dir,
     source_may_be_built_profile_archive,
     source_is_built_profile,
@@ -111,7 +112,10 @@ class ModelDownloadTests(unittest.TestCase):
                 raise EntryNotFoundError()
             destination = Path(kwargs["local_dir"]) / filename
             destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_text(filename, encoding="utf-8")
+            if filename == "config.json":
+                _write_test_profile_config(destination.parent, "fast")
+            else:
+                destination.write_text(filename, encoding="utf-8")
             return str(destination)
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -173,7 +177,10 @@ class ModelDownloadTests(unittest.TestCase):
             filename = kwargs["filename"]
             destination = Path(kwargs["local_dir"]) / filename
             destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(b"x" * sizes[filename])
+            if filename == "config.json":
+                _write_test_profile_config(destination.parent, "fast")
+            else:
+                destination.write_bytes(b"x" * sizes[filename])
             return str(destination)
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -318,12 +325,41 @@ class ModelDownloadTests(unittest.TestCase):
 
             self.assertFalse(model_runtime_dir_valid(source))
 
+    def test_profile_runtime_dir_rejects_non_fixed_shape_fast_config(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp)
+            _write_test_runtime_profile(source)
+            (source / "config.json").write_text(
+                json.dumps({"projected_cache": True, "dynamic_quint8_quantization": False}),
+                encoding="utf-8",
+            )
+
+            self.assertTrue(model_runtime_dir_valid(source))
+            self.assertFalse(profile_runtime_dir_valid(source, "fast"))
+
+            _write_test_profile_config(source, "fast")
+
+            self.assertTrue(profile_runtime_dir_valid(source, "fast"))
+
+    def test_completion_marker_rejects_bad_profile_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            _write_test_runtime_profile(source)
+            (source / "config.json").write_text(
+                json.dumps({"projected_cache": True, "dynamic_quint8_quantization": False}),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(RuntimeError, "fixed-shape projected-cache"):
+                install_built_profile(source=source, model_root=root / "installed", profile="fast")
+
     def test_install_built_profile_copies_runtime_dir_to_profile_destination(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             source = root / "source"
             _write_test_runtime_profile(source)
-            (source / "config.json").write_text("{}", encoding="utf-8")
+            _write_test_profile_config(source, "compact")
 
             runtime_dir = install_built_profile(
                 source=source,
@@ -669,6 +705,26 @@ def _write_test_runtime_profile(path: Path) -> None:
     (path / "tokenizer.model").write_text("tokenizer", encoding="utf-8")
     (path / "encoder.ort").write_text("encoder", encoding="utf-8")
     (path / "decoder_joint.ort").write_text("decoder", encoding="utf-8")
+
+
+def _write_test_profile_config(path: Path, profile: str) -> None:
+    (path / "config.json").write_text(
+        json.dumps(
+            {
+                "projected_cache": True,
+                "dynamic_quint8_quantization": profile == "compact",
+                "fixed_streaming_shapes": {
+                    "input_frames": 65,
+                    "output_frames": 7,
+                    "num_layers": 24,
+                    "cache_len": 56,
+                    "hidden_dim": 1024,
+                    "conv_context": 8,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

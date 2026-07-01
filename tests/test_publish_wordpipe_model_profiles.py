@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -30,15 +31,19 @@ class PublishWordpipeModelProfilesTests(unittest.TestCase):
             (source / "encoder.onnx").write_text("encoder", encoding="utf-8")
             (source / "encoder.onnx.data").write_text("encoder-data", encoding="utf-8")
             (source / "decoder_joint.onnx").write_text("decoder", encoding="utf-8")
+            _write_test_profile_config(source, "fast")
 
-            module.validate_publish_source(source)
+            module.validate_publish_source(source, module.profile_spec("fast"))
             copied = module.copy_profile_files(
                 source,
                 output,
                 force=False,
             )
 
-            self.assertEqual({path.name for path in copied}, {"tokenizer.model", "encoder.onnx", "encoder.onnx.data", "decoder_joint.onnx"})
+            self.assertEqual(
+                {path.name for path in copied},
+                {"tokenizer.model", "encoder.onnx", "encoder.onnx.data", "decoder_joint.onnx", "config.json"},
+            )
             self.assertEqual((output / "tokenizer.model").read_text(encoding="utf-8"), "tokenizer")
             self.assertEqual((output / "encoder.onnx").read_text(encoding="utf-8"), "encoder")
             self.assertEqual((output / "encoder.onnx.data").read_text(encoding="utf-8"), "encoder-data")
@@ -54,7 +59,23 @@ class PublishWordpipeModelProfilesTests(unittest.TestCase):
             (source / "decoder_joint.ort").write_text("decoder", encoding="utf-8")
 
             with self.assertRaisesRegex(SystemExit, "Publish the ONNX profile directory"):
-                module.validate_publish_source(source)
+                module.validate_publish_source(source, module.profile_spec("compact"))
+
+    def test_validate_publish_source_rejects_non_fixed_shape_fast_export(self) -> None:
+        module = _load_script()
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "fast-transform-output"
+            source.mkdir()
+            (source / "tokenizer.model").write_text("tokenizer", encoding="utf-8")
+            (source / "encoder.onnx").write_text("encoder", encoding="utf-8")
+            (source / "decoder_joint.onnx").write_text("decoder", encoding="utf-8")
+            (source / "config.json").write_text(
+                json.dumps({"projected_cache": True, "dynamic_quint8_quantization": False}),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(SystemExit, "missing fixed_streaming_shapes"):
+                module.validate_publish_source(source, module.profile_spec("fast"))
 
     def test_model_card_includes_hub_metadata_and_attribution(self) -> None:
         module = _load_script()
@@ -103,6 +124,25 @@ class PublishWordpipeModelProfilesTests(unittest.TestCase):
 
             for name in module.REPRODUCIBILITY_SCRIPTS:
                 self.assertTrue((output_dir / "scripts" / name).is_file(), name)
+
+def _write_test_profile_config(path: Path, profile: str) -> None:
+    (path / "config.json").write_text(
+        json.dumps(
+            {
+                "projected_cache": True,
+                "dynamic_quint8_quantization": profile == "compact",
+                "fixed_streaming_shapes": {
+                    "input_frames": 65,
+                    "output_frames": 7,
+                    "num_layers": 24,
+                    "cache_len": 56,
+                    "hidden_dim": 1024,
+                    "conv_context": 8,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

@@ -325,7 +325,11 @@ impl WordpipeService {
                 insert_str(&mut item, "prebuilt_repo", profile.prebuilt_repo);
                 insert_bool(&mut item, "ort_format", profile.ort_format);
                 insert_str(&mut item, "runtime_dir", &runtime_dir);
-                insert_bool(&mut item, "installed", profile_installed(&runtime_dir));
+                insert_bool(
+                    &mut item,
+                    "installed",
+                    profile_installed(&runtime_dir, profile.id),
+                );
                 item
             })
             .collect()
@@ -696,7 +700,7 @@ impl WordpipeService {
             let mut data = self.lock_data()?;
             let config = data.config.clone();
             let runtime_dir = selected_runtime_dir(&config);
-            if !profile_installed(&runtime_dir) {
+            if !profile_installed(&runtime_dir, &config.model_profile) {
                 return Err(zbus::fdo::Error::Failed(format!(
                     "model profile '{}' is not installed at {runtime_dir}",
                     config.model_profile
@@ -1045,7 +1049,7 @@ fn state_map(data: &ServiceData) -> VariantMap {
     insert_bool(
         &mut map,
         "selected_model_installed",
-        profile_installed(&runtime_dir),
+        profile_installed(&runtime_dir, &data.config.model_profile),
     );
     insert_str(&mut map, "last_error", &data.last_error);
     insert_map(&mut map, "last_metrics", &data.last_metrics);
@@ -1335,6 +1339,49 @@ fn model_runtime_dir_valid(runtime_dir: &Path) -> bool {
         && profile_completion_marker_valid_if_present(runtime_dir)
 }
 
+fn model_profile_metadata_valid_if_present(runtime_dir: &Path, profile: &str) -> bool {
+    let config_path = runtime_dir.join("config.json");
+    if !config_path.exists() {
+        return true;
+    }
+    let payload = match fs::read(&config_path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<JsonValue>(&bytes).ok())
+    {
+        Some(payload) => payload,
+        None => return false,
+    };
+    let Some(fixed) = payload.get("fixed_streaming_shapes") else {
+        return false;
+    };
+    let expected = [
+        ("input_frames", 65_u64),
+        ("output_frames", 7),
+        ("num_layers", 24),
+        ("cache_len", 56),
+        ("hidden_dim", 1024),
+        ("conv_context", 8),
+    ];
+    if expected
+        .iter()
+        .any(|(key, value)| fixed.get(*key).and_then(JsonValue::as_u64) != Some(*value))
+    {
+        return false;
+    }
+    if payload.get("projected_cache").and_then(JsonValue::as_bool) != Some(true) {
+        return false;
+    }
+    let quantized = payload
+        .get("dynamic_quint8_quantization")
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false);
+    match profile {
+        "fast" => !quantized,
+        "compact" => quantized,
+        _ => false,
+    }
+}
+
 fn model_runtime_structure_valid(runtime_dir: &Path) -> bool {
     runtime_dir.join("tokenizer.model").exists()
         && graph_file_valid(runtime_dir, "encoder")
@@ -1401,10 +1448,10 @@ fn legacy_model_runtime_dir_valid(runtime_dir: &Path) -> bool {
     runtime_dir.join("tokenizer.model").exists() && legacy_encoder_graph_exists(runtime_dir)
 }
 
-fn profile_installed(runtime_dir: &str) -> bool {
+fn profile_installed(runtime_dir: &str, profile: &str) -> bool {
     let path = Path::new(runtime_dir);
     if model_runtime_dir_valid(path) {
-        true
+        model_profile_metadata_valid_if_present(path, profile)
     } else {
         legacy_model_runtime_dir_valid(path)
     }
@@ -1429,13 +1476,13 @@ fn selected_runtime_dir(config: &ServiceConfig) -> String {
 }
 
 fn select_installed_model_profile(config: &mut ServiceConfig) {
-    if profile_installed(&selected_runtime_dir(config)) {
+    if profile_installed(&selected_runtime_dir(config), &config.model_profile) {
         return;
     }
     for profile in MODEL_PROFILES {
         let runtime_dir =
             profile_runtime_dir(&config.model_root, profile.output_name, profile.ort_format);
-        if profile_installed(&runtime_dir) {
+        if profile_installed(&runtime_dir, profile.id) {
             config.model_profile = profile.id.to_string();
             return;
         }
@@ -2184,10 +2231,16 @@ mod tests {
         fs::write(root.join("encoder.onnx"), b"external encoder.onnx.data").unwrap();
         fs::write(root.join("decoder_joint.onnx"), b"decoder").unwrap();
 
-        assert!(!profile_installed(root.to_string_lossy().as_ref()));
+        assert!(!profile_installed(
+            root.to_string_lossy().as_ref(),
+            "compact"
+        ));
 
         fs::write(root.join("encoder.onnx.data"), b"weights").unwrap();
-        assert!(profile_installed(root.to_string_lossy().as_ref()));
+        assert!(profile_installed(
+            root.to_string_lossy().as_ref(),
+            "compact"
+        ));
 
         fs::remove_dir_all(root).unwrap();
     }
@@ -2214,10 +2267,16 @@ mod tests {
         )
         .unwrap();
 
-        assert!(profile_installed(root.to_string_lossy().as_ref()));
+        assert!(profile_installed(
+            root.to_string_lossy().as_ref(),
+            "compact"
+        ));
 
         fs::write(root.join("decoder_joint.ort"), b"changed!").unwrap();
-        assert!(!profile_installed(root.to_string_lossy().as_ref()));
+        assert!(!profile_installed(
+            root.to_string_lossy().as_ref(),
+            "compact"
+        ));
 
         fs::remove_dir_all(root).unwrap();
     }
@@ -2242,7 +2301,51 @@ mod tests {
         )
         .unwrap();
 
-        assert!(!profile_installed(root.to_string_lossy().as_ref()));
+        assert!(!profile_installed(
+            root.to_string_lossy().as_ref(),
+            "compact"
+        ));
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn profile_metadata_rejects_non_fixed_shape_fast_export() {
+        let root = unique_temp_dir("profile-metadata-fast");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("tokenizer.model"), b"tokenizer").unwrap();
+        fs::write(root.join("encoder.onnx"), b"encoder").unwrap();
+        fs::write(root.join("decoder_joint.onnx"), b"decoder").unwrap();
+        fs::write(
+            root.join("config.json"),
+            json!({
+                "projected_cache": true,
+                "dynamic_quint8_quantization": false
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        assert!(!profile_installed(root.to_string_lossy().as_ref(), "fast"));
+
+        fs::write(
+            root.join("config.json"),
+            json!({
+                "projected_cache": true,
+                "dynamic_quint8_quantization": false,
+                "fixed_streaming_shapes": {
+                    "input_frames": 65,
+                    "output_frames": 7,
+                    "num_layers": 24,
+                    "cache_len": 56,
+                    "hidden_dim": 1024,
+                    "conv_context": 8
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(profile_installed(root.to_string_lossy().as_ref(), "fast"));
 
         fs::remove_dir_all(root).unwrap();
     }

@@ -75,7 +75,7 @@ Or from explicit build directories:
 ```sh
 PYTHONPATH=src python3 scripts/publish_wordpipe_model_profiles.py \
   --profile fast \
-  --fast-dir build/model-variants/nemotron-fp32-projected \
+  --fast-dir build/model-variants/nemotron-fp32-projected-fixed-shape \
   --output-dir build/model-release/fast \
   --force
 
@@ -124,7 +124,7 @@ Then upload:
 ```sh
 PYTHONPATH=src python3 scripts/publish_wordpipe_model_profiles.py \
   --profile fast \
-  --model-root ~/.local/share/wordpipe/models \
+  --fast-dir build/model-variants/nemotron-fp32-projected-fixed-shape \
   --output-dir build/model-release/fast \
   --force \
   --upload

@@ -66,7 +66,7 @@ def main() -> int:
     for profile_name in profiles:
         spec = profile_spec(profile_name)
         source = resolve_profile_source(args, spec)
-        validate_publish_source(source)
+        validate_publish_source(source, spec)
         copied = copy_profile_files(
             source,
             output_dir,
@@ -167,7 +167,7 @@ def resolve_profile_source(args: argparse.Namespace, spec: ModelProfileSpec) -> 
     raise SystemExit(f"{spec.name}: pass --{spec.name}-dir or --model-root")
 
 
-def validate_publish_source(source: Path) -> None:
+def validate_publish_source(source: Path, spec: ModelProfileSpec) -> None:
     source = source.expanduser()
     if not source.is_dir():
         raise SystemExit(f"{source} is not a directory")
@@ -181,6 +181,53 @@ def validate_publish_source(source: Path) -> None:
             f"{source} is not publishable as a prebuilt profile; missing {', '.join(missing)}. "
             "Publish the ONNX profile directory, not the local ORT runtime cache."
         )
+    validate_profile_config(source, spec)
+
+
+def validate_profile_config(source: Path, spec: ModelProfileSpec) -> None:
+    config_path = source / "config.json"
+    if not config_path.is_file():
+        raise SystemExit(f"{source} is missing config.json")
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"{config_path} is not valid JSON: {exc}") from exc
+
+    fixed = config.get("fixed_streaming_shapes")
+    if not isinstance(fixed, dict):
+        raise SystemExit(
+            f"{source} is not publishable as {spec.name}: config.json is missing "
+            "fixed_streaming_shapes. Publish the fixed-shape profile output, not "
+            "the intermediate transform/export directory."
+        )
+
+    expected_fixed = {
+        "input_frames": 65,
+        "output_frames": 7,
+        "num_layers": 24,
+        "cache_len": 56,
+        "hidden_dim": 1024,
+        "conv_context": 8,
+    }
+    mismatched = [
+        f"{key}={fixed.get(key)!r} (expected {value!r})"
+        for key, value in expected_fixed.items()
+        if fixed.get(key) != value
+    ]
+    if mismatched:
+        raise SystemExit(
+            f"{source} is not publishable as {spec.name}: fixed_streaming_shapes mismatch: "
+            + ", ".join(mismatched)
+        )
+
+    if config.get("projected_cache") is not True:
+        raise SystemExit(f"{source} is not publishable as {spec.name}: projected_cache must be true")
+
+    quantized = bool(config.get("dynamic_quint8_quantization"))
+    if spec.name == "fast" and quantized:
+        raise SystemExit(f"{source} is not publishable as fast: expected FP32, got quantized config")
+    if spec.name == "compact" and not quantized:
+        raise SystemExit(f"{source} is not publishable as compact: expected dynamic QUInt8 config")
 
 
 def copy_profile_files(

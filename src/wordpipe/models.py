@@ -189,12 +189,12 @@ def profile_runtime_dir(model_root: Path, profile: str) -> Path:
 
 def profile_installed(model_root: Path, profile: str) -> bool:
     runtime_dir = profile_runtime_dir(model_root, profile)
-    return model_runtime_dir_valid(runtime_dir)
+    return profile_runtime_dir_valid(runtime_dir, profile)
 
 
 def ensure_profile_completion_marker(model_root: Path, profile: str) -> Path:
     runtime_dir = profile_runtime_dir(model_root, profile)
-    if not model_runtime_dir_valid(runtime_dir):
+    if not profile_runtime_dir_valid(runtime_dir, profile):
         raise RuntimeError(f"model profile {profile!r} is not installed at {runtime_dir}")
     if not _profile_completion_marker(runtime_dir).exists():
         _write_profile_completion_marker(runtime_dir, profile=profile)
@@ -206,6 +206,10 @@ def model_runtime_dir_valid(runtime_dir: Path) -> bool:
         return False
     marker = _profile_completion_marker(runtime_dir)
     return not marker.exists() or _profile_completion_marker_valid(runtime_dir, verify_hashes=False)
+
+
+def profile_runtime_dir_valid(runtime_dir: Path, profile: str) -> bool:
+    return model_runtime_dir_valid(runtime_dir) and _profile_config_valid_if_present(runtime_dir, profile)
 
 
 def _runtime_structure_valid(runtime_dir: Path) -> bool:
@@ -242,6 +246,38 @@ def _onnx_references_external_data(onnx_path: Path, marker: str) -> bool:
                     return True
     except OSError:
         return True
+    return False
+
+
+def _profile_config_valid_if_present(runtime_dir: Path, profile: str) -> bool:
+    config_path = runtime_dir / "config.json"
+    if not config_path.exists():
+        return True
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+
+    fixed = config.get("fixed_streaming_shapes")
+    if not isinstance(fixed, dict):
+        return False
+    expected_fixed = {
+        "input_frames": 65,
+        "output_frames": 7,
+        "num_layers": 24,
+        "cache_len": 56,
+        "hidden_dim": 1024,
+        "conv_context": 8,
+    }
+    if any(fixed.get(key) != value for key, value in expected_fixed.items()):
+        return False
+    if config.get("projected_cache") is not True:
+        return False
+    quantized = bool(config.get("dynamic_quint8_quantization"))
+    if profile == "fast":
+        return not quantized
+    if profile == "compact":
+        return quantized
     return False
 
 
@@ -301,7 +337,7 @@ def download_prebuilt_profile(
     selected_repo = repo_id or spec.prebuilt_repo
     output_dir = prebuilt_profile_cache_dir(model_root, selected_repo, profile)
     output_dir.mkdir(parents=True, exist_ok=True)
-    if source_is_built_profile(output_dir) and not force:
+    if source_is_built_profile(output_dir) and _profile_config_valid_if_present(output_dir, profile) and not force:
         if not _profile_completion_marker(output_dir).exists():
             _write_profile_completion_marker(output_dir, profile=profile)
         _progress(progress, f"Using cached prebuilt profile: {output_dir}")
@@ -384,6 +420,11 @@ def download_prebuilt_profile(
                     os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
                 else:
                     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = env_value
+        if not _profile_config_valid_if_present(output_dir, profile):
+            raise RuntimeError(
+                f"downloaded {profile!r} profile at {output_dir} does not match Wordpipe's "
+                "fixed-shape projected-cache runtime contract"
+            )
         _write_profile_completion_marker(output_dir, profile=profile)
         _progress(progress, f"Prebuilt profile ready: {output_dir}")
         return output_dir
@@ -535,14 +576,14 @@ def install_prebuilt_profile(
 ) -> Path:
     spec = profile_spec(profile)
     runtime_dir = spec.runtime_dir(model_root)
-    if runtime_dir.exists() and not force and model_runtime_dir_valid(runtime_dir):
+    if runtime_dir.exists() and not force and profile_runtime_dir_valid(runtime_dir, profile):
         if not _profile_completion_marker(runtime_dir).exists():
             _write_profile_completion_marker(runtime_dir, profile=profile)
         _progress(progress, f"Using installed model profile: {runtime_dir}")
         return runtime_dir
 
     onnx_dir = spec.output_dir(model_root)
-    if onnx_dir.exists() and not force and model_runtime_dir_valid(onnx_dir):
+    if onnx_dir.exists() and not force and profile_runtime_dir_valid(onnx_dir, profile):
         if not _profile_completion_marker(onnx_dir).exists():
             _write_profile_completion_marker(onnx_dir, profile=profile)
         _progress(progress, f"Using cached ONNX profile: {onnx_dir}")
@@ -558,7 +599,7 @@ def install_prebuilt_profile(
         _progress(progress, f"Model profile ready: {onnx_dir}")
         return onnx_dir
 
-    if runtime_dir.exists() and not force and model_runtime_dir_valid(runtime_dir):
+    if runtime_dir.exists() and not force and profile_runtime_dir_valid(runtime_dir, profile):
         if not _profile_completion_marker(runtime_dir).exists():
             _write_profile_completion_marker(runtime_dir, profile=profile)
         _progress(progress, f"Using cached ORT runtime profile: {runtime_dir}")
@@ -853,6 +894,11 @@ def _write_profile_completion_marker(runtime_dir: Path, *, profile: str) -> None
         raise RuntimeError(
             f"model runtime profile is incomplete at {runtime_dir}; expected tokenizer.model "
             "plus encoder and decoder_joint ONNX/ORT graphs"
+        )
+    if not _profile_config_valid_if_present(runtime_dir, profile):
+        raise RuntimeError(
+            f"model runtime profile at {runtime_dir} does not match Wordpipe's "
+            f"{profile!r} fixed-shape projected-cache contract"
         )
     marker = _profile_completion_marker(runtime_dir)
     files = []
