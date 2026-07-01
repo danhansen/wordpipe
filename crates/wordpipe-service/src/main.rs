@@ -12,8 +12,9 @@ use cpal::traits::{DeviceTrait, HostTrait};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as JsonValue};
 use wordpipe_protocol::{
-    is_backend, is_model_profile, BACKENDS, BUS_NAME, DEFAULT_BACKEND, DEFAULT_MODEL_PROFILE,
-    DEFAULT_NUM_THREADS, DEFAULT_SAMPLE_RATE, DEFAULT_SHORTCUT, MODEL_PROFILES, OBJECT_PATH,
+    is_backend, is_language, is_model_profile, BACKENDS, BUS_NAME, DEFAULT_BACKEND,
+    DEFAULT_LANGUAGE, DEFAULT_MODEL_PROFILE, DEFAULT_NUM_THREADS, DEFAULT_SAMPLE_RATE,
+    DEFAULT_SHORTCUT, MODEL_PROFILES, OBJECT_PATH,
 };
 use zbus::object_server::SignalEmitter;
 use zbus::zvariant::{OwnedValue, Value};
@@ -35,6 +36,7 @@ struct ServiceConfig {
     backend: String,
     model_profile: String,
     input_device: String,
+    language: String,
     shortcut: String,
     model_root: String,
     worker_path: String,
@@ -52,6 +54,7 @@ struct PersistedConfig {
     backend: Option<String>,
     model_profile: Option<String>,
     input_device: Option<String>,
+    language: Option<String>,
     shortcut: Option<String>,
     model_root: Option<String>,
     worker_path: Option<String>,
@@ -70,6 +73,7 @@ impl From<&ServiceConfig> for PersistedConfig {
             backend: Some(config.backend.clone()),
             model_profile: Some(config.model_profile.clone()),
             input_device: Some(config.input_device.clone()),
+            language: Some(config.language.clone()),
             shortcut: Some(config.shortcut.clone()),
             model_root: Some(config.model_root.clone()),
             worker_path: Some(config.worker_path.clone()),
@@ -90,6 +94,7 @@ impl Default for ServiceConfig {
             backend: DEFAULT_BACKEND.to_string(),
             model_profile: DEFAULT_MODEL_PROFILE.to_string(),
             input_device: String::new(),
+            language: DEFAULT_LANGUAGE.to_string(),
             shortcut: DEFAULT_SHORTCUT.to_string(),
             model_root: default_model_root(),
             worker_path: default_worker_path(),
@@ -205,7 +210,7 @@ impl WordpipeService {
             self.record_error(&emitter, &message).await?;
             return Err(zbus::fdo::Error::Failed(message));
         }
-        let (state, session_id, stdin) = {
+        let (state, session_id, stdin, language) = {
             let mut data = self.lock_data()?;
             if !data.listening {
                 data.listening = true;
@@ -220,8 +225,14 @@ impl WordpipeService {
                 .as_ref()
                 .map(|worker| Arc::clone(&worker.stdin))
                 .ok_or_else(|| zbus::fdo::Error::Failed("ASR worker is not running".to_string()))?;
-            (state_map(&data), data.session_id, stdin)
+            (
+                state_map(&data),
+                data.session_id,
+                stdin,
+                data.config.language.clone(),
+            )
         };
+        send_worker_language_command(&stdin, &language).map_err(fdo_failed)?;
         send_worker_command(&stdin, "start").map_err(fdo_failed)?;
         Self::session_started(&emitter, session_id).await?;
         Self::state_changed(&emitter, state).await?;
@@ -452,13 +463,31 @@ impl WordpipeService {
         options: VariantMap,
         #[zbus(signal_emitter)] emitter: SignalEmitter<'_>,
     ) -> zbus::fdo::Result<()> {
-        let (config_data, config, state) = {
+        let (config_data, config, state, language_update) = {
             let mut data = self.lock_data()?;
             let mut restart_worker = false;
+            let mut language_update = None;
             if let Some(value) = get_string(&options, "model_root") {
                 let value = normalize_model_root(value);
                 restart_worker |= data.config.model_root != value;
                 data.config.model_root = value;
+            }
+            if let Some(value) = get_string(&options, "language") {
+                let value = normalize_language(value);
+                if !is_language(&value) {
+                    return Err(zbus::fdo::Error::InvalidArgs(format!(
+                        "unknown language: {value}"
+                    )));
+                }
+                if data.config.language != value {
+                    if !data.listening && !data.stopping {
+                        language_update = data
+                            .worker
+                            .as_ref()
+                            .map(|worker| (Arc::clone(&worker.stdin), value.clone()));
+                    }
+                }
+                data.config.language = value;
             }
             if let Some(value) = get_string(&options, "worker_path") {
                 let value = normalize_worker_path(value);
@@ -493,9 +522,12 @@ impl WordpipeService {
             let config_data = data.config.clone();
             let config = config_map(&data.config);
             let state = state_map(&data);
-            (config_data, config, state)
+            (config_data, config, state, language_update)
         };
         self.persist_config(&config_data)?;
+        if let Some((stdin, language)) = language_update {
+            send_worker_language_command(&stdin, &language).map_err(fdo_failed)?;
+        }
         Self::config_changed(&emitter, config).await?;
         Self::state_changed(&emitter, state).await?;
         Ok(())
@@ -1023,6 +1055,7 @@ fn config_map(config: &ServiceConfig) -> VariantMap {
     insert_str(&mut map, "backend", &config.backend);
     insert_str(&mut map, "model_profile", &config.model_profile);
     insert_str(&mut map, "input_device", &config.input_device);
+    insert_str(&mut map, "language", &config.language);
     insert_str(&mut map, "shortcut", &config.shortcut);
     insert_str(&mut map, "model_root", &config.model_root);
     insert_str(&mut map, "worker_path", &config.worker_path);
@@ -1093,6 +1126,13 @@ fn apply_persisted_config(
     }
     if let Some(value) = persisted.input_device {
         config.input_device = value;
+    }
+    if let Some(value) = persisted.language {
+        let value = normalize_language(value);
+        if !is_language(&value) {
+            return Err(anyhow!("unknown language in service config: {value}"));
+        }
+        config.language = value;
     }
     if let Some(value) = persisted.shortcut {
         config.shortcut = value;
@@ -1209,6 +1249,15 @@ fn normalize_model_root(value: String) -> String {
 
 fn normalize_worker_path(value: String) -> String {
     normalize_executable_path(value, default_worker_path)
+}
+
+fn normalize_language(value: String) -> String {
+    let value = value.trim();
+    if value.is_empty() {
+        DEFAULT_LANGUAGE.to_string()
+    } else {
+        value.to_string()
+    }
 }
 
 fn normalize_model_installer_path(value: String) -> String {
@@ -1614,6 +1663,8 @@ fn spawn_worker(
         .arg(config.num_threads.to_string())
         .arg("--sample-rate")
         .arg(config.sample_rate.to_string())
+        .arg("--language")
+        .arg(&config.language)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
@@ -1659,10 +1710,21 @@ fn apply_worker_thread_env(command: &mut Command, num_threads: u32) {
 }
 
 fn send_worker_command(stdin: &Arc<Mutex<ChildStdin>>, command: &str) -> Result<()> {
+    send_worker_message(stdin, &json!({ "command": command }))
+}
+
+fn send_worker_language_command(stdin: &Arc<Mutex<ChildStdin>>, language: &str) -> Result<()> {
+    send_worker_message(
+        stdin,
+        &json!({ "command": "set_language", "language": language }),
+    )
+}
+
+fn send_worker_message(stdin: &Arc<Mutex<ChildStdin>>, message: &JsonValue) -> Result<()> {
     let mut stdin = stdin
         .lock()
         .map_err(|_| anyhow!("ASR worker stdin lock poisoned"))?;
-    serde_json::to_writer(&mut *stdin, &json!({ "command": command }))?;
+    serde_json::to_writer(&mut *stdin, message)?;
     writeln!(stdin)?;
     stdin.flush()?;
     Ok(())
@@ -1903,6 +1965,7 @@ mod tests {
             PersistedConfig {
                 model_profile: Some("compact".to_string()),
                 input_device: Some("pipewire".to_string()),
+                language: Some("en-GB".to_string()),
                 num_threads: Some(4),
                 sample_rate: Some(16_000),
                 show_overlay: Some(false),
@@ -1913,6 +1976,7 @@ mod tests {
 
         assert_eq!(config.model_profile, "compact");
         assert_eq!(config.input_device, "pipewire");
+        assert_eq!(config.language, "en-GB");
         assert_eq!(config.num_threads, 4);
         assert_eq!(config.sample_rate, 16_000);
         assert!(!config.show_overlay);
@@ -1929,6 +1993,7 @@ mod tests {
                 "backend",
                 "input_device",
                 "insert_partials",
+                "language",
                 "model_installer_path",
                 "model_profile",
                 "model_root",

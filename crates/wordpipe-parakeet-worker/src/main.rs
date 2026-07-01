@@ -10,7 +10,7 @@ use clap::{Parser, ValueEnum};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, StreamConfig};
 use crossbeam_channel::{bounded, select, Receiver, Sender};
-use parakeet_rs::{ExecutionConfig, GraphOptimization, Nemotron, NemotronChunkTrace};
+use parakeet_rs::{ExecutionConfig, GraphOptimization, Nemotron, NemotronChunkTrace, NemotronMode};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -28,6 +28,8 @@ struct Args {
     sample_rate: u32,
     #[arg(long)]
     input_device: Option<String>,
+    #[arg(long, default_value = "en-US")]
+    language: String,
     #[arg(long, default_value_t = 10.0)]
     queue_seconds: f32,
     #[arg(long, default_value_t = 1.0)]
@@ -93,6 +95,7 @@ impl CliBoolOverride {
 #[derive(Debug, Deserialize)]
 struct Command {
     command: String,
+    language: Option<String>,
 }
 
 struct JsonEmitter {
@@ -197,6 +200,31 @@ fn main() -> Result<()> {
                     }
                 } else {
                     emitter.emit(json!({"event": "stopped"}));
+                }
+            }
+            "set_language" => {
+                let Some(language) = command.language.as_deref() else {
+                    emitter.emit(
+                        json!({"event": "error", "message": "set_language requires language"}),
+                    );
+                    continue;
+                };
+                let Some(session_model) = model.as_mut() else {
+                    emitter.emit(json!({
+                        "event": "error",
+                        "message": "cannot change language while recognition is active"
+                    }));
+                    continue;
+                };
+                match apply_language(session_model, language) {
+                    Ok(()) => emitter.emit(json!({
+                        "event": "language_changed",
+                        "data": {"language": language},
+                    })),
+                    Err(err) => emitter.emit(json!({
+                        "event": "error",
+                        "message": format!("{err:#}"),
+                    })),
                 }
             }
             "shutdown" => {
@@ -541,8 +569,26 @@ fn load_model(args: &Args) -> Result<Nemotron> {
     } else {
         config
     };
-    Nemotron::from_pretrained(model_dir.to_string_lossy().as_ref(), Some(config))
-        .with_context(|| format!("failed to load Nemotron model from {}", model_dir.display()))
+    let mut model = Nemotron::from_pretrained(model_dir.to_string_lossy().as_ref(), Some(config))
+        .with_context(|| {
+        format!("failed to load Nemotron model from {}", model_dir.display())
+    })?;
+    apply_language(&mut model, &args.language)?;
+    Ok(model)
+}
+
+fn apply_language(model: &mut Nemotron, language: &str) -> Result<()> {
+    let language = language.trim();
+    if model.mode() == NemotronMode::Multilingual {
+        model
+            .set_target_lang(language)
+            .with_context(|| format!("failed to set target language to {language:?}"))?;
+    } else if !matches!(language, "" | "auto" | "en" | "en-US") {
+        return Err(anyhow!(
+            "language {language:?} requires a multilingual Nemotron model"
+        ));
+    }
+    Ok(())
 }
 
 fn required_model_dir(args: &Args) -> Result<&PathBuf> {
@@ -823,6 +869,7 @@ mod tests {
             num_threads: 2,
             sample_rate: 16_000,
             input_device: None,
+            language: "en-US".to_string(),
             queue_seconds: 10.0,
             stats_interval_seconds: 1.0,
             chunk_samples: NEMOTRON_CHUNK_SAMPLES,

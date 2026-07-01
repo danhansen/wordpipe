@@ -24,6 +24,7 @@ EXPECTED_SETTINGS_KEYS = {
     "backend": "s",
     "model-profile": "s",
     "input-device": "s",
+    "language": "s",
     "model-root": "s",
     "worker-path": "s",
     "model-installer-path": "s",

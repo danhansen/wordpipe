@@ -599,6 +599,8 @@ export default class WordpipeExtension extends Extension {
                 this._settings.set_string('model-profile', config.model_profile);
             if (typeof config.input_device === 'string')
                 this._settings.set_string('input-device', config.input_device);
+            if (typeof config.language === 'string')
+                this._settings.set_string('language', config.language);
             if (typeof config.model_root === 'string')
                 this._settings.set_string('model-root', config.model_root);
             if (typeof config.worker_path === 'string')
@@ -631,6 +633,7 @@ export default class WordpipeExtension extends Extension {
         const backend = this._settings.get_string('backend');
         const profile = this._settings.get_string('model-profile');
         const inputDevice = this._settings.get_string('input-device');
+        const language = this._settings.get_string('language');
         const modelRoot = this._settings.get_string('model-root');
         const workerPath = this._settings.get_string('worker-path');
         const modelInstallerPath = this._settings.get_string('model-installer-path');
@@ -653,6 +656,7 @@ export default class WordpipeExtension extends Extension {
         this._callRemote('SetInsertionOptions', options);
         this._callRemote('SetRuntimeOptions', {
             model_root: new GLib.Variant('s', modelRoot),
+            language: new GLib.Variant('s', language),
             worker_path: new GLib.Variant('s', workerPath),
             model_installer_path: new GLib.Variant('s', modelInstallerPath),
             num_threads: new GLib.Variant('u',

@@ -26,6 +26,11 @@
       <summary>Input device selector</summary>
       <description>CPAL input device selector. Empty means the system default input device.</description>
     </key>
+    <key name="language" type="s">
+      <default>'en-US'</default>
+      <summary>Dictation language</summary>
+      <description>Target language prompt passed to the multilingual ASR model. Auto enables language detection.</description>
+    </key>
     <key name="model-root" type="s">
       <default>''</default>
       <summary>Model root</summary>

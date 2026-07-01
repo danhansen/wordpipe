@@ -5,6 +5,7 @@ pub const INTERFACE_NAME: &str = "dev.wordpipe.Service1";
 pub const DEFAULT_BACKEND: &str = "parakeet";
 pub const DEFAULT_MODEL_PROFILE: &str = "fast";
 pub const DEFAULT_SHORTCUT: &str = "<Control><Alt>space";
+pub const DEFAULT_LANGUAGE: &str = "en-US";
 pub const DEFAULT_SAMPLE_RATE: u32 = 16_000;
 pub const DEFAULT_NUM_THREADS: u32 = 2;
 
@@ -35,6 +36,173 @@ pub const MODEL_PROFILES: &[ModelProfileSpec] = &[
     },
 ];
 
+pub const LANGUAGE_OPTIONS: &[LanguageSpec] = &[
+    LanguageSpec {
+        id: "en-US",
+        title: "English (US)",
+    },
+    LanguageSpec {
+        id: "en-GB",
+        title: "English (UK)",
+    },
+    LanguageSpec {
+        id: "auto",
+        title: "Auto",
+    },
+    LanguageSpec {
+        id: "es-US",
+        title: "Spanish (US)",
+    },
+    LanguageSpec {
+        id: "es-ES",
+        title: "Spanish (Spain)",
+    },
+    LanguageSpec {
+        id: "fr-FR",
+        title: "French (France)",
+    },
+    LanguageSpec {
+        id: "fr-CA",
+        title: "French (Canada)",
+    },
+    LanguageSpec {
+        id: "de-DE",
+        title: "German",
+    },
+    LanguageSpec {
+        id: "it-IT",
+        title: "Italian",
+    },
+    LanguageSpec {
+        id: "pt-BR",
+        title: "Portuguese (Brazil)",
+    },
+    LanguageSpec {
+        id: "pt-PT",
+        title: "Portuguese (Portugal)",
+    },
+    LanguageSpec {
+        id: "nl-NL",
+        title: "Dutch",
+    },
+    LanguageSpec {
+        id: "tr-TR",
+        title: "Turkish",
+    },
+    LanguageSpec {
+        id: "ru-RU",
+        title: "Russian",
+    },
+    LanguageSpec {
+        id: "ar-AR",
+        title: "Arabic",
+    },
+    LanguageSpec {
+        id: "hi-IN",
+        title: "Hindi",
+    },
+    LanguageSpec {
+        id: "ja-JP",
+        title: "Japanese",
+    },
+    LanguageSpec {
+        id: "ko-KR",
+        title: "Korean",
+    },
+    LanguageSpec {
+        id: "vi-VN",
+        title: "Vietnamese",
+    },
+    LanguageSpec {
+        id: "uk-UA",
+        title: "Ukrainian",
+    },
+    LanguageSpec {
+        id: "pl-PL",
+        title: "Polish",
+    },
+    LanguageSpec {
+        id: "sv-SE",
+        title: "Swedish",
+    },
+    LanguageSpec {
+        id: "cs-CZ",
+        title: "Czech",
+    },
+    LanguageSpec {
+        id: "nb-NO",
+        title: "Norwegian Bokmal",
+    },
+    LanguageSpec {
+        id: "da-DK",
+        title: "Danish",
+    },
+    LanguageSpec {
+        id: "bg-BG",
+        title: "Bulgarian",
+    },
+    LanguageSpec {
+        id: "fi-FI",
+        title: "Finnish",
+    },
+    LanguageSpec {
+        id: "hr-HR",
+        title: "Croatian",
+    },
+    LanguageSpec {
+        id: "sk-SK",
+        title: "Slovak",
+    },
+    LanguageSpec {
+        id: "zh-CN",
+        title: "Chinese (Simplified)",
+    },
+    LanguageSpec {
+        id: "zh-TW",
+        title: "Chinese (Traditional)",
+    },
+    LanguageSpec {
+        id: "hu-HU",
+        title: "Hungarian",
+    },
+    LanguageSpec {
+        id: "ro-RO",
+        title: "Romanian",
+    },
+    LanguageSpec {
+        id: "et-EE",
+        title: "Estonian",
+    },
+    LanguageSpec {
+        id: "el-GR",
+        title: "Greek",
+    },
+    LanguageSpec {
+        id: "lt-LT",
+        title: "Lithuanian",
+    },
+    LanguageSpec {
+        id: "lv-LV",
+        title: "Latvian",
+    },
+    LanguageSpec {
+        id: "bn-IN",
+        title: "Bengali",
+    },
+    LanguageSpec {
+        id: "id-ID",
+        title: "Indonesian",
+    },
+    LanguageSpec {
+        id: "ms-MY",
+        title: "Malay",
+    },
+    LanguageSpec {
+        id: "th-TH",
+        title: "Thai",
+    },
+];
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BackendSpec {
     pub id: &'static str,
@@ -53,12 +221,22 @@ pub struct ModelProfileSpec {
     pub ort_format: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LanguageSpec {
+    pub id: &'static str,
+    pub title: &'static str,
+}
+
 pub fn is_backend(value: &str) -> bool {
     BACKENDS.iter().any(|backend| backend.id == value)
 }
 
 pub fn is_model_profile(value: &str) -> bool {
     MODEL_PROFILES.iter().any(|profile| profile.id == value)
+}
+
+pub fn is_language(value: &str) -> bool {
+    LANGUAGE_OPTIONS.iter().any(|language| language.id == value)
 }
 
 pub const INTROSPECTION_XML: &str = r#"

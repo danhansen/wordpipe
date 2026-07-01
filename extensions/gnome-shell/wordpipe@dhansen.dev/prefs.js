@@ -53,6 +53,50 @@ const BACKENDS = [
     ['parakeet', 'Parakeet'],
 ];
 
+const LANGUAGES = [
+    ['en-US', 'English (US)'],
+    ['en-GB', 'English (UK)'],
+    ['auto', 'Auto'],
+    ['es-US', 'Spanish (US)'],
+    ['es-ES', 'Spanish (Spain)'],
+    ['fr-FR', 'French (France)'],
+    ['fr-CA', 'French (Canada)'],
+    ['de-DE', 'German'],
+    ['it-IT', 'Italian'],
+    ['pt-BR', 'Portuguese (Brazil)'],
+    ['pt-PT', 'Portuguese (Portugal)'],
+    ['nl-NL', 'Dutch'],
+    ['tr-TR', 'Turkish'],
+    ['ru-RU', 'Russian'],
+    ['ar-AR', 'Arabic'],
+    ['hi-IN', 'Hindi'],
+    ['ja-JP', 'Japanese'],
+    ['ko-KR', 'Korean'],
+    ['vi-VN', 'Vietnamese'],
+    ['uk-UA', 'Ukrainian'],
+    ['pl-PL', 'Polish'],
+    ['sv-SE', 'Swedish'],
+    ['cs-CZ', 'Czech'],
+    ['nb-NO', 'Norwegian Bokmal'],
+    ['da-DK', 'Danish'],
+    ['bg-BG', 'Bulgarian'],
+    ['fi-FI', 'Finnish'],
+    ['hr-HR', 'Croatian'],
+    ['sk-SK', 'Slovak'],
+    ['zh-CN', 'Chinese (Simplified)'],
+    ['zh-TW', 'Chinese (Traditional)'],
+    ['hu-HU', 'Hungarian'],
+    ['ro-RO', 'Romanian'],
+    ['et-EE', 'Estonian'],
+    ['el-GR', 'Greek'],
+    ['lt-LT', 'Lithuanian'],
+    ['lv-LV', 'Latvian'],
+    ['bn-IN', 'Bengali'],
+    ['id-ID', 'Indonesian'],
+    ['ms-MY', 'Malay'],
+    ['th-TH', 'Thai'],
+];
+
 const ShortcutSettingButton = GObject.registerClass({
     Properties: {
         shortcut: GObject.ParamSpec.string(
@@ -256,6 +300,7 @@ class WordpipePage extends Adw.PreferencesPage {
         this._signalIds = [];
         this._syncingSettings = false;
         this._backends = BACKENDS.map(([id, title]) => ({id, title, description: ''}));
+        this._languages = LANGUAGES.map(([id, title]) => ({id, title}));
         this._profiles = PROFILES.map(([id, title, description]) => ({
             id,
             title,
@@ -384,6 +429,26 @@ class WordpipePage extends Adw.PreferencesPage {
             this._callRemote('SetModelProfile', profile);
         });
         this._modelGroup.add(this._profileRow);
+
+        this._languageModel = new Gtk.StringList();
+        this._languages.forEach(language => this._languageModel.append(language.title));
+        this._languageRow = new Adw.ComboRow({
+            title: _('Dictation Language'),
+            subtitle: _('Auto is useful for multilingual dictation, but may be less accurate.'),
+            model: this._languageModel,
+        });
+        this._languageRow.selected = this._selectedIndex(
+            this._languages, this._settings.get_string('language'));
+        this._languageRow.connect('notify::selected', row => {
+            if (this._syncingSettings)
+                return;
+            const language = this._languages[row.selected]?.id;
+            if (!language)
+                return;
+            this._settings.set_string('language', language);
+            this._pushRuntimeOptions();
+        });
+        this._modelGroup.add(this._languageRow);
 
         this._rebuildProfileRows();
     }
@@ -739,6 +804,8 @@ class WordpipePage extends Adw.PreferencesPage {
                 this._settings.set_string('model-profile', values.model_profile);
             if (typeof values.input_device === 'string')
                 this._settings.set_string('input-device', values.input_device);
+            if (typeof values.language === 'string')
+                this._settings.set_string('language', values.language);
             if (typeof values.model_root === 'string')
                 this._settings.set_string('model-root', values.model_root);
             if (typeof values.worker_path === 'string')
@@ -769,13 +836,15 @@ class WordpipePage extends Adw.PreferencesPage {
     }
 
     _syncComboSelections() {
-        if (!this._backendRow || !this._profileRow)
+        if (!this._backendRow || !this._profileRow || !this._languageRow)
             return;
         const backend = this._settings.get_string('backend');
         const profile = this._settings.get_string('model-profile');
+        const language = this._settings.get_string('language');
         this._withSyncing(() => {
             this._backendRow.selected = this._selectedIndex(this._backends, backend);
             this._profileRow.selected = this._selectedIndex(this._profiles, profile);
+            this._languageRow.selected = this._selectedIndex(this._languages, language);
         });
     }
 
@@ -963,6 +1032,7 @@ class WordpipePage extends Adw.PreferencesPage {
     _pushRuntimeOptions() {
         this._callRemote('SetRuntimeOptions', {
             model_root: new GLib.Variant('s', this._settings.get_string('model-root')),
+            language: new GLib.Variant('s', this._settings.get_string('language')),
             worker_path: new GLib.Variant('s', this._settings.get_string('worker-path')),
             model_installer_path: new GLib.Variant('s',
                 this._settings.get_string('model-installer-path')),
