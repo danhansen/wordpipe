@@ -90,18 +90,18 @@ class Indicator extends PanelMenu.Button {
         this._box.add_child(this._levelBox);
         this.add_child(this._box);
 
+        this._toggleItem = new PopupMenu.PopupMenuItem(_('Start Dictation'));
+        this._toggleItem.connect('activate', () => this._extension.toggleDictation());
+        this.menu.addMenuItem(this._toggleItem);
+
         this._statusItem = new PopupMenu.PopupMenuItem(_('Service unavailable'), {
             reactive: false,
         });
         this.menu.addMenuItem(this._statusItem);
 
-        this._toggleItem = new PopupMenu.PopupMenuItem(_('Start Dictation'));
-        this._toggleItem.connect('activate', () => this._extension.toggleDictation());
-        this.menu.addMenuItem(this._toggleItem);
-
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        this._profileStatusItem = new PopupMenu.PopupMenuItem(_('Model unavailable'), {
+        this._profileStatusItem = new PopupMenu.PopupMenuItem(_('Model'), {
             reactive: false,
         });
         this.menu.addMenuItem(this._profileStatusItem);
@@ -161,15 +161,10 @@ class Indicator extends PanelMenu.Button {
         this._profileItems = [];
         this._installProfileItems.clear();
 
-        if (!profiles.length) {
-            this._profileStatusItem.label.text = _('No model profiles');
-            return;
-        }
+        this._profileStatusItem.label.text = _('Model');
 
-        const selected = profiles.find(profile => profile.id === selectedProfile);
-        this._profileStatusItem.label.text = selected
-            ? `${_('Model')}: ${selected.title}${selected.installed ? '' : ` (${_('not installed')})`}`
-            : `${_('Model')}: ${selectedProfile || _('Unknown')}`;
+        if (!profiles.length)
+            return;
 
         for (const profile of profiles) {
             const isSelected = profile.id === selectedProfile;
