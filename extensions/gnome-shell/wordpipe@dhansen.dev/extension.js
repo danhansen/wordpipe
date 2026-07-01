@@ -535,6 +535,16 @@ export default class WordpipeExtension extends Extension {
         this._signalIds.push(this._proxy.connectSignal('InstallProgress',
             (_proxy, _sender, [profile, progress]) => {
                 const values = deepUnpackMap(progress);
+                if (typeof values.profile !== 'string')
+                    values.profile = profile;
+                if (this._state) {
+                    this._state.last_install_progress = values;
+                    this._state.installing = values.phase !== 'complete' && values.phase !== 'error';
+                    this._state.installing_profile = this._state.installing ? values.profile : '';
+                }
+                const summary = formatInstallProgress(values);
+                if (summary)
+                    this._indicator?.setStatusMessage(summary);
                 if (values.phase === 'complete' || values.phase === 'error')
                     this._refreshProfiles();
             }));

@@ -114,6 +114,8 @@ install -m 0755 "$ROOT/scripts/convert_nemotron_to_ort_format.py" \
   "$STAGE_ROOT/share/wordpipe/scripts/convert_nemotron_to_ort_format.py"
 install -m 0755 "$ROOT/scripts/build_nemotron_wordpipe_model.py" \
   "$STAGE_ROOT/share/wordpipe/scripts/build_nemotron_wordpipe_model.py"
+install -m 0755 "$ROOT/scripts/download_hf_ranged.py" \
+  "$STAGE_ROOT/share/wordpipe/scripts/download_hf_ranged.py"
 
 cat > "$STAGE_ROOT/bin/wordpipe-model-install" <<'EOF'
 #!/usr/bin/env sh

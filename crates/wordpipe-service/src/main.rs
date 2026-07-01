@@ -1747,6 +1747,7 @@ fn run_progress_command(
     emitter: &SignalEmitter<'static>,
     data: Arc<Mutex<ServiceData>>,
 ) -> Result<()> {
+    eprintln!("wordpipe-service: starting model installer for {profile}: {command:?}");
     let mut child = command
         .spawn()
         .with_context(|| format!("failed to start model installer {:?}", command))?;
@@ -1776,8 +1777,10 @@ fn run_progress_command(
     let _ = stdout_thread.join();
     let _ = stderr_thread.join();
     if status.success() {
+        eprintln!("wordpipe-service: model installer for {profile} completed successfully");
         Ok(())
     } else {
+        eprintln!("wordpipe-service: model installer for {profile} exited with {status}");
         Err(anyhow!("model installer exited with {status}"))
     }
 }
@@ -1795,6 +1798,10 @@ fn stream_progress_lines<R>(
         if line.trim().is_empty() {
             continue;
         }
+        eprintln!(
+            "wordpipe-service: model installer {profile}: {}",
+            line.trim()
+        );
         let progress = progress_from_line(profile, line.trim());
         if let Ok(mut data) = data.lock() {
             data.last_install_progress = progress.clone();

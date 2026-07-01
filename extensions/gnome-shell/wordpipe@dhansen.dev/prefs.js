@@ -903,6 +903,9 @@ class WordpipePage extends Adw.PreferencesPage {
         if (typeof progress.profile !== 'string')
             progress.profile = profile;
         this._setInstallProgress(progress);
+        const summary = formatInstallProgress(progress);
+        if (summary)
+            this._statusRow.subtitle = summary;
         if (progress.phase === 'complete' || progress.phase === 'error')
             this._refreshModelProfiles();
     }
