@@ -108,7 +108,6 @@ class Indicator extends PanelMenu.Button {
 
         this._profileItems = [];
         this._installProfileItems = new Map();
-        this._installActionLabels = new Map();
         this._installProgressByProfile = new Map();
         this._installing = false;
         this._installingProfile = '';
@@ -125,6 +124,8 @@ class Indicator extends PanelMenu.Button {
     }
 
     setState(state, available) {
+        const previousInstalling = this._installing;
+        const previousInstallingProfile = this._installingProfile;
         const listening = available && Boolean(state?.listening);
         const stopping = Boolean(state?.stopping);
         const installing = Boolean(state?.installing);
@@ -143,7 +144,13 @@ class Indicator extends PanelMenu.Button {
         this._statusItem.label.text = available
             ? statusText(state, selectedModelInstalled)
             : _('Service unavailable');
-        this._syncInstallActions();
+        if (
+            previousInstalling !== this._installing ||
+            previousInstallingProfile !== this._installingProfile
+        )
+            this.setProfiles(this._profiles, this._selectedProfile);
+        else
+            this._syncInstallActions();
     }
 
     setProfiles(profiles, selectedProfile) {
@@ -153,7 +160,6 @@ class Indicator extends PanelMenu.Button {
             item.destroy();
         this._profileItems = [];
         this._installProfileItems.clear();
-        this._installActionLabels.clear();
 
         if (!profiles.length) {
             this._profileStatusItem.label.text = _('No model profiles');
@@ -168,28 +174,26 @@ class Indicator extends PanelMenu.Button {
         for (const profile of profiles) {
             const isSelected = profile.id === selectedProfile;
             const installing = this._installingProfile === profile.id;
-            const rowReactive = profile.installed ? !isSelected : !this._installing;
+            const rowReactive = profile.installed && !isSelected;
             const selectItem = new PopupMenu.PopupBaseMenuItem({
                 reactive: rowReactive,
                 can_focus: rowReactive,
             });
-            selectItem.add_child(new St.Label({
+            const titleLabel = new St.Label({
                 text: profile.title,
                 x_expand: true,
                 y_align: Clutter.ActorAlign.CENTER,
-            }));
+            });
+            if (!profile.installed)
+                titleLabel.style_class = 'wordpipe-model-title-missing';
+            selectItem.add_child(titleLabel);
             if (!profile.installed) {
                 const progress = this._installProgressByProfile.get(profile.id) ?? {};
                 const fraction = numberValue(progress.fraction);
-                const actionLabel = new St.Label({
-                    text: installing
-                        ? installProgressLabel(fraction)
-                        : _('Install'),
-                    style_class: 'wordpipe-menu-action-label',
-                    y_align: Clutter.ActorAlign.CENTER,
-                });
-                selectItem.add_child(actionLabel);
-                this._installActionLabels.set(profile.id, actionLabel);
+                selectItem.add_child(installing
+                    ? createInstallProgress(fraction)
+                    : createInstallButton(this._installing,
+                        () => this._extension.installModel(profile.id)));
             }
             selectItem.setOrnament(isSelected
                 ? PopupMenu.Ornament.CHECK
@@ -197,10 +201,9 @@ class Indicator extends PanelMenu.Button {
             if (profile.installed && !isSelected) {
                 selectItem.connect('activate',
                     () => this._extension.selectModelProfile(profile.id));
-            } else if (!profile.installed) {
-                selectItem.connect('activate', () => this._extension.installModel(profile.id));
-                this._installProfileItems.set(profile.id, selectItem);
             }
+            if (!profile.installed)
+                this._installProfileItems.set(profile.id, selectItem);
             this._profileSection.addMenuItem(selectItem);
             this._profileItems.push(selectItem);
         }
@@ -241,8 +244,8 @@ class Indicator extends PanelMenu.Button {
     }
 
     _syncInstallActions() {
-        for (const item of this._installProfileItems.values())
-            item.setSensitive(!this._installing);
+        if (this._installProfileItems.size)
+            this.setProfiles(this._profiles, this._selectedProfile);
     }
 
     _setListening(listening) {
@@ -835,6 +838,58 @@ function installProgressLabel(fraction) {
     if (fraction === null)
         return _('Installing');
     return `${Math.round(Math.max(0.0, Math.min(1.0, fraction)) * 100)}%`;
+}
+
+function createInstallButton(disabled, onClicked) {
+    const content = new St.BoxLayout({
+        style_class: 'wordpipe-model-download-content',
+        y_align: Clutter.ActorAlign.CENTER,
+    });
+    content.add_child(new St.Icon({
+        icon_name: 'folder-download-symbolic',
+        style_class: 'wordpipe-model-download-icon',
+    }));
+    content.add_child(new St.Label({
+        text: _('Install'),
+        y_align: Clutter.ActorAlign.CENTER,
+    }));
+    const button = new St.Button({
+        style_class: disabled
+            ? 'wordpipe-model-download-button wordpipe-model-download-disabled'
+            : 'wordpipe-model-download-button',
+        child: content,
+        reactive: !disabled,
+        can_focus: !disabled,
+        y_align: Clutter.ActorAlign.CENTER,
+    });
+    if (!disabled)
+        button.connect('clicked', onClicked);
+    return button;
+}
+
+function createInstallProgress(fraction) {
+    const progress = Math.max(0.0, Math.min(1.0, fraction ?? 0.0));
+    const box = new St.BoxLayout({
+        style_class: 'wordpipe-model-progress',
+        y_align: Clutter.ActorAlign.CENTER,
+    });
+    const track = new St.Bin({
+        style_class: 'wordpipe-model-progress-track',
+        y_align: Clutter.ActorAlign.CENTER,
+    });
+    const fill = new St.Bin({
+        style_class: 'wordpipe-model-progress-fill',
+        style: `width: ${Math.round(progress * 64)}px;`,
+        x_align: Clutter.ActorAlign.START,
+    });
+    track.add_child(fill);
+    box.add_child(track);
+    box.add_child(new St.Label({
+        text: installProgressLabel(fraction),
+        style_class: 'wordpipe-model-progress-label',
+        y_align: Clutter.ActorAlign.CENTER,
+    }));
+    return box;
 }
 
 function numberValue(value) {
